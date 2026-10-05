@@ -174,17 +174,14 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .study-card { position: relative; isolation: isolate; width: min(100%, 700px); height: min(450px, 54vh); min-height: 230px; flex: none; padding: 0; border: 0; border-radius: 24px; background: transparent; cursor: pointer; perspective: 1100px; transform-origin: 50% 50%; transform-style: preserve-3d; }
 .study-card:not(.study-card-preview) { z-index: 1; }
 .study-card::before { display: none; }
-.study-card::after { position: absolute; z-index: 2; inset: 0; display: grid; place-items: center; border: 1px solid transparent; border-radius: inherit; opacity: 0; pointer-events: none; content: attr(data-feedback); font-size: clamp(23px, 4vw, 34px); font-weight: 650; letter-spacing: -.5px; }
 .study-card.is-scoring-known, .study-card.is-scoring-missed { will-change: transform, opacity; animation: card-swipe-away .7s cubic-bezier(.22,.75,.24,1) both; }
 .study-card-preview { position: absolute; inset: 0; z-index: 0; margin: auto; visibility: hidden; opacity: 0; cursor: default; box-shadow: 0 12px 28px #0005; }
 .study-card-preview.is-visible { visibility: visible; opacity: 1; }
-.study-card.is-scoring-known::after { border-color: #b4d8ba; background: #d9efdc; color: #168344; animation: card-feedback .7s ease-in-out both; }
-.study-card.is-scoring-missed::after { border-color: #dfa5a0; background: color-mix(in srgb, var(--danger) 20%, var(--drift)); color: #8c403b; animation: card-feedback .7s ease-in-out both; }
 @keyframes card-swipe-away { 0%, 18% { opacity: 1; transform: translate3d(0, 0, 0); } 100% { opacity: 0; transform: translate3d(105%, 0, 0); } }
-@keyframes card-feedback { 0% { opacity: 0; } 7%, 80% { opacity: 1; } 100% { opacity: 0; } }
 .study-card-inner { position: relative; display: block; width: 100%; height: 100%; transform-style: preserve-3d; transition: transform .42s ease; }
 .study-card-inner.no-flip-transition { transition: none !important; }
 .study-card.is-scoring-known .study-card-inner, .study-card.is-scoring-missed .study-card-inner { transition: none !important; }
+.study-card-preview .study-card-inner { transform: none !important; transition: none !important; }
 .study-card-inner.flipped { transform: rotateY(180deg); }
 .study-face { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; padding: 42px; border: 1px solid #c6d0d6; border-radius: 24px; background: #DDE3EA; color: #11171c; backface-visibility: hidden; -webkit-backface-visibility: hidden; }
 .study-back { transform: rotateY(180deg); background: #4FC3F7; }

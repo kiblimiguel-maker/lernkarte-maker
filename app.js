@@ -183,7 +183,7 @@
   }
   function updateStudyScoreCounts(){if(!session)return;const known=session.results.filter(result=>result===true).length,missed=session.results.filter(result=>result===false).length;$('#known-count').textContent=String(known);$('#missed-count').textContent=String(missed);$('#study-known').textContent=`${known} ✓ · ${missed} ✕`;$('#answer-yes').setAttribute('aria-label',`Gewusst, bisher ${known}`);$('#answer-no').setAttribute('aria-label',`Nicht gewusst, bisher ${missed}`)}
   function renderStudyCard(options={}){if(!session)return;const {resetOrientation=false,keepTransition=false}=options,total=session.cards.length,index=session.index,card=session.cards[index],studyCard=$('#study-card'),inner=$('#study-card-inner'),nextCard=$('#study-next-card');if(!keepTransition)nextCard.classList.remove('is-visible');$('#study-progress-label').textContent=`${index+1} von ${total}`;const reviewed=session.results.filter(result=>result!==null).length;$('#study-progress-bar').style.width=`${Math.round(reviewed/total*100)}%`;$('#study-progress-track').setAttribute('aria-valuemax',String(total));$('#study-progress-track').setAttribute('aria-valuenow',String(reviewed));updateStudyScoreCounts();
-    const result=session.results[index];$('#session-stat').textContent=result===null?'Noch nicht bewertet':result?'Diese Karte: gewusst':'Diese Karte: noch üben';if(resetOrientation)inner.classList.add('no-flip-transition');inner.classList.toggle('flipped',session.flipped);if(resetOrientation)requestAnimationFrame(()=>inner.classList.remove('no-flip-transition'));$('#card-front').textContent=card.front;$('#card-back').textContent=card.back;studyCard.setAttribute('aria-label',session.flipped?'Rückseite: '+card.back:'Vorderseite: '+card.front);studyCard.setAttribute('aria-pressed',String(session.flipped));if(!keepTransition){studyCard.classList.toggle('is-final-card',index===total-1);studyCard.disabled=false;studyCard.classList.remove('is-scoring-known','is-scoring-missed','is-entering');studyCard.removeAttribute('data-feedback');$('#answer-no').disabled=!session.flipped;$('#answer-yes').disabled=!session.flipped;$('#study-prev').disabled=index===0;$('#study-next').disabled=false}}
+    const result=session.results[index];$('#session-stat').textContent=result===null?'Noch nicht bewertet':result?'Diese Karte: gewusst':'Diese Karte: noch üben';if(resetOrientation)inner.classList.add('no-flip-transition');inner.classList.toggle('flipped',session.flipped);if(resetOrientation)requestAnimationFrame(()=>inner.classList.remove('no-flip-transition'));$('#card-front').textContent=card.front;$('#card-back').textContent=card.back;studyCard.setAttribute('aria-label',session.flipped?'Rückseite: '+card.back:'Vorderseite: '+card.front);studyCard.setAttribute('aria-pressed',String(session.flipped));if(!keepTransition){studyCard.classList.toggle('is-final-card',index===total-1);studyCard.disabled=false;studyCard.classList.remove('is-scoring-known','is-scoring-missed','is-entering');$('#answer-no').disabled=false;$('#answer-yes').disabled=false;$('#study-prev').disabled=index===0;$('#study-next').disabled=false}}
   function flip(){if(!session||session.transitioning||!$('#study-complete').hidden)return;session.flipped=!session.flipped;renderStudyCard()}
   function moveStudy(delta){if(!session||session.transitioning||!$('#study-complete').hidden)return;const next=session.index+delta;if(next<0||next>=session.cards.length)return;session.index=next;session.flipped=false;saveSessionProgress();renderStudyCard()}
   function nextStudyCard(){if(!session||session.transitioning||!$('#study-complete').hidden)return;if(session.index<session.cards.length-1){moveStudy(1);return}const next=window.WortwerkModel.nextUnratedIndex(session.results,session.index);if(next>=0){session.index=next;session.flipped=false;saveSessionProgress();renderStudyCard()}else finishStudy()}
@@ -196,7 +196,7 @@
     saveSessionProgress(hasNext?nextIndex:session.index);
     updateStudyScoreCounts();
     const studyCard=$('#study-card'),nextCard=$('#study-next-card');
-    studyCard.dataset.feedback=known?'Hat geklappt':'Nochmal üben';
+    $('#session-stat').textContent=known?'Gewusst':'Noch zu üben';
     studyCard.classList.toggle('is-final-card',!hasNext);
     studyCard.classList.add(known?'is-scoring-known':'is-scoring-missed');
     studyCard.disabled=true;$('#answer-no').disabled=true;$('#answer-yes').disabled=true;$('#study-prev').disabled=true;$('#study-next').disabled=true;
@@ -206,7 +206,7 @@
       if(completed||session!==activeSession)return;
       completed=true;clearTimeout(fallback);studyCard.removeEventListener('animationend',onAnimationEnd);
       if(hasNext){session.index=nextIndex;session.flipped=false;renderStudyCard({resetOrientation:true,keepTransition:true})}
-      studyCard.classList.remove('is-scoring-known','is-scoring-missed');studyCard.removeAttribute('data-feedback');nextCard.classList.remove('is-visible');session.transitioning=false;
+      studyCard.classList.remove('is-scoring-known','is-scoring-missed');nextCard.classList.remove('is-visible');session.transitioning=false;
       if(!hasNext)finishStudy();else renderStudyCard()
     };
     const onAnimationEnd=event=>{if(event.target===studyCard&&!event.pseudoElement&&event.animationName==='card-swipe-away')finishTransition()};
