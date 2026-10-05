@@ -22,10 +22,9 @@
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const id = () => crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const initial = () => ({subjects:[],folders:[],sets:[],cards:[],recent:[],studySessions:{},studyHistory:[]});
-  let data = load(), activeSubject = null, activeFolder = null, activeSet = null, view = 'library';
+  let data = initial(), activeSubject = null, activeFolder = null, activeSet = null, view = 'library';
   let formContext = null, importRows = [], session = null;
-  function load(){try{return window.WortwerkModel.normalizeLibrary(JSON.parse(localStorage.getItem(STORAGE_KEY)))}catch(e){console.warn('Bibliothek konnte nicht geladen werden.',e);return initial()}}
-  function save(){try{localStorage.setItem(STORAGE_KEY,JSON.stringify(data))}catch(e){toast('Speichern fehlgeschlagen. Bitte Speicherplatz prüfen.');console.error(e)}}
+  function save(){try{localStorage.setItem(STORAGE_KEY,JSON.stringify(data))}catch(e){console.warn('Lokaler Cache konnte nicht aktualisiert werden.',e)}window.WortwerkRepository.saveLibrary(data).catch(()=>{})}
   const subject = key => data.subjects.find(x=>x.id===key);
   const folder = key => data.folders.find(x=>x.id===key);
   const setById = key => data.sets.find(x=>x.id===key);
@@ -183,7 +182,7 @@
     $('#study-title').textContent=setById(key)?.name||'Lernsession';$('#study-complete').hidden=true;$('#shuffle-toggle').setAttribute('aria-pressed','false');$('#study-dialog').classList.remove('is-fullscreen');$('#study-dialog').showModal();renderStudyCard();
   }
   function updateStudyScoreCounts(){if(!session)return;const known=session.results.filter(result=>result===true).length,missed=session.results.filter(result=>result===false).length;$('#known-count').textContent=String(known);$('#missed-count').textContent=String(missed);$('#study-known').textContent=`${known} ✓ · ${missed} ✕`;$('#answer-yes').setAttribute('aria-label',`Gewusst, bisher ${known}`);$('#answer-no').setAttribute('aria-label',`Nicht gewusst, bisher ${missed}`)}
-  function renderStudyCard(options={}){if(!session)return;const {resetOrientation=false,keepTransition=false}=options,total=session.cards.length,index=session.index,card=session.cards[index],studyCard=$('#study-card'),inner=$('#study-card-inner'),nextCard=$('#study-next-card');if(!keepTransition)nextCard.classList.remove('is-visible','is-revealing');$('#study-progress-label').textContent=`${index+1} von ${total}`;const reviewed=session.results.filter(result=>result!==null).length;$('#study-progress-bar').style.width=`${Math.round(reviewed/total*100)}%`;$('#study-progress-track').setAttribute('aria-valuemax',String(total));$('#study-progress-track').setAttribute('aria-valuenow',String(reviewed));updateStudyScoreCounts();
+  function renderStudyCard(options={}){if(!session)return;const {resetOrientation=false,keepTransition=false}=options,total=session.cards.length,index=session.index,card=session.cards[index],studyCard=$('#study-card'),inner=$('#study-card-inner'),nextCard=$('#study-next-card');if(!keepTransition)nextCard.classList.remove('is-visible');$('#study-progress-label').textContent=`${index+1} von ${total}`;const reviewed=session.results.filter(result=>result!==null).length;$('#study-progress-bar').style.width=`${Math.round(reviewed/total*100)}%`;$('#study-progress-track').setAttribute('aria-valuemax',String(total));$('#study-progress-track').setAttribute('aria-valuenow',String(reviewed));updateStudyScoreCounts();
     const result=session.results[index];$('#session-stat').textContent=result===null?'Noch nicht bewertet':result?'Diese Karte: gewusst':'Diese Karte: noch üben';if(resetOrientation)inner.classList.add('no-flip-transition');inner.classList.toggle('flipped',session.flipped);if(resetOrientation)requestAnimationFrame(()=>inner.classList.remove('no-flip-transition'));$('#card-front').textContent=card.front;$('#card-back').textContent=card.back;studyCard.setAttribute('aria-label',session.flipped?'Rückseite: '+card.back:'Vorderseite: '+card.front);studyCard.setAttribute('aria-pressed',String(session.flipped));if(!keepTransition){studyCard.classList.toggle('is-final-card',index===total-1);studyCard.disabled=false;studyCard.classList.remove('is-scoring-known','is-scoring-missed','is-entering');studyCard.removeAttribute('data-feedback');$('#answer-no').disabled=!session.flipped;$('#answer-yes').disabled=!session.flipped;$('#study-prev').disabled=index===0;$('#study-next').disabled=false}}
   function flip(){if(!session||session.transitioning||!$('#study-complete').hidden)return;session.flipped=!session.flipped;renderStudyCard()}
   function moveStudy(delta){if(!session||session.transitioning||!$('#study-complete').hidden)return;const next=session.index+delta;if(next<0||next>=session.cards.length)return;session.index=next;session.flipped=false;saveSessionProgress();renderStudyCard()}
@@ -201,16 +200,16 @@
     studyCard.classList.toggle('is-final-card',!hasNext);
     studyCard.classList.add(known?'is-scoring-known':'is-scoring-missed');
     studyCard.disabled=true;$('#answer-no').disabled=true;$('#answer-yes').disabled=true;$('#study-prev').disabled=true;$('#study-next').disabled=true;
-    if(hasNext){$('#next-card-front').textContent=session.cards[nextIndex].front;nextCard.classList.add('is-visible','is-revealing')}
+    if(hasNext){$('#next-card-front').textContent=session.cards[nextIndex].front;nextCard.classList.add('is-visible')}
     let completed=false,fallback;
     const finishTransition=()=>{
       if(completed||session!==activeSession)return;
       completed=true;clearTimeout(fallback);studyCard.removeEventListener('animationend',onAnimationEnd);
       if(hasNext){session.index=nextIndex;session.flipped=false;renderStudyCard({resetOrientation:true,keepTransition:true})}
-      studyCard.classList.remove('is-scoring-known','is-scoring-missed');studyCard.removeAttribute('data-feedback');nextCard.classList.remove('is-visible','is-revealing');session.transitioning=false;
+      studyCard.classList.remove('is-scoring-known','is-scoring-missed');studyCard.removeAttribute('data-feedback');nextCard.classList.remove('is-visible');session.transitioning=false;
       if(!hasNext)finishStudy();else renderStudyCard()
     };
-    const onAnimationEnd=event=>{const expected=hasNext?'card-fold-away':'card-fold-final';if(event.target===studyCard&&!event.pseudoElement&&event.animationName===expected)finishTransition()};
+    const onAnimationEnd=event=>{if(event.target===studyCard&&!event.pseudoElement&&event.animationName==='card-swipe-away')finishTransition()};
     studyCard.addEventListener('animationend',onAnimationEnd);
     fallback=window.setTimeout(finishTransition,window.matchMedia('(prefers-reduced-motion: reduce)').matches?100:820);
   }
@@ -225,5 +224,7 @@
   $('#study-card').onclick=flip;$('#answer-no').onclick=()=>scoreCard(false);$('#answer-yes').onclick=()=>scoreCard(true);$('#study-prev').onclick=()=>moveStudy(-1);$('#study-next').onclick=nextStudyCard;$('#study-close').onclick=endStudy;$('#finish-study').onclick=()=>{endStudy();render()};$('#retry-missed').onclick=retryMissed;$('#study-manage').onclick=()=>{endStudy();render()};$('#shuffle-toggle').onclick=()=>{if(!session)return;const paired=session.cards.map((card,index)=>[card,session.results[index]]);for(let i=paired.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[paired[i],paired[j]]=[paired[j],paired[i]]}session.cards=paired.map(pair=>pair[0]);session.results=paired.map(pair=>pair[1]);session.index=0;session.flipped=false;$('#study-complete').hidden=true;$('#shuffle-toggle').setAttribute('aria-pressed','true');saveSessionProgress();renderStudyCard()};
   document.addEventListener('keydown',e=>{if(!$('#study-dialog').open)return;if(e.key==='Escape'){endStudy();return}if(e.target.matches('input,textarea,select,[contenteditable="true"]')||session?.transitioning)return;const focusedButton=e.target.closest('button');if(focusedButton&&focusedButton.id!=='study-card')return;if(e.key===' '){if(focusedButton?.id==='study-card')return;e.preventDefault();flip()}if(e.key==='ArrowLeft'){e.preventDefault();moveStudy(-1)}if(e.key==='ArrowRight'){e.preventDefault();nextStudyCard()}});
   $('#create-set').onclick=()=>{if(!data.subjects.length){openEntity('subject');return}openEntity('set')};$('#import-open').onclick=()=>openImport(activeSet);$('#import-form').onsubmit=e=>e.preventDefault();
-  render();
+  window.addEventListener('library-save-error',()=>toast('Mit Supabase konnte nicht gespeichert werden. Bitte Verbindung prüfen und erneut versuchen.'));
+  window.WortwerkReloadLibrary=async()=>{try{data=await window.WortwerkRepository.loadLibrary(window.WortwerkModel.normalizeLibrary);render()}catch(error){console.error('Lernbibliothek konnte nicht geladen werden.',error);$('#content').innerHTML='<section class="empty-state"><h2>Deine Bibliothek konnte nicht geladen werden.</h2><p>Bitte prüfe deine Verbindung und lade die Seite erneut.</p><button class="quiet-button" onclick="location.reload()">Erneut laden</button></section>'}};
+  window.WortwerkReloadLibrary();
 })();

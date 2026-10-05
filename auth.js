@@ -56,11 +56,12 @@ function showSignedOut(message = '') {
     : ''));
 }
 
-function loadExistingApp() {
+async function loadExistingApp() {
   authScreen.hidden = true;
   authLoading.hidden = true;
 
   if (appLoaded) {
+    if (window.WortwerkReloadLibrary) await window.WortwerkReloadLibrary();
     bootScreen.hidden = true;
     appShell.hidden = false;
     return;
@@ -69,7 +70,10 @@ function loadExistingApp() {
   bootScreen.hidden = false;
   appShell.hidden = true;
   appLoaded = true;
-  import('./parser.js').then(() => import('./model.js')).then(() => import('./app.js')).then(() => {
+  import('./parser.js').then(() => import('./model.js')).then(() => import('./repository.js')).then(module => {
+    window.WortwerkRepository = module;
+    return import('./app.js');
+  }).then(() => {
     bootScreen.hidden = true;
     appShell.hidden = false;
   }).catch(error => {
