@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#020202">
+  <title>Lernkarten Maker</title>
+  <link rel="icon" type="image/png" href="assets/logo.png">
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+  <main class="auth-screen" id="boot-screen" aria-live="polite">
+    <section class="auth-panel boot-panel"><img class="auth-logo" src="assets/logo.png" alt="Lernkarten Maker"><div class="auth-loading" role="status"><span class="loading-mark"></span><span>Dein Lernraum wird geöffnet …</span></div></section>
+  </main>
+  <main class="auth-screen" id="auth-screen" aria-labelledby="auth-title" hidden>
+    <section class="auth-panel">
+      <img class="auth-logo" src="assets/logo.png" alt="Lernkarten Maker" width="2172" height="724">
+      <div class="auth-copy">
+        <p class="eyebrow">DEIN LERNRAUM</p>
+        <h1 id="auth-title">Lernen, das<br>bei dir bleibt.</h1>
+        <p class="auth-description">Melde dich an, um deine Lernbibliothek zu öffnen.</p>
+      </div>
+      <button class="google-button" id="google-sign-in" type="button">
+        <svg aria-hidden="true" viewBox="0 0 18 18" width="18" height="18"><path fill="#4285F4" d="M17.64 9.2c0-.62-.06-1.22-.16-1.8H9v3.4h4.84a4.14 4.14 0 0 1-1.8 2.72v2.22h2.92c1.7-1.57 2.68-3.88 2.68-6.54Z"/><path fill="#34A853" d="M9 18c2.43 0 4.47-.8 5.96-2.18l-2.92-2.22c-.8.54-1.82.87-3.04.87-2.34 0-4.32-1.58-5.03-3.7H.96v2.28A9 9 0 0 0 9 18Z"/><path fill="#FBBC05" d="M3.97 10.77A5.42 5.42 0 0 1 3.69 9c0-.62.1-1.22.28-1.77V4.95H.96A9 9 0 0 0 0 9c0 1.45.35 2.82.96 4.05l3.01-2.28Z"/><path fill="#EA4335" d="M9 3.58c1.32 0 2.5.46 3.43 1.36L15 2.37A8.57 8.57 0 0 0 9 0 9 9 0 0 0 .96 4.95l3.01 2.28c.71-2.12 2.69-3.65 5.03-3.65Z"/></svg>
+        <span>Mit Google anmelden</span>
+      </button>
+      <p class="auth-error" id="auth-error" role="alert" hidden></p>
+      <p class="auth-footnote">Sicher anmelden mit deinem Google-Konto.</p>
+      <div class="auth-loading" id="auth-loading" role="status" aria-live="polite"><span class="loading-mark"></span><span id="auth-loading-label">Verbindung wird geprüft …</span></div>
+    </section>
+    <footer class="auth-footer">Lernkarten Maker <span>·</span> Dein persönlicher Lernraum</footer>
+  </main>
+  <div class="app-shell" id="app-shell" hidden>
+    <main class="main-area">
+      <header class="topbar">
+        <a class="brand" href="#" data-view="library" aria-label="Lernkarten Maker – Startseite"><img src="assets/logo.png" alt="Lernkarten Maker" width="2172" height="724"></a>
+        <div class="breadcrumbs" id="breadcrumbs"><span>Dein Lernraum</span></div>
+        <div class="top-actions"><button class="quiet-button" data-view="recent">Zuletzt gelernt</button><button class="quiet-button" id="import-open">Importieren</button><button class="primary-button" id="create-set">＋ Neues Set</button><span class="account-email" id="account-email"></span><button class="quiet-button sign-out-button" id="sign-out">Abmelden</button></div>
+      </header>
+      <section class="content" id="content" aria-live="polite"></section>
+    </main>
+  </div>
+
+  <dialog id="form-dialog" class="dialog"><form method="dialog" id="entity-form"><div class="dialog-head"><div><div class="eyebrow" id="form-eyebrow">NEU</div><h2 id="form-title">Erstellen</h2></div><button type="button" class="icon-button" value="cancel" aria-label="Schliessen">×</button></div><div id="form-fields"></div><div class="dialog-actions"><button type="button" class="quiet-button" value="cancel">Abbrechen</button><button class="primary-button" id="form-submit" value="default">Erstellen</button></div></form></dialog>
+  <dialog id="import-dialog" class="dialog wide"><form method="dialog" id="import-form"><div class="dialog-head"><div><div class="eyebrow">TEXTIMPORT</div><h2>Karten aus Text erstellen</h2><p class="muted">Vorder- und Rückseite mit dem ersten Gleichheitszeichen (=) trennen. Jede Karte kommt auf eine neue Zeile.</p></div><button type="button" class="icon-button" value="cancel" aria-label="Schliessen">×</button></div><label class="field-label" for="import-text">Lernmaterial</label><textarea id="import-text" rows="8" placeholder="das Haus = la maison&#10;der Hund = le chien&#10;die Katze = le chat"></textarea><div class="import-file-row"><label class="quiet-button file-button" for="import-file">＋ Textdatei wählen</label><input id="import-file" type="file" accept=".txt,text/plain"><span id="import-file-name" class="muted">TXT · UTF-8</span></div><div class="import-meta"><label class="field-label" for="import-set">In Set speichern</label><select id="import-set"></select></div><button class="quiet-button" id="preview-import" type="button">Import prüfen</button><div id="import-preview" class="import-preview" aria-live="polite"></div><div class="dialog-actions"><button type="button" class="quiet-button" value="cancel">Abbrechen</button><button class="primary-button" id="import-submit" value="default" disabled>0 Karten erstellen</button></div></form></dialog>
+  <dialog id="study-dialog" class="study-dialog"><div class="study-top"><button class="icon-button" id="study-close" aria-label="Lernen beenden">×</button><div class="study-set-name" id="study-title"></div><div class="study-top-actions"><button class="quiet-button" id="study-expand" aria-label="Lernmodus im Vollbild öffnen" aria-pressed="false" title="Vollbild"><span aria-hidden="true">⛶</span> <span id="study-expand-label">Vollbild</span></button><button class="quiet-button" id="shuffle-toggle" aria-pressed="false">⤨ Mischen</button></div></div><div class="study-progress"><span id="study-progress-label">1 von 1</span><div class="progress-track" id="study-progress-track" role="progressbar" aria-label="Bewertete Karten" aria-valuemin="0" aria-valuemax="1" aria-valuenow="0"><span id="study-progress-bar"></span></div><span id="study-known" aria-live="polite" aria-atomic="true">0 ✓ · 0 ✕</span></div><div class="study-stage"><button class="study-card" id="study-card" aria-label="Karte umdrehen" aria-pressed="false"><span class="study-card-inner" id="study-card-inner"><span class="study-face study-front"><span class="card-side-label">VORDERSEITE</span><span id="card-front"></span><span class="flip-hint">Tippen oder Leertaste zum Umdrehen</span></span><span class="study-face study-back"><span class="card-side-label">RÜCKSEITE</span><span id="card-back"></span><span class="flip-hint">Tippen oder Leertaste zum Umdrehen</span></span></span></button><div class="study-card study-card-preview" id="study-next-card" aria-hidden="true"><span class="study-card-inner"><span class="study-face study-front"><span class="card-side-label">VORDERSEITE</span><span id="next-card-front"></span><span class="flip-hint"></span></span></span></div></div><div class="study-controls"><button class="study-step" id="study-prev" aria-label="Vorherige Karte">←</button><button class="answer-button missed" id="answer-no" aria-label="Nicht gewusst">✕ <span id="missed-count">0</span></button><button class="answer-button known" id="answer-yes" aria-label="Gewusst">✓ <span id="known-count">0</span></button><button class="study-step" id="study-next" aria-label="Nächste Karte">→</button></div><div class="study-foot"><span id="session-stat" aria-live="polite">Noch nicht bewertet</span><button class="text-button" id="study-manage">Alle Karten</button></div><section class="study-complete" id="study-complete" aria-labelledby="complete-title" hidden><div class="complete-icon" aria-hidden="true">✓</div><h2 id="complete-title">Lernrunde abgeschlossen</h2><p id="complete-copy"></p><div class="result-summary"><div class="result-chart" id="result-chart" role="img" aria-label="Ergebnis der Lernrunde"><svg viewBox="0 0 100 100" aria-hidden="true"><circle class="result-track" cx="50" cy="50" r="42"></circle><circle class="result-ring missed-ring" id="score-ring-missed" cx="50" cy="50" r="42"></circle><circle class="result-ring known-ring" id="score-ring-known" cx="50" cy="50" r="42"></circle></svg><strong id="score-value">0%</strong><span>richtig</span></div><div class="result-details"><div><span class="result-key known-key"></span><span>Gewusst</span><strong id="result-known">0</strong></div><div><span class="result-key missed-key"></span><span>Noch zu üben</span><strong id="result-missed">0</strong></div><div><span class="result-key unrated-key"></span><span>Nicht bewertet</span><strong id="result-unrated">0</strong></div></div></div><div class="complete-actions"><button class="quiet-button" id="retry-missed">Falsche Karten wiederholen</button><button class="primary-button" id="finish-study">Zurück zum Set</button></div></section></dialog>
+  <script type="module" src="/auth.js"></script>
+</body>
+</html>
