@@ -196,6 +196,7 @@
     saveSessionProgress(hasNext?nextIndex:session.index);
     updateStudyScoreCounts();
     const studyCard=$('#study-card'),nextCard=$('#study-next-card');
+    studyCard.dataset.feedback=known?'Ok':'Nochmal üben';
     $('#session-stat').textContent=known?'Gewusst':'Noch zu üben';
     studyCard.classList.toggle('is-final-card',!hasNext);
     studyCard.classList.add(known?'is-scoring-known':'is-scoring-missed');
@@ -206,7 +207,7 @@
       if(completed||session!==activeSession)return;
       completed=true;clearTimeout(fallback);studyCard.removeEventListener('animationend',onAnimationEnd);
       if(hasNext){session.index=nextIndex;session.flipped=false;renderStudyCard({resetOrientation:true,keepTransition:true})}
-      studyCard.classList.remove('is-scoring-known','is-scoring-missed');nextCard.classList.remove('is-visible');session.transitioning=false;
+      studyCard.classList.remove('is-scoring-known','is-scoring-missed');studyCard.removeAttribute('data-feedback');nextCard.classList.remove('is-visible');session.transitioning=false;
       if(!hasNext)finishStudy();else renderStudyCard()
     };
     const onAnimationEnd=event=>{if(event.target===studyCard&&!event.pseudoElement&&event.animationName==='card-swipe-away')finishTransition()};
