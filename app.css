@@ -110,6 +110,10 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .study-banner { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 0 0 28px; padding: 15px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
 .study-banner h2 { margin-bottom: 3px; }
 .study-banner p { margin: 0; color: var(--muted); font-size: 12px; }
+.study-banner-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
+.reset-confirm-button { min-height: 38px; padding: 0 13px; border: 1px solid color-mix(in srgb, #f87171 35%, var(--line)); border-radius: var(--radius-control); background: #251517; color: #ffb4b4; font-size: 12px; font-weight: 570; }
+.reset-confirm-button:hover { border-color: #f87171; background: #32191c; }
+.reset-confirm-button:focus-visible { outline: 2px solid #f87171; outline-offset: 2px; }
 .card-list { overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius-card); background: color-mix(in srgb, var(--surface) 70%, var(--onyx)); }
 .flash-row { min-height: 60px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; align-items: center; gap: 16px; padding: 9px 13px; border-bottom: 1px solid var(--line); }
 .flash-row:last-child { border-bottom: 0; }

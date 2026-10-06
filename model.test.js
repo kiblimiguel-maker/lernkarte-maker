@@ -1,7 +1,7 @@
 'use strict';
 
 const assert = require('node:assert/strict');
-const { normalizeLibrary, createImportedCards, recordCardAnswer, getSetProgress, summarizeResults, summarizeSession, nextUnratedIndex } = require('./model.js');
+const { normalizeLibrary, createImportedCards, recordCardAnswer, getSetProgress, resetSetProgress, summarizeResults, summarizeSession, nextUnratedIndex } = require('./model.js');
 
 assert.deepEqual(normalizeLibrary(null), { subjects: [], folders: [], sets: [], cards: [], recent: [], studySessions: {}, studyHistory: [] });
 const malformedCollections = normalizeLibrary({
@@ -56,6 +56,40 @@ assert.equal(restoredSession.studySessions['set-1'].index, 1, 'in-progress sessi
 assert.deepEqual(restoredSession.studySessions['set-1'].results, [true, null]);
 assert.equal(restoredSession.studyHistory[0].percentage, 50, 'completed session history survives reload');
 assert.deepEqual(normalizeLibrary({ studySessions: { broken: { cardIds: ['a'], results: [] } } }).studySessions, {}, 'invalid session state is discarded without affecting the library');
+
+const resetLibrary = normalizeLibrary({
+  sets: [{ id: 'set-1', name: 'Französisch', shuffle: true }, { id: 'set-2', name: 'Mathe' }],
+  cards: [
+    { id: 'reset-card-1', setId: 'set-1', front: 'das Haus', back: 'la maison', position: 0, correctCount: 3, incorrectCount: 1, attemptCount: 4, lastReviewedAt: '2026-10-05T12:00:00.000Z', nextReviewAt: '2026-10-06T12:00:00.000Z' },
+    { id: 'reset-card-2', setId: 'set-1', front: 'die Katze', back: 'le chat', position: 1, correctCount: 0, incorrectCount: 2, attemptCount: 2, lastReviewedAt: '2026-10-05T12:00:00.000Z', nextReviewAt: '2026-10-05T12:10:00.000Z' },
+    { id: 'other-card', setId: 'set-2', front: '2+2', back: '4', position: 0, correctCount: 2, incorrectCount: 0, attemptCount: 2, lastReviewedAt: '2026-10-05T12:00:00.000Z', nextReviewAt: '2026-10-06T12:00:00.000Z' }
+  ],
+  studySessions: {
+    'set-1': { id: 'resume-this', setId: 'set-1', cardIds: ['reset-card-1', 'reset-card-2'], results: [true, null], index: 1 },
+    'set-2': { id: 'keep-this', setId: 'set-2', cardIds: ['other-card'], results: [true], index: 0 }
+  },
+  studyHistory: [{ id: 'history-1', setId: 'set-1', known: 2, missed: 1 }]
+});
+const untouchedCard = structuredClone(resetLibrary.cards[2]);
+const untouchedSet = structuredClone(resetLibrary.sets[0]);
+const historyBeforeReset = structuredClone(resetLibrary.studyHistory);
+assert.equal(resetSetProgress(resetLibrary, 'set-1'), 2);
+assert.deepEqual(getSetProgress(resetLibrary.cards.filter(card => card.setId === 'set-1')), { total: 2, secure: 0, practice: 0, new: 2, percentage: 0 });
+assert.deepEqual(resetLibrary.cards.slice(0, 2).map(card => [card.correctCount, card.incorrectCount, card.attemptCount, card.lastReviewedAt, card.nextReviewAt]), [[0, 0, 0, null, null], [0, 0, 0, null, null]]);
+assert.deepEqual(resetLibrary.cards.slice(0, 2).map(({ id, front, back, position }) => ({ id, front, back, position })), [
+  { id: 'reset-card-1', front: 'das Haus', back: 'la maison', position: 0 },
+  { id: 'reset-card-2', front: 'die Katze', back: 'le chat', position: 1 }
+]);
+assert.deepEqual(resetLibrary.cards[2], untouchedCard, 'reset leaves cards in other sets unchanged');
+assert.deepEqual(resetLibrary.sets[0], untouchedSet, 'reset leaves set settings unchanged');
+assert.equal(resetLibrary.studySessions['set-1'], undefined, 'reset removes the saved resume point');
+assert.equal(resetLibrary.studySessions['set-2'].id, 'keep-this', 'reset preserves other sets’ sessions');
+assert.deepEqual(resetLibrary.studyHistory, historyBeforeReset, 'reset preserves completed-session history');
+const resetReload = normalizeLibrary(JSON.parse(JSON.stringify(resetLibrary)));
+assert.equal(getSetProgress(resetReload.cards.filter(card => card.setId === 'set-1')).new, 2, 'reset state persists through storage normalization/reload');
+assert.equal(resetReload.studySessions['set-1'], undefined, 'removed resume point stays removed after reload');
+assert.equal(resetSetProgress(resetReload, 'set-1'), 2, 'reset is safe when repeated');
+assert.equal(resetSetProgress(resetReload, 'missing-set'), 0, 'unknown set reset is a no-op');
 
 const rows = Array.from({ length: 50000 }, (_, index) => ({ front: `Begriff ${index}`, back: `Definition ${index}` }));
 const created = createImportedCards(rows, {

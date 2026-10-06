@@ -64,6 +64,22 @@
     return progress;
   }
 
+  function resetSetProgress(library, setId) {
+    if (!isRecord(library) || typeof setId !== 'string') return 0;
+    let resetCount = 0;
+    for (const card of records(library.cards)) {
+      if (card.setId !== setId) continue;
+      card.correctCount = 0;
+      card.incorrectCount = 0;
+      card.attemptCount = 0;
+      card.lastReviewedAt = null;
+      card.nextReviewAt = null;
+      resetCount++;
+    }
+    if (isRecord(library.studySessions)) delete library.studySessions[setId];
+    return resetCount;
+  }
+
   function summarizeResults(results) {
     const known = results.filter(result => result === true).length;
     const missed = results.filter(result => result === false).length;
@@ -91,7 +107,7 @@
     return -1;
   }
 
-  const api = { normalizeLibrary, createImportedCards, recordCardAnswer, getCardProgress, getSetProgress, summarizeResults, summarizeSession, nextUnratedIndex };
+  const api = { normalizeLibrary, createImportedCards, recordCardAnswer, getCardProgress, getSetProgress, resetSetProgress, summarizeResults, summarizeSession, nextUnratedIndex };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (typeof globalThis !== 'undefined') globalThis.WortwerkModel = api;
 })();
