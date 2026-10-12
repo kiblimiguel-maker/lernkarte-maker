@@ -174,47 +174,236 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .study-progress { display: flex; flex: none; align-items: center; gap: 12px; margin-top: 17px; color: var(--muted); font-size: 11px; }
 .progress-track { height: 3px; flex: 1; overflow: hidden; border-radius: 2px; background: #293139; }
 .progress-track span { display: block; width: 0; height: 100%; background: var(--accent); transition: width .2s ease; }
-.study-stage { position: relative; display: grid; flex: 1 1 0; min-height: 0; place-items: center; padding: 18px 0 26px; perspective: 1100px; }
-.study-card-swipe-layer { position: relative; z-index: 1; width: min(100%, 700px); height: min(450px, 54vh); min-height: 230px; flex: none; transform-origin: 50% 50%; transform-style: flat; }
-.study-card { position: relative; isolation: isolate; width: 100%; height: 100%; min-height: 0; padding: 0; border: 0; border-radius: 24px; background: transparent; cursor: pointer; perspective: 1100px; transform-style: preserve-3d; }
-.study-card::before { display: none; }
-/* Swipe-away: purely translateX + Z-tilt. No Y-axis rotation whatsoever. */
-.study-card-swipe-layer.is-swiping { will-change: transform; pointer-events: none; animation: card-swipe-away .72s cubic-bezier(.22,.68,.30,1) both; }
-@keyframes card-swipe-away {
-  from { transform: translateX(0) rotate(0deg) scale(1); }
-  to   { transform: translateX(118%) rotate(6deg) scale(.97); }
+.study-stage { position: relative; display: grid; flex: 1 1 0; min-height: 0; place-items: center; padding: 18px 0 26px; perspective: 1200px; }
+
+/* ── Stack Base: creates physical deck depth underneath all cards ── */
+.study-deck-base {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  z-index: 0;
+  width: min(100%, 700px);
+  height: min(450px, 54vh);
+  min-height: 230px;
+  border-radius: 24px;
+  background: #10161c;
+  border: 1px solid #1f2832;
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.45);
+  transform: scale(.955) translateY(12px) rotate(-1.8deg);
+  pointer-events: none;
+  transition: opacity .3s ease, transform .3s ease;
 }
-@media (prefers-reduced-motion: reduce) { .study-card-swipe-layer.is-swiping { animation-duration: .01ms; } }
-/* Stack: next-card shown as a slightly smaller, darker card behind */
-.study-card-preview { position: absolute; inset: 0; z-index: 0; width: min(100%, 700px); height: min(450px, 54vh); min-height: 230px; margin: auto; border-radius: 24px; overflow: hidden; cursor: default; visibility: hidden; opacity: 0; transform: scale(.965) translateY(9px); box-shadow: 0 10px 26px #0007; transition: opacity .18s ease; }
-.study-card-preview.is-visible { visibility: visible; opacity: 1; }
-.study-card-preview .study-card-inner { transform: none !important; transition: none !important; }
-/* Stack preview face is slightly muted to convey depth */
-.study-card-preview .study-face { border-color: #b0bac0; background: #c9d0d6; }
-/* Flip animation on inner element */
-.study-card-inner { position: relative; display: block; width: 100%; height: 100%; transform-style: preserve-3d; transition: transform .42s ease; }
-.study-card-inner.no-flip-transition { transition: none !important; }
-/* Freeze flip transition while swiping – prevents the Y-rotation from replaying */
-.study-card-swipe-layer.is-swiping .study-card-inner { transition: none !important; }
-.study-card-inner.flipped { transform: rotateY(180deg); }
-/* Card faces */
-.study-face { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; padding: 42px; border: 1px solid #c6d0d6; border-radius: 24px; background: #DDE3EA; color: #11171c; backface-visibility: hidden; -webkit-backface-visibility: hidden; }
-.study-back { transform: rotateY(180deg); background: #4FC3F7; }
-.study-face > span:nth-child(2) { max-width: 100%; overflow-wrap: anywhere; white-space: pre-wrap; font-size: clamp(21px, 3.6vw, 31px); font-weight: 590; line-height: 1.4; text-align: center; }
-.study-face .card-side-label { position: absolute; top: 18px; color: #53636c; font-size: 9px; letter-spacing: 1.1px; }
-.study-face .flip-hint { position: absolute; bottom: 15px; color: #61717a; font-size: 10px; }
-/* ── Feedback overlay ───────────────────────────────────────────────────────
-   Sits flat above the swipe layer (not inside the 3D inner) so it is always
-   visible regardless of the card's rotateY flip state.                      */
-.study-feedback { position: absolute; inset: 0; z-index: 3; display: flex; align-items: center; justify-content: center; padding: 36px; border-radius: 24px; border: 1.5px solid transparent; opacity: 0; pointer-events: none; transition: opacity .16s ease; }
-.study-feedback.is-visible { opacity: 1; }
-.study-feedback-text { max-width: 85%; overflow-wrap: anywhere; font-size: clamp(20px, 3.2vw, 27px); font-weight: 680; line-height: 1.4; text-align: center; }
-/* Correct – light green */
-.study-card-swipe-layer.is-correct .study-feedback { background: #d4edda; border-color: #9dcfaa; }
-.study-card-swipe-layer.is-correct .study-feedback-text { color: #155724; }
-/* Incorrect – light peach/rose */
-.study-card-swipe-layer.is-incorrect .study-feedback { background: #fce8e8; border-color: #f0b8b8; }
-.study-card-swipe-layer.is-incorrect .study-feedback-text { color: #b91c1c; }
+.study-deck-base.is-empty {
+  opacity: 0;
+}
+
+/* ── Card Slots: two interchangeable full cards ── */
+.study-card-slot {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: min(100%, 700px);
+  height: min(450px, 54vh);
+  min-height: 230px;
+  perspective: 1200px;
+  pointer-events: none;
+  transition: transform .62s cubic-bezier(.22,.75,.24,1), opacity .3s ease;
+}
+
+/* Slot states */
+.study-card-slot.is-active {
+  z-index: 2;
+  pointer-events: auto;
+  transform: scale(1) translateY(0) rotate(0deg);
+  opacity: 1;
+}
+
+.study-card-slot.is-stack {
+  z-index: 1;
+  pointer-events: none;
+  transform: scale(.97) translateY(8px) rotate(-0.8deg);
+  opacity: 1;
+}
+
+.study-card-slot.is-elevating {
+  z-index: 2;
+  pointer-events: none;
+  transform: scale(1) translateY(0) rotate(0deg);
+  opacity: 1;
+}
+
+.study-card-slot.is-hidden {
+  z-index: 0;
+  opacity: 0;
+  pointer-events: none;
+  visibility: hidden;
+}
+
+/* Swipe layer */
+.study-card-swipe-layer {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  transform-origin: 50% 50%;
+  transform-style: flat;
+}
+
+/* Smooth, dignified swipe-away animation (calm and high-end) */
+.study-card-swipe-layer.is-swiping {
+  will-change: transform, opacity;
+  pointer-events: none;
+  animation: card-swipe-away .64s cubic-bezier(.25,1,.35,1) forwards;
+}
+
+@keyframes card-swipe-away {
+  0% {
+    transform: translateX(0) rotate(0deg) scale(1);
+    opacity: 1;
+  }
+  100% {
+    transform: translateX(120%) rotate(5deg) scale(.98);
+    opacity: 0.96;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .study-card-swipe-layer.is-swiping { animation-duration: .01ms; }
+  .study-card-slot { transition-duration: .01ms !important; }
+}
+
+/* Card Button */
+.study-card {
+  position: relative;
+  isolation: isolate;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 24px;
+  background: transparent;
+  cursor: pointer;
+  perspective: 1200px;
+  transform-style: preserve-3d;
+}
+.study-card::before { display: none; }
+.study-card:focus-visible { outline: 0; }
+.study-card:focus-visible .study-face { border-color: var(--accent); }
+
+/* Card Inner 3D container */
+.study-card-inner {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
+  transform-style: preserve-3d;
+  transition: transform .45s cubic-bezier(.25,.8,.25,1);
+}
+.study-card-inner.flipped {
+  transform: rotateY(180deg);
+}
+
+/* Faces */
+.study-face {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 42px;
+  border: 1px solid #c6d0d6;
+  border-radius: 24px;
+  background: #DDE3EA;
+  color: #11171c;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.45);
+}
+.study-back {
+  transform: rotateY(180deg);
+  background: #4FC3F7;
+}
+.study-face > span:nth-child(2) {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  font-size: clamp(21px, 3.6vw, 31px);
+  font-weight: 590;
+  line-height: 1.4;
+  text-align: center;
+}
+.study-face .card-side-label {
+  position: absolute;
+  top: 18px;
+  color: #53636c;
+  font-size: 9px;
+  letter-spacing: 1.1px;
+}
+.study-face .flip-hint {
+  position: absolute;
+  bottom: 15px;
+  color: #61717a;
+  font-size: 10px;
+}
+
+/* Depth for stack card */
+.study-card-slot.is-stack .study-face {
+  border-color: #b0bac0;
+  background: #c8cfd5;
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.35);
+}
+.study-card-slot.is-stack .card-side-label,
+.study-card-slot.is-stack .flip-hint {
+  opacity: .55;
+}
+
+/* ── Feedback Overlay (matching Reference Images 1 & 2) ── */
+.study-feedback {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 36px;
+  border-radius: 24px;
+  border: 1px solid transparent;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .18s ease;
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.45);
+}
+.study-feedback.is-visible {
+  opacity: 1;
+}
+.study-feedback-text {
+  max-width: 90%;
+  overflow-wrap: anywhere;
+  line-height: 1.35;
+  text-align: center;
+}
+
+/* Image 1: Correct – soft light green with green "Ok" */
+.study-card-slot.is-correct .study-feedback {
+  background: #d7ebd9;
+  border-color: #b7dcbb;
+}
+.study-card-slot.is-correct .study-feedback-text {
+  color: #15803d;
+  font-size: clamp(30px, 5vw, 42px);
+  font-weight: 680;
+}
+
+/* Image 2: Incorrect – soft peach / rose with warm red "Das nächste Mal klappt es bestimmt" */
+.study-card-slot.is-incorrect .study-feedback {
+  background: #fde5dd;
+  border-color: #f7c7bc;
+}
+.study-card-slot.is-incorrect .study-feedback-text {
+  color: #c53030;
+  font-size: clamp(22px, 3.4vw, 30px);
+  font-weight: 650;
+}
 .study-controls { display: flex; flex: none; align-items: center; justify-content: center; gap: 9px; margin: 0 0 16px; }
 .study-step { width: 46px; min-height: 46px; border: 1px solid var(--line); border-radius: var(--radius-control); background: transparent; color: var(--soft); font-size: 18px; }
 .study-step:hover:not(:disabled) { border-color: var(--line-strong); background: var(--surface); }
@@ -258,7 +447,7 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .study-dialog:fullscreen .study-progress, .study-dialog.is-fullscreen .study-progress { margin-top: 12px; }
 .study-dialog:fullscreen .study-stage, .study-dialog.is-fullscreen .study-stage { min-height: 0; padding: clamp(12px, 2vh, 24px) 0; }
 .study-dialog:fullscreen .study-controls, .study-dialog.is-fullscreen .study-controls { margin: 0 0 14px; }
-.study-dialog:fullscreen .study-card-swipe-layer, .study-dialog.is-fullscreen .study-card-swipe-layer, .study-dialog:fullscreen .study-card-preview, .study-dialog.is-fullscreen .study-card-preview { width: min(58vw, 760px); height: min(60vh, 460px); min-height: 0; }
+.study-dialog:fullscreen .study-card-slot, .study-dialog.is-fullscreen .study-card-slot, .study-dialog:fullscreen .study-deck-base, .study-dialog.is-fullscreen .study-deck-base, .study-dialog:fullscreen .study-card-swipe-layer, .study-dialog.is-fullscreen .study-card-swipe-layer { width: min(58vw, 760px); height: min(60vh, 460px); min-height: 0; }
 .study-dialog:fullscreen .study-face, .study-dialog.is-fullscreen .study-face { border-radius: 26px; }
 
 @media (max-width: 760px) {
@@ -271,8 +460,8 @@ button:disabled { opacity: .45; cursor: not-allowed; }
   .page-actions { width: 100%; margin-left: 57px; }
   .subject-grid, .set-grid, .folder-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .study-dialog { padding: 17px 17px 14px; }
-  .study-card-swipe-layer, .study-card-preview { height: min(385px, 48vh); }
-  .study-dialog:fullscreen .study-card-swipe-layer, .study-dialog.is-fullscreen .study-card-swipe-layer, .study-dialog:fullscreen .study-card-preview, .study-dialog.is-fullscreen .study-card-preview { width: min(82vw, 640px); height: min(52vh, 440px); }
+  .study-card-slot, .study-deck-base, .study-card-swipe-layer { height: min(385px, 48vh); }
+  .study-dialog:fullscreen .study-card-slot, .study-dialog.is-fullscreen .study-card-slot, .study-dialog:fullscreen .study-deck-base, .study-dialog.is-fullscreen .study-deck-base, .study-dialog:fullscreen .study-card-swipe-layer, .study-dialog.is-fullscreen .study-card-swipe-layer { width: min(82vw, 640px); height: min(52vh, 440px); }
   .study-face { padding: 28px; }
 }
 @media (max-width: 480px) {
@@ -295,7 +484,7 @@ button:disabled { opacity: .45; cursor: not-allowed; }
   .study-dialog { width: calc(100vw - 12px); height: calc(100dvh - 12px); padding: 11px; }
   .study-progress { gap: 8px; margin-top: 12px; }
   .study-stage { min-height: 200px; padding: 13px 0; }
-  .study-card-swipe-layer, .study-card-preview { width: min(100%, 700px); height: 42vh; min-height: 210px; }
+  .study-card-slot, .study-deck-base, .study-card-swipe-layer { width: min(100%, 700px); height: 42vh; min-height: 210px; }
   .study-face { padding: 22px; }
   .study-controls { gap: 6px; margin-bottom: 13px; }
   .study-step { width: 42px; min-height: 44px; }
@@ -306,7 +495,7 @@ button:disabled { opacity: .45; cursor: not-allowed; }
   .preview-line { grid-template-columns: 27px minmax(0, 1fr) minmax(0, 1fr) 34px; gap: 5px; }
   .import-file-row { flex-wrap: wrap; }
   .study-dialog:fullscreen, .study-dialog.is-fullscreen { padding: 12px; }
-  .study-dialog:fullscreen .study-card-swipe-layer, .study-dialog.is-fullscreen .study-card-swipe-layer, .study-dialog:fullscreen .study-card-preview, .study-dialog.is-fullscreen .study-card-preview { width: min(100%, 520px); height: min(46vh, calc(100dvh - 320px)); }
+  .study-dialog:fullscreen .study-card-slot, .study-dialog.is-fullscreen .study-card-slot, .study-dialog:fullscreen .study-deck-base, .study-dialog.is-fullscreen .study-deck-base, .study-dialog:fullscreen .study-card-swipe-layer, .study-dialog.is-fullscreen .study-card-swipe-layer { width: min(100%, 520px); height: min(46vh, calc(100dvh - 320px)); }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; transition-duration: .01ms !important; }
