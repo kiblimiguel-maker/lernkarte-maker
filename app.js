@@ -236,6 +236,19 @@
     data.studySessions[session.setId]=record;save();
   }
   let activeSlotIndex = 0;
+  let cancelActiveStudyTransition = null;
+  function clearActiveStudyTransition(){if(cancelActiveStudyTransition){const cleanup=cancelActiveStudyTransition;cancelActiveStudyTransition=null;cleanup()}}
+  function animateStudyTransition({owner,layer,startClass,stackSlot=null,delay=0,duration=500,complete}){
+    clearActiveStudyTransition();
+    let delayTimer=null,fallbackTimer=null,frame=0,finished=false;
+    const reduced=window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const cleanup=()=>{if(delayTimer!==null)clearTimeout(delayTimer);if(fallbackTimer!==null)clearTimeout(fallbackTimer);if(frame)cancelAnimationFrame(frame);layer.removeEventListener('animationend',onAnimationEnd);layer.classList.remove(startClass)};
+    const finish=event=>{if(event&&event.target!==layer)return;if(finished)return;finished=true;cleanup();if(cancelActiveStudyTransition===cleanup)cancelActiveStudyTransition=null;if(session===owner)complete()};
+    const onAnimationEnd=event=>finish(event);
+    cancelActiveStudyTransition=cleanup;
+    const start=()=>{if(session!==owner){clearActiveStudyTransition();return}if(reduced){finish();return}layer.addEventListener('animationend',onAnimationEnd);layer.classList.add(startClass);if(stackSlot){stackSlot.classList.remove('is-stack');stackSlot.classList.add('is-elevating')}fallbackTimer=setTimeout(()=>finish(),duration+100)};
+    if(reduced)start();else if(delay>0)delayTimer=setTimeout(()=>{frame=requestAnimationFrame(start)},delay);else frame=requestAnimationFrame(start);
+  }
   function getSlot(idx){
     const slot=$(`#study-slot-${idx}`);
     return {
@@ -338,10 +351,20 @@
   }
   function moveStudy(delta){
     if(!session||session.transitioning||!$('#study-complete').hidden)return;
+    const previousCardId=session.currentCardId;
     if(!window.WortwerkModel.navigateStudySession(session,delta))return;
+    const targetCard=window.WortwerkModel.getStudyCard(session);
+    if(!targetCard){session.currentCardId=previousCardId;return}
+    const owner=session,active=getSlot(activeSlotIndex),stack=getSlot(1-activeSlotIndex);
+    session.transitioning=true;
     session.flipped=false;
     saveSessionProgress();
-    renderStudyCard();
+    stack.frontText.textContent=targetCard.front;stack.backText.textContent=targetCard.back;
+    stack.button.setAttribute('aria-label',`Karte: ${targetCard.front}`);stack.button.setAttribute('aria-pressed','false');stack.button.disabled=true;stack.button.tabIndex=-1;
+    resetSlotOrientation(stack);stack.slot.className='study-card-slot is-stack';stack.swipeLayer.className='study-card-swipe-layer';stack.feedback.classList.remove('is-visible');
+    active.button.disabled=true;$('#answer-no').disabled=true;$('#answer-yes').disabled=true;$('#study-prev').disabled=true;$('#study-next').disabled=true;$('#shuffle-toggle').disabled=true;
+    const directionClass=delta>0?'is-navigation-forward':'is-navigation-backward';
+    animateStudyTransition({owner,layer:active.swipeLayer,startClass:directionClass,stackSlot:stack.slot,duration:500,complete:()=>{activeSlotIndex=1-activeSlotIndex;active.slot.className='study-card-slot is-hidden';active.swipeLayer.className='study-card-swipe-layer';active.feedback.classList.remove('is-visible');session.transitioning=false;renderStudyCard()}});
   }
   function nextStudyCard(){
     if(!session||session.transitioning||!$('#study-complete').hidden)return;
@@ -396,37 +419,8 @@
     }
 
     const isReduced=window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    const pauseTime=isReduced?60:(known?380:480);
-
-    window.setTimeout(()=>{
-      if(session!==activeSession)return;
-
-      if(isReduced){
-        completeCardTransition();
-        return;
-      }
-
-      // ── Phase 2: Swipe-out active card & elevate stack card ─────────────────
-      let finished=false,fallback;
-      const onSwipeDone=event=>{
-        if(event&&event.target!==active.swipeLayer)return;
-        if(finished||session!==activeSession)return;
-        finished=true;
-        clearTimeout(fallback);
-        active.swipeLayer.removeEventListener('animationend',onSwipeDone);
-        completeCardTransition();
-      };
-
-      active.swipeLayer.addEventListener('animationend',onSwipeDone);
-      fallback=window.setTimeout(onSwipeDone,620);
-
-      active.swipeLayer.classList.add('is-swiping');
-
-      if(hasNext){
-        stack.slot.classList.remove('is-stack');
-        stack.slot.classList.add('is-elevating');
-      }
-    },pauseTime);
+    const pauseTime=isReduced?0:160;
+    animateStudyTransition({owner:activeSession,layer:active.swipeLayer,startClass:'is-swiping',stackSlot:hasNext?stack.slot:null,delay:pauseTime,duration:560,complete:completeCardTransition});
 
     function completeCardTransition(){
       if(session!==activeSession)return;
@@ -456,7 +450,7 @@
   const studyDialog=$('#study-dialog');
   function syncFullscreenButton(){const active=document.fullscreenElement===studyDialog||studyDialog.classList.contains('is-fullscreen'),button=$('#study-expand');button.setAttribute('aria-pressed',String(active));button.setAttribute('aria-label',active?'Vollbild verlassen':'Lernmodus im Vollbild öffnen');button.title=active?'Vollbild verlassen':'Vollbild';$('#study-expand-label').textContent=active?'Fenster':'Vollbild'}
   async function toggleStudyFullscreen(){if(document.fullscreenElement===studyDialog||studyDialog.classList.contains('is-fullscreen')){studyDialog.classList.remove('is-fullscreen');if(document.fullscreenElement===studyDialog){try{await document.exitFullscreen()}catch(error){console.warn('Vollbildmodus konnte nicht beendet werden.',error)}}syncFullscreenButton();return}try{if(studyDialog.requestFullscreen)await studyDialog.requestFullscreen();else studyDialog.classList.add('is-fullscreen')}catch(error){studyDialog.classList.add('is-fullscreen')}syncFullscreenButton()}
-  function endStudy(){const setId=session?.setId;if(document.fullscreenElement===studyDialog)document.exitFullscreen().catch(()=>{});studyDialog.classList.remove('is-fullscreen');studyDialog.close();session=null;syncFullscreenButton();if(setId){const label=sessionForSet(setId)?'Fortsetzen':'Lernen';if(activeSet===setId){const button=$('#start-study');if(button)button.textContent=label}document.querySelectorAll('[data-quick-study]').forEach(button=>{if(button.dataset.quickStudy===setId)button.textContent=label})}}
+  function endStudy(){const setId=session?.setId;clearActiveStudyTransition();if(document.fullscreenElement===studyDialog)document.exitFullscreen().catch(()=>{});studyDialog.classList.remove('is-fullscreen');studyDialog.close();session=null;syncFullscreenButton();if(setId){const label=sessionForSet(setId)?'Fortsetzen':'Lernen';if(activeSet===setId){const button=$('#start-study');if(button)button.textContent=label}document.querySelectorAll('[data-quick-study]').forEach(button=>{if(button.dataset.quickStudy===setId)button.textContent=label})}}
   studyDialog.addEventListener('fullscreenchange',syncFullscreenButton);
   $('#study-expand').onclick=toggleStudyFullscreen;
   $('#study-card-0').onclick=flip;$('#study-card-1').onclick=flip;$('#answer-no').onclick=()=>scoreCard(false);$('#answer-yes').onclick=()=>scoreCard(true);$('#study-prev').onclick=()=>moveStudy(-1);$('#study-next').onclick=nextStudyCard;$('#study-close').onclick=endStudy;$('#finish-study').onclick=()=>{endStudy();render()};$('#retry-missed').onclick=retryMissed;$('#create-missed-set').onclick=openMissedSetCreation;$('#create-missed-set-complete').onclick=openMissedSetCreation;$('#study-manage').onclick=()=>{endStudy();render()};$('#shuffle-toggle').onclick=()=>{if(!session||session.transitioning||!$('#study-complete').hidden)return;window.WortwerkModel.shuffleUnvisitedStudyCards(session);$('#shuffle-toggle').setAttribute('aria-pressed','true');saveSessionProgress();renderStudyCard()};

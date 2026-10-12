@@ -144,6 +144,7 @@ assert.equal(navigateStudySession(navigationSession, -1), true);
 assert.equal(getStudyCard(navigationSession).id, 'nav-2', 'back returns to the actual previous visit');
 assert.equal(navigateStudySession(navigationSession, 1), true);
 assert.equal(getStudyCard(navigationSession).id, 'nav-3', 'forward replays the existing visit path');
+assert.equal(getNextStudyCardId(navigationSession), 'nav-4', 'the next unvisited card is selected before revisiting a skipped card');
 
 let previous = setStudyAnswer(navigationSession, 'nav-3', false);
 updateCardAnswer(navigationCards[2], previous, false, '2026-10-12T13:01:00.000Z');
@@ -163,10 +164,13 @@ assert.equal(shuffleUnvisitedStudyCards(navigationSession, () => 0), true, 'shuf
 assert.equal(navigationSession.currentCardId, beforeShuffleCurrent, 'shuffling preserves the displayed card');
 assert.deepEqual(navigationSession.historyCardIds, beforeShuffleHistory, 'shuffling preserves the visit history');
 assert.equal(new Set(navigationSession.cards.map(card => card.id)).size, 5, 'shuffling never duplicates or removes cards');
+assert.deepEqual(navigationSession.cards.slice(-2).map(card => card.id), ['nav-5', 'nav-4'], 'Fisher-Yates changes the pending order while leaving visited cards in place');
+assert.equal(getStudyResult(navigationSession, 'nav-3'), true, 'the rating remains bound to its card ID after reorder');
 assert.equal(navigateStudySession(navigationSession, -1), true);
 assert.equal(getStudyCard(navigationSession).id, 'nav-2', 'back remains valid after shuffling');
 assert.equal(navigateStudySession(navigationSession, 1), true);
 assert.equal(getStudyCard(navigationSession).id, 'nav-3', 'the same card is reachable again after shuffling');
+assert.equal(getNextStudyCardId(navigationSession), 'nav-5', 'the shuffled remainder determines the next unseen card');
 for (let index = 0; index < 4; index++) shuffleUnvisitedStudyCards(navigationSession, () => 0);
 assert.equal(navigationSession.currentCardId, 'nav-3', 'repeated mixes do not move the current card');
 assert.equal(navigationSession.cards.length, 5);
@@ -191,6 +195,14 @@ assert.equal(shuffleUnvisitedStudyCards(singleCardSession, () => 0), false, 'a s
 assert.equal(navigateStudySession(singleCardSession, 1), false, 'a single-card stack cannot navigate past its end');
 assert.equal(createStudySession([]).currentCardId, null, 'an empty stack has no invalid current card');
 assert.equal(navigateStudySession(createStudySession([]), -1), false, 'an empty stack safely rejects navigation');
+
+const rapidSession = createStudySession(navigationCards);
+for (const action of [1, 1, -1, 'shuffle', 1, -1, 'shuffle', 1, 1, -1]) {
+  if (action === 'shuffle') shuffleUnvisitedStudyCards(rapidSession, () => 0.37);
+  else navigateStudySession(rapidSession, action);
+  assert.ok(navigationCards.some(card => card.id === rapidSession.currentCardId), 'rapid navigation and mixing always leave a valid current card');
+  assert.equal(new Set(rapidSession.cards.map(card => card.id)).size, navigationCards.length, 'rapid mixing keeps exactly one copy of each session card');
+}
 
 const legacyResume = createStudySession(navigationCards, { cardIds: navigationCards.map(card => card.id), results: [true, false, null, null], index: 2 });
 assert.equal(legacyResume.currentCardId, 'nav-3', 'legacy saved sessions migrate to stable current IDs');

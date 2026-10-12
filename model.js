@@ -179,8 +179,17 @@
   function getNextStudyCardId(session) {
     if (!session?.cards.length) return null;
     if (session.historyIndex < session.historyCardIds.length - 1) return session.historyCardIds[session.historyIndex + 1];
-    const nextIndex = nextUnratedIndex(getStudyResults(session), getStudyCurrentIndex(session));
-    return nextIndex >= 0 ? session.cards[nextIndex].id : null;
+    const currentIndex = getStudyCurrentIndex(session);
+    const visited = new Set(session.historyCardIds);
+    for (const [cardId, result] of Object.entries(session.resultsByCardId)) if (result !== null) visited.add(cardId);
+    const findNext = predicate => {
+      for (let step = 1; step < session.cards.length; step++) {
+        const card = session.cards[(currentIndex + step + session.cards.length) % session.cards.length];
+        if (getStudyResult(session, card.id) === null && predicate(card.id)) return card.id;
+      }
+      return null;
+    };
+    return findNext(cardId => !visited.has(cardId)) || findNext(() => true);
   }
 
   function visitStudyCard(session, cardId) {
