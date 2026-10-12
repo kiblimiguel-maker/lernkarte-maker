@@ -213,6 +213,13 @@
     $('#study-title').textContent=setById(key)?.name||'Lernsession';$('#study-complete').hidden=true;$('#shuffle-toggle').setAttribute('aria-pressed','false');$('#study-dialog').classList.remove('is-fullscreen');$('#study-dialog').showModal();renderStudyCard();
   }
   function updateStudyScoreCounts(){if(!session)return;const known=session.results.filter(result=>result===true).length,missed=session.results.filter(result=>result===false).length;$('#known-count').textContent=String(known);$('#missed-count').textContent=String(missed);$('#study-known').textContent=`${known} ✓ · ${missed} ✕`;$('#answer-yes').setAttribute('aria-label',`Gewusst, bisher ${known}`);$('#answer-no').setAttribute('aria-label',`Nicht gewusst, bisher ${missed}`)}
+  function resetSlotOrientation(slotObj){
+    if(!slotObj)return;
+    slotObj.inner.classList.add('no-transition');
+    slotObj.inner.classList.remove('flipped');
+    void slotObj.inner.offsetWidth;
+    slotObj.inner.classList.remove('no-transition');
+  }
   function renderStudyCard(){
     if(!session)return;
     const total=session.cards.length,index=session.index,card=session.cards[index];
@@ -243,7 +250,11 @@
     active.slot.className='study-card-slot is-active';
     active.swipeLayer.className='study-card-swipe-layer';
     active.feedback.classList.remove('is-visible');
-    active.inner.classList.toggle('flipped',session.flipped);
+    if(!session.flipped){
+      resetSlotOrientation(active);
+    }else{
+      active.inner.classList.add('flipped');
+    }
 
     // Stack slot (preview of next card)
     if(hasNext){
@@ -253,11 +264,12 @@
       stack.button.setAttribute('aria-label','Nächste Karte: '+nextCard.front);
       stack.button.disabled=true;
       stack.button.tabIndex=-1;
+      resetSlotOrientation(stack);
       stack.slot.className='study-card-slot is-stack';
       stack.swipeLayer.className='study-card-swipe-layer';
       stack.feedback.classList.remove('is-visible');
-      stack.inner.classList.remove('flipped');
     }else{
+      resetSlotOrientation(stack);
       stack.slot.className='study-card-slot is-hidden';
     }
 
@@ -323,14 +335,15 @@
     }
     active.feedback.classList.add('is-visible');
 
-    // Ensure stack card has the next card's content ready
+    // Ensure stack card has the next card's content ready and cleanly upright
     if(hasNext){
       const nextCard=session.cards[nextIndex];
       stack.frontText.textContent=nextCard.front;
       stack.backText.textContent=nextCard.back;
-      stack.inner.classList.remove('flipped');
+      resetSlotOrientation(stack);
       stack.slot.className='study-card-slot is-stack';
     }else{
+      resetSlotOrientation(stack);
       stack.slot.className='study-card-slot is-hidden';
     }
 
@@ -357,7 +370,7 @@
       };
 
       active.swipeLayer.addEventListener('animationend',onSwipeDone);
-      fallback=window.setTimeout(onSwipeDone,720);
+      fallback=window.setTimeout(onSwipeDone,620);
 
       active.swipeLayer.classList.add('is-swiping');
 
@@ -377,7 +390,7 @@
         active.slot.className='study-card-slot is-hidden';
         active.swipeLayer.className='study-card-swipe-layer';
         active.feedback.classList.remove('is-visible');
-        active.inner.classList.remove('flipped');
+        resetSlotOrientation(active);
 
         session.transitioning=false;
         renderStudyCard();
@@ -385,6 +398,7 @@
         active.slot.className='study-card-slot is-hidden';
         active.swipeLayer.className='study-card-swipe-layer';
         active.feedback.classList.remove('is-visible');
+        resetSlotOrientation(active);
         session.transitioning=false;
         finishStudy();
       }

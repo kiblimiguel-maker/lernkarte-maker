@@ -174,7 +174,7 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .study-progress { display: flex; flex: none; align-items: center; gap: 12px; margin-top: 17px; color: var(--muted); font-size: 11px; }
 .progress-track { height: 3px; flex: 1; overflow: hidden; border-radius: 2px; background: #293139; }
 .progress-track span { display: block; width: 0; height: 100%; background: var(--accent); transition: width .2s ease; }
-.study-stage { position: relative; display: grid; flex: 1 1 0; min-height: 0; place-items: center; padding: 18px 0 26px; perspective: 1200px; }
+.study-stage { position: relative; display: grid; flex: 1 1 0; min-height: 0; place-items: center; padding: 18px 0 26px; }
 
 /* ── Stack Base: creates physical deck depth underneath all cards ── */
 .study-deck-base {
@@ -189,7 +189,7 @@ button:disabled { opacity: .45; cursor: not-allowed; }
   background: #10161c;
   border: 1px solid #1f2832;
   box-shadow: 0 16px 36px rgba(0, 0, 0, 0.45);
-  transform: scale(.955) translateY(12px) rotate(-1.8deg);
+  transform: scale(.935) translateY(14px);
   pointer-events: none;
   transition: opacity .3s ease, transform .3s ease;
 }
@@ -205,30 +205,29 @@ button:disabled { opacity: .45; cursor: not-allowed; }
   width: min(100%, 700px);
   height: min(450px, 54vh);
   min-height: 230px;
-  perspective: 1200px;
   pointer-events: none;
-  transition: transform .62s cubic-bezier(.22,.75,.24,1), opacity .3s ease;
+  transition: transform .56s cubic-bezier(.2,.8,.25,1);
 }
 
-/* Slot states */
+/* Slot states: pure vertical & scale elevation without rotation tilt */
 .study-card-slot.is-active {
   z-index: 2;
   pointer-events: auto;
-  transform: scale(1) translateY(0) rotate(0deg);
+  transform: scale(1) translateY(0);
   opacity: 1;
 }
 
 .study-card-slot.is-stack {
   z-index: 1;
   pointer-events: none;
-  transform: scale(.97) translateY(8px) rotate(-0.8deg);
+  transform: scale(.965) translateY(8px);
   opacity: 1;
 }
 
 .study-card-slot.is-elevating {
   z-index: 2;
   pointer-events: none;
-  transform: scale(1) translateY(0) rotate(0deg);
+  transform: scale(1) translateY(0);
   opacity: 1;
 }
 
@@ -237,6 +236,16 @@ button:disabled { opacity: .45; cursor: not-allowed; }
   opacity: 0;
   pointer-events: none;
   visibility: hidden;
+}
+
+/* CRITICAL: ONLY active slots can ever animate their 3D inner flip.
+   Stack, elevating, and hidden slots NEVER animate transform on .study-card-inner. */
+.study-card-slot.is-active .study-card-inner {
+  transition: transform .42s cubic-bezier(.25,.8,.25,1);
+}
+.study-card-slot:not(.is-active) .study-card-inner,
+.study-card-inner.no-transition {
+  transition: none !important;
 }
 
 /* Swipe layer */
@@ -248,21 +257,24 @@ button:disabled { opacity: .45; cursor: not-allowed; }
   transform-style: flat;
 }
 
-/* Smooth, dignified swipe-away animation (calm and high-end) */
+/* Smooth, dignified swipe-away animation (560ms synchronized with elevation) */
 .study-card-swipe-layer.is-swiping {
   will-change: transform, opacity;
   pointer-events: none;
-  animation: card-swipe-away .64s cubic-bezier(.25,1,.35,1) forwards;
+  animation: card-swipe-away .56s cubic-bezier(.2,.8,.25,1) forwards;
 }
 
 @keyframes card-swipe-away {
   0% {
-    transform: translateX(0) rotate(0deg) scale(1);
+    transform: translateX(0) rotate(0deg);
     opacity: 1;
   }
+  65% {
+    opacity: 0.95;
+  }
   100% {
-    transform: translateX(120%) rotate(5deg) scale(.98);
-    opacity: 0.96;
+    transform: translateX(120%) rotate(2.2deg);
+    opacity: 0;
   }
 }
 
@@ -297,13 +309,13 @@ button:disabled { opacity: .45; cursor: not-allowed; }
   width: 100%;
   height: 100%;
   transform-style: preserve-3d;
-  transition: transform .45s cubic-bezier(.25,.8,.25,1);
 }
 .study-card-inner.flipped {
   transform: rotateY(180deg);
 }
 
-/* Faces */
+/* Faces: IDENTICAL colors in active and stack state.
+   Depth is expressed through geometry and stack-base, NEVER by darkening the card face. */
 .study-face {
   position: absolute;
   inset: 0;
@@ -318,6 +330,7 @@ button:disabled { opacity: .45; cursor: not-allowed; }
   backface-visibility: hidden;
   -webkit-backface-visibility: hidden;
   box-shadow: 0 14px 34px rgba(0, 0, 0, 0.45);
+  transition: box-shadow .56s cubic-bezier(.2,.8,.25,1);
 }
 .study-back {
   transform: rotateY(180deg);
@@ -346,15 +359,9 @@ button:disabled { opacity: .45; cursor: not-allowed; }
   font-size: 10px;
 }
 
-/* Depth for stack card */
+/* Subtle stack depth shadow (no color shift!) */
 .study-card-slot.is-stack .study-face {
-  border-color: #b0bac0;
-  background: #c8cfd5;
-  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.35);
-}
-.study-card-slot.is-stack .card-side-label,
-.study-card-slot.is-stack .flip-hint {
-  opacity: .55;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.35);
 }
 
 /* ── Feedback Overlay (matching Reference Images 1 & 2) ── */
@@ -371,7 +378,6 @@ button:disabled { opacity: .45; cursor: not-allowed; }
   opacity: 0;
   pointer-events: none;
   transition: opacity .18s ease;
-  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.45);
 }
 .study-feedback.is-visible {
   opacity: 1;
