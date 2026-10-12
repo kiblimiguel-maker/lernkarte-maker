@@ -1,7 +1,7 @@
 'use strict';
 
 const assert = require('node:assert/strict');
-const { normalizeLibrary, createImportedCards, createCopiedCards, nextSetName, swapSetCardSides, recordCardAnswer, getSetProgress, resetSetProgress, summarizeResults, summarizeSession, nextUnratedIndex } = require('./model.js');
+const { normalizeLibrary, createImportedCards, createCopiedCards, nextSetName, swapSetCardSides, recordCardAnswer, updateCardAnswer, createStudySession, getStudyResults, getStudyResult, getStudyCurrentIndex, getStudyCard, getNextStudyCardId, navigateStudySession, shuffleUnvisitedStudyCards, setStudyAnswer, getSetProgress, resetSetProgress, summarizeResults, summarizeSession, nextUnratedIndex } = require('./model.js');
 
 assert.deepEqual(normalizeLibrary(null), { subjects: [], folders: [], sets: [], cards: [], recent: [], studySessions: {}, studyHistory: [] });
 const malformedCollections = normalizeLibrary({
@@ -132,6 +132,69 @@ assert.deepEqual(swapCards.slice(0, 2).map(card => [card.front, card.back, card.
 assert.equal(swapCards[0].updatedAt, '2026-10-12T12:30:00.000Z');
 assert.deepEqual(swapCards[2], swapOtherSnapshot, 'side swap does not affect another stack');
 assert.equal(swapSetCardSides([], 'set-1'), 0, 'side swap safely handles an empty stack');
+
+const navigationCards = Array.from({ length: 5 }, (_, index) => ({ id: `nav-${index + 1}`, setId: 'nav-set', front: `Front ${index + 1}`, back: `Back ${index + 1}`, correctCount: 0, incorrectCount: 0, attemptCount: 0 }));
+const navigationSession = createStudySession(navigationCards, { id: 'nav-session', setId: 'nav-set', startedAt: '2026-10-12T13:00:00.000Z' });
+assert.equal(getStudyCard(navigationSession).id, 'nav-1', 'a new session opens on its first card');
+assert.equal(navigateStudySession(navigationSession, -1), false, 'back is unavailable at the beginning');
+assert.equal(navigateStudySession(navigationSession, 1), true);
+assert.equal(navigateStudySession(navigationSession, 1), true);
+assert.equal(getStudyCard(navigationSession).id, 'nav-3', 'forward visits the next unrated card');
+assert.equal(navigateStudySession(navigationSession, -1), true);
+assert.equal(getStudyCard(navigationSession).id, 'nav-2', 'back returns to the actual previous visit');
+assert.equal(navigateStudySession(navigationSession, 1), true);
+assert.equal(getStudyCard(navigationSession).id, 'nav-3', 'forward replays the existing visit path');
+
+let previous = setStudyAnswer(navigationSession, 'nav-3', false);
+updateCardAnswer(navigationCards[2], previous, false, '2026-10-12T13:01:00.000Z');
+assert.equal(navigationCards[2].attemptCount, 1, 'first evaluation adds one attempt');
+assert.equal(navigateStudySession(navigationSession, -1), true);
+assert.equal(getStudyResult(navigationSession), null, 'each card keeps its own answer status');
+assert.equal(navigateStudySession(navigationSession, 1), true);
+assert.equal(getStudyResult(navigationSession), false, 'a rated card retains its status when revisited');
+previous = setStudyAnswer(navigationSession, 'nav-3', true);
+updateCardAnswer(navigationCards[2], previous, true, '2026-10-12T13:02:00.000Z');
+assert.deepEqual([navigationCards[2].correctCount, navigationCards[2].incorrectCount, navigationCards[2].attemptCount], [1, 0, 1], 'changing an answer updates counts without double-counting');
+assert.deepEqual(getStudyResults(navigationSession), [null, null, true, null, null]);
+
+const beforeShuffleCurrent = navigationSession.currentCardId;
+const beforeShuffleHistory = navigationSession.historyCardIds.slice();
+assert.equal(shuffleUnvisitedStudyCards(navigationSession, () => 0), true, 'shuffling changes the unvisited cards');
+assert.equal(navigationSession.currentCardId, beforeShuffleCurrent, 'shuffling preserves the displayed card');
+assert.deepEqual(navigationSession.historyCardIds, beforeShuffleHistory, 'shuffling preserves the visit history');
+assert.equal(new Set(navigationSession.cards.map(card => card.id)).size, 5, 'shuffling never duplicates or removes cards');
+assert.equal(navigateStudySession(navigationSession, -1), true);
+assert.equal(getStudyCard(navigationSession).id, 'nav-2', 'back remains valid after shuffling');
+assert.equal(navigateStudySession(navigationSession, 1), true);
+assert.equal(getStudyCard(navigationSession).id, 'nav-3', 'the same card is reachable again after shuffling');
+for (let index = 0; index < 4; index++) shuffleUnvisitedStudyCards(navigationSession, () => 0);
+assert.equal(navigationSession.currentCardId, 'nav-3', 'repeated mixes do not move the current card');
+assert.equal(navigationSession.cards.length, 5);
+assert.equal(navigateStudySession(navigationSession, -1), true, 'back can move within the current path after repeated mixes');
+
+const resumeRecord = {
+  id: navigationSession.id, setId: navigationSession.setId, startedAt: navigationSession.startedAt,
+  cardIds: navigationSession.cards.map(card => card.id), results: getStudyResults(navigationSession),
+  resultsByCardId: { ...navigationSession.resultsByCardId }, historyCardIds: navigationSession.historyCardIds.slice(),
+  historyIndex: navigationSession.historyIndex, currentCardId: navigationSession.currentCardId,
+  index: getStudyCurrentIndex(navigationSession)
+};
+const resumedSession = createStudySession(navigationCards, resumeRecord);
+assert.equal(resumedSession.currentCardId, navigationSession.currentCardId, 'resume restores current card by stable ID');
+assert.deepEqual(resumedSession.historyCardIds, navigationSession.historyCardIds, 'resume restores the complete visit history');
+assert.equal(resumedSession.historyIndex, navigationSession.historyIndex, 'resume restores a backtracked position without appending duplicate history');
+assert.deepEqual(getStudyResults(resumedSession), getStudyResults(navigationSession), 'resume restores card-keyed answers after reordering');
+assert.equal(getNextStudyCardId(resumedSession), getNextStudyCardId(navigationSession));
+
+const singleCardSession = createStudySession([navigationCards[0]]);
+assert.equal(shuffleUnvisitedStudyCards(singleCardSession, () => 0), false, 'a single-card stack safely ignores shuffle');
+assert.equal(navigateStudySession(singleCardSession, 1), false, 'a single-card stack cannot navigate past its end');
+assert.equal(createStudySession([]).currentCardId, null, 'an empty stack has no invalid current card');
+assert.equal(navigateStudySession(createStudySession([]), -1), false, 'an empty stack safely rejects navigation');
+
+const legacyResume = createStudySession(navigationCards, { cardIds: navigationCards.map(card => card.id), results: [true, false, null, null], index: 2 });
+assert.equal(legacyResume.currentCardId, 'nav-3', 'legacy saved sessions migrate to stable current IDs');
+assert.deepEqual(getStudyResults(legacyResume), [true, false, null, null, null], 'legacy positional results migrate to card IDs');
 
 const rows = Array.from({ length: 50000 }, (_, index) => ({ front: `Begriff ${index}`, back: `Definition ${index}` }));
 const created = createImportedCards(rows, {

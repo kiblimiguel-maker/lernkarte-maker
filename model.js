@@ -90,6 +90,148 @@
     return card;
   }
 
+  function updateCardAnswer(card, previousAnswer, nextAnswer, timestamp) {
+    if (previousAnswer === null || typeof previousAnswer !== 'boolean') {
+      recordCardAnswer(card, nextAnswer, timestamp);
+      return;
+    }
+    if (previousAnswer === nextAnswer) {
+      card.lastReviewedAt = timestamp;
+      card.nextReviewAt = new Date(new Date(timestamp).getTime() + (nextAnswer ? 86400000 : 600000)).toISOString();
+      card.updatedAt = timestamp;
+      return;
+    }
+    if (previousAnswer) card.correctCount = Math.max(0, count(card.correctCount) - 1);
+    else card.incorrectCount = Math.max(0, count(card.incorrectCount) - 1);
+    if (nextAnswer) card.correctCount = count(card.correctCount) + 1;
+    else card.incorrectCount = count(card.incorrectCount) + 1;
+    card.attemptCount = Math.max(count(card.attemptCount), card.correctCount + card.incorrectCount);
+    card.lastReviewedAt = timestamp;
+    card.nextReviewAt = new Date(new Date(timestamp).getTime() + (nextAnswer ? 86400000 : 600000)).toISOString();
+    card.updatedAt = timestamp;
+  }
+
+  function createStudySession(cards, saved = null) {
+    const byId = new Map(records(cards).filter(card => typeof card.id === 'string').map(card => [card.id, card]));
+    const savedIds = Array.isArray(saved?.cardIds) ? [...new Set(saved.cardIds.filter(id => byId.has(id)))] : [];
+    const cardIds = savedIds.length ? savedIds : [...byId.keys()];
+    const orderedCards = cardIds.map(id => byId.get(id));
+    const resultsByCardId = Object.create(null);
+    for (const [cardId, result] of Object.entries(saved?.resultsByCardId || {})) {
+      if (byId.has(cardId) && (result === null || typeof result === 'boolean')) resultsByCardId[cardId] = result;
+    }
+    if (Array.isArray(saved?.results)) saved.cardIds.forEach((cardId, index) => {
+      if (byId.has(cardId) && resultsByCardId[cardId] === undefined && (saved.results[index] === null || typeof saved.results[index] === 'boolean')) resultsByCardId[cardId] = saved.results[index];
+    });
+    for (const cardId of cardIds) if (resultsByCardId[cardId] === undefined) resultsByCardId[cardId] = null;
+
+    const fallbackIndex = Number.isInteger(saved?.index) ? Math.max(0, Math.min(saved.index, cardIds.length - 1)) : 0;
+    const fallbackCurrent = cardIds[fallbackIndex];
+    const savedHistory = Array.isArray(saved?.historyCardIds) ? saved.historyCardIds.filter(id => byId.has(id)) : [];
+    const savedCurrent = typeof saved?.currentCardId === 'string' && byId.has(saved.currentCardId) ? saved.currentCardId : fallbackCurrent;
+    let historyCardIds = savedHistory.length ? savedHistory : cardIds.slice(0, fallbackIndex + 1);
+    let historyIndex = Number.isInteger(saved?.historyIndex) ? Math.max(0, Math.min(saved.historyIndex, historyCardIds.length - 1)) : historyCardIds.length - 1;
+    if (!savedHistory.length) {
+      const visited = new Set(historyCardIds);
+      for (const cardId of cardIds) if (resultsByCardId[cardId] !== null && !visited.has(cardId)) {
+        historyCardIds.push(cardId);
+        visited.add(cardId);
+      }
+    }
+    if (savedCurrent && historyCardIds[historyIndex] !== savedCurrent) {
+      const currentInHistory = historyCardIds.lastIndexOf(savedCurrent);
+      if (currentInHistory >= 0) historyIndex = currentInHistory;
+      else {
+        historyCardIds = historyCardIds.slice(0, historyIndex + 1);
+        historyCardIds.push(savedCurrent);
+        historyIndex = historyCardIds.length - 1;
+      }
+    }
+    const currentCardId = historyCardIds[historyIndex];
+    return {
+      id: saved?.id,
+      setId: saved?.setId,
+      startedAt: saved?.startedAt,
+      cards: orderedCards,
+      resultsByCardId,
+      historyCardIds,
+      historyIndex,
+      currentCardId: currentCardId || cardIds[0] || null
+    };
+  }
+
+  function getStudyResults(session) {
+    return session.cards.map(card => session.resultsByCardId[card.id] ?? null);
+  }
+
+  function getStudyResult(session, cardId = session?.currentCardId) {
+    return session && cardId ? (session.resultsByCardId[cardId] ?? null) : null;
+  }
+
+  function getStudyCurrentIndex(session) {
+    return session?.cards.findIndex(card => card.id === session.currentCardId) ?? -1;
+  }
+
+  function getStudyCard(session, cardId = session?.currentCardId) {
+    return session?.cards.find(card => card.id === cardId) || null;
+  }
+
+  function getNextStudyCardId(session) {
+    if (!session?.cards.length) return null;
+    if (session.historyIndex < session.historyCardIds.length - 1) return session.historyCardIds[session.historyIndex + 1];
+    const nextIndex = nextUnratedIndex(getStudyResults(session), getStudyCurrentIndex(session));
+    return nextIndex >= 0 ? session.cards[nextIndex].id : null;
+  }
+
+  function visitStudyCard(session, cardId) {
+    if (!session || !session.cards.some(card => card.id === cardId) || cardId === session.currentCardId) return false;
+    const forwardIndex = session.historyCardIds.indexOf(cardId, session.historyIndex + 1);
+    if (forwardIndex >= 0) {
+      session.historyIndex = forwardIndex;
+      session.currentCardId = cardId;
+      return true;
+    }
+    session.historyCardIds = session.historyCardIds.slice(0, session.historyIndex + 1);
+    session.historyCardIds.push(cardId);
+    session.historyIndex = session.historyCardIds.length - 1;
+    session.currentCardId = cardId;
+    return true;
+  }
+
+  function navigateStudySession(session, direction) {
+    if (!session || ![-1, 1].includes(direction)) return false;
+    if (direction < 0) {
+      if (session.historyIndex <= 0) return false;
+      session.historyIndex--;
+      session.currentCardId = session.historyCardIds[session.historyIndex];
+      return true;
+    }
+    const nextCardId = getNextStudyCardId(session);
+    return nextCardId ? visitStudyCard(session, nextCardId) : false;
+  }
+
+  function shuffleUnvisitedStudyCards(session, random = Math.random) {
+    if (!session?.cards.length) return false;
+    const visited = new Set(session.historyCardIds);
+    for (const [cardId, result] of Object.entries(session.resultsByCardId)) if (result !== null) visited.add(cardId);
+    const unvisited = session.cards.filter(card => !visited.has(card.id));
+    if (unvisited.length < 2) return false;
+    for (let index = unvisited.length - 1; index > 0; index--) {
+      const target = Math.floor(random() * (index + 1));
+      [unvisited[index], unvisited[target]] = [unvisited[target], unvisited[index]];
+    }
+    let next = 0;
+    session.cards = session.cards.map(card => visited.has(card.id) ? card : unvisited[next++]);
+    return true;
+  }
+
+  function setStudyAnswer(session, cardId, answer) {
+    if (!session?.resultsByCardId || !Object.hasOwn(session.resultsByCardId, cardId) || typeof answer !== 'boolean') return null;
+    const previous = session.resultsByCardId[cardId];
+    session.resultsByCardId[cardId] = answer;
+    return previous;
+  }
+
   function getCardProgress(card) {
     const attempts = Math.max(count(card.attemptCount), count(card.correctCount) + count(card.incorrectCount));
     const state = !attempts ? 'new' : count(card.correctCount) >= 2 && count(card.correctCount) > count(card.incorrectCount) ? 'secure' : 'practice';
@@ -146,7 +288,7 @@
     return -1;
   }
 
-  const api = { normalizeLibrary, createImportedCards, createCopiedCards, nextSetName, swapSetCardSides, recordCardAnswer, getCardProgress, getSetProgress, resetSetProgress, summarizeResults, summarizeSession, nextUnratedIndex };
+  const api = { normalizeLibrary, createImportedCards, createCopiedCards, nextSetName, swapSetCardSides, recordCardAnswer, updateCardAnswer, createStudySession, getStudyResults, getStudyResult, getStudyCurrentIndex, getStudyCard, getNextStudyCardId, visitStudyCard, navigateStudySession, shuffleUnvisitedStudyCards, setStudyAnswer, getCardProgress, getSetProgress, resetSetProgress, summarizeResults, summarizeSession, nextUnratedIndex };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (typeof globalThis !== 'undefined') globalThis.WortwerkModel = api;
 })();

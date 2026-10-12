@@ -228,10 +228,11 @@
   $('#reset-progress-close').addEventListener('click',()=>{$('#reset-progress-dialog').close();resetSetId=null});
   $('#reset-progress-dialog').addEventListener('close',()=>{resetSetId=null});
   function completeSession(record){if(session?.completionRecorded)return;delete data.studySessions[record.setId];data.studyHistory.unshift(window.WortwerkModel.summarizeSession(record,new Date().toISOString()));data.studyHistory=data.studyHistory.slice(0,30);if(session)session.completionRecorded=true;save()}
-  function saveSessionProgress(nextIndex=session?.index){
+  function saveSessionProgress(){
     if(!session)return;
-    const record={id:session.id,setId:session.setId,startedAt:session.startedAt,cardIds:session.cards.map(card=>card.id),results:session.results.slice(),index:Math.max(0,Math.min(nextIndex,session.cards.length-1)),missedCardIdsCopied:[...(session.missedCardIdsCopied||[])]};
-    if(session.results.every(result=>result!==null)){completeSession(record);return}
+    const results=window.WortwerkModel.getStudyResults(session),index=window.WortwerkModel.getStudyCurrentIndex(session);
+    const record={id:session.id,setId:session.setId,startedAt:session.startedAt,cardIds:session.cards.map(card=>card.id),results,resultsByCardId:{...session.resultsByCardId},historyCardIds:session.historyCardIds.slice(),historyIndex:session.historyIndex,currentCardId:session.currentCardId,index:Math.max(0,Math.min(index,session.cards.length-1)),missedCardIdsCopied:[...(session.missedCardIdsCopied||[])]};
+    if(results.every(result=>result!==null)){completeSession(record);return}
     data.studySessions[session.setId]=record;save();
   }
   let activeSlotIndex = 0;
@@ -252,14 +253,14 @@
     const cards=setCards(key);if(!cards.length){toast('Dieses Set enthält noch keine Karten.');return}
     session=null;activeSlotIndex=0;
     const saved=sessionForSet(key);
-    if(saved){const byId=new Map(cards.map(card=>[card.id,card])),paired=saved.cardIds.map((cardId,index)=>({card:byId.get(cardId),result:saved.results[index]})).filter(item=>item.card);if(paired.length)session={id:saved.id,setId:key,startedAt:saved.startedAt,cards:paired.map(item=>item.card),index:Math.min(saved.index,paired.length-1),flipped:false,results:paired.map(item=>item.result),missedCardIdsCopied:new Set(Array.isArray(saved.missedCardIdsCopied)?saved.missedCardIdsCopied:[]),missedSetPending:false}}
-    if(!session)session={id:id(),setId:key,startedAt:new Date().toISOString(),cards:cards.slice(),index:0,flipped:false,results:Array(cards.length).fill(null),missedCardIdsCopied:new Set(),missedSetPending:false};
+    const sessionState=window.WortwerkModel.createStudySession(cards,saved);
+    session={...sessionState,id:saved?.id||id(),setId:key,startedAt:saved?.startedAt||new Date().toISOString(),flipped:false,missedCardIdsCopied:new Set(Array.isArray(saved?.missedCardIdsCopied)?saved.missedCardIdsCopied:[]),missedSetPending:false};
     data.recent.unshift({setId:key,at:new Date().toISOString()});data.recent=data.recent.slice(0,30);saveSessionProgress();
     $('#study-title').textContent=setById(key)?.name||'Lernsession';$('#study-complete').hidden=true;$('#shuffle-toggle').setAttribute('aria-pressed','false');$('#study-dialog').classList.remove('is-fullscreen');$('#study-dialog').showModal();renderStudyCard();
   }
-  function updateStudyScoreCounts(){if(!session)return;const known=session.results.filter(result=>result===true).length,missed=session.results.filter(result=>result===false).length;$('#known-count').textContent=String(known);$('#missed-count').textContent=String(missed);$('#study-known').textContent=`${known} ✓ · ${missed} ✕`;$('#answer-yes').setAttribute('aria-label',`Gewusst, bisher ${known}`);$('#answer-no').setAttribute('aria-label',`Nicht gewusst, bisher ${missed}`);updateMissedSetActions()}
-  function getUncopiedMissedCards(){if(!session)return[];const copied=session.missedCardIdsCopied||new Set();return session.cards.filter((card,index)=>session.results[index]===false&&!copied.has(card.id))}
-  function updateMissedSetActions(){if(!session)return;const totalMissed=session.results.filter(result=>result===false).length,available=getUncopiedMissedCards().length,pending=Boolean(session.missedSetPending);const button=$('#create-missed-set');button.disabled=!available||pending||session.transitioning;button.textContent=available?`Lernstapel aus ${available} falschen Karten erstellen`:totalMissed?'Lernstapel erstellt':'Lernstapel aus falschen Karten erstellen';const resultButton=$('#create-missed-set-complete');resultButton.hidden=totalMissed===0;resultButton.disabled=!available||pending;resultButton.textContent=available?`Lernstapel aus ${available} falschen Karten erstellen`:totalMissed?'Lernstapel erstellt':'Lernstapel aus falschen Karten erstellen'}
+  function updateStudyScoreCounts(){if(!session)return;const results=window.WortwerkModel.getStudyResults(session),known=results.filter(result=>result===true).length,missed=results.filter(result=>result===false).length;$('#known-count').textContent=String(known);$('#missed-count').textContent=String(missed);$('#study-known').textContent=`${known} ✓ · ${missed} ✕`;$('#answer-yes').setAttribute('aria-label',`Gewusst, bisher ${known}`);$('#answer-no').setAttribute('aria-label',`Nicht gewusst, bisher ${missed}`);$('#shuffle-toggle').disabled=Boolean(session.transitioning);updateMissedSetActions()}
+  function getUncopiedMissedCards(){if(!session)return[];const copied=session.missedCardIdsCopied||new Set();return session.cards.filter(card=>window.WortwerkModel.getStudyResult(session,card.id)===false&&!copied.has(card.id))}
+  function updateMissedSetActions(){if(!session)return;const results=window.WortwerkModel.getStudyResults(session),totalMissed=results.filter(result=>result===false).length,available=getUncopiedMissedCards().length,pending=Boolean(session.missedSetPending);const button=$('#create-missed-set');button.disabled=!available||pending||session.transitioning;button.textContent=available?`Lernstapel aus ${available} falschen Karten erstellen`:totalMissed?'Lernstapel erstellt':'Lernstapel aus falschen Karten erstellen';const resultButton=$('#create-missed-set-complete');resultButton.hidden=totalMissed===0;resultButton.disabled=!available||pending;resultButton.textContent=available?`Lernstapel aus ${available} falschen Karten erstellen`:totalMissed?'Lernstapel erstellt':'Lernstapel aus falschen Karten erstellen'}
   function openMissedSetCreation(){if(!session||session.missedSetPending)return;const cards=getUncopiedMissedCards();if(!cards.length){toast('Bewerte zuerst Karten als „Nicht gewusst“.');return}const originalSet=setById(session.setId);session.missedSetPending=true;formContext={type:'set',defaultSubjectId:originalSet?.subjectId||activeSubject||data.subjects[0]?.id||'',defaultFolderId:originalSet?.folderId||null,copyCards:cards.slice(),sourceSessionId:session.id};fillForm('set');$('#form-submit').textContent='Lernstapel erstellen';$('#form-dialog').showModal();$('#f-name').focus();updateMissedSetActions()}
   function resetSlotOrientation(slotObj){
     if(!slotObj)return;
@@ -270,16 +271,16 @@
   }
   function renderStudyCard(){
     if(!session)return;
-    const total=session.cards.length,index=session.index,card=session.cards[index];
-    const nextIndex=window.WortwerkModel.nextUnratedIndex(session.results,index),hasNext=nextIndex>=0;
+    const total=session.cards.length,index=window.WortwerkModel.getStudyCurrentIndex(session),card=window.WortwerkModel.getStudyCard(session);
+    const nextCardId=window.WortwerkModel.getNextStudyCardId(session),hasNext=Boolean(nextCardId);
     $('#study-progress-label').textContent=`${index+1} von ${total}`;
-    const reviewed=session.results.filter(result=>result!==null).length;
+    const reviewed=window.WortwerkModel.getStudyResults(session).filter(result=>result!==null).length;
     $('#study-progress-bar').style.width=`${Math.round(reviewed/total*100)}%`;
     $('#study-progress-track').setAttribute('aria-valuemax',String(total));
     $('#study-progress-track').setAttribute('aria-valuenow',String(reviewed));
     updateStudyScoreCounts();
 
-    const result=session.results[index];
+    const result=window.WortwerkModel.getStudyResult(session);
     $('#session-stat').textContent=result===null?'Noch nicht bewertet':result?'Diese Karte: gewusst':'Diese Karte: noch üben';
 
     const deckBase=$('#study-deck-base');
@@ -306,7 +307,7 @@
 
     // Stack slot (preview of next card)
     if(hasNext){
-      const nextCard=session.cards[nextIndex];
+      const nextCard=window.WortwerkModel.getStudyCard(session,nextCardId);
       stack.frontText.textContent=nextCard.front;
       stack.backText.textContent=nextCard.back;
       stack.button.setAttribute('aria-label','Nächste Karte: '+nextCard.front);
@@ -323,42 +324,41 @@
 
     $('#answer-no').disabled=false;
     $('#answer-yes').disabled=false;
-    $('#study-prev').disabled=index===0;
-    $('#study-next').disabled=false;
+    $('#study-prev').disabled=session.historyIndex<=0;
+    $('#study-next').disabled=!hasNext;
   }
   function flip(){
     if(!session||session.transitioning||!$('#study-complete').hidden)return;
     session.flipped=!session.flipped;
     const active=getSlot(activeSlotIndex);
     active.inner.classList.toggle('flipped',session.flipped);
-    const card=session.cards[session.index];
+    const card=window.WortwerkModel.getStudyCard(session);
     active.button.setAttribute('aria-label',session.flipped?'Rückseite: '+card.back:'Vorderseite: '+card.front);
     active.button.setAttribute('aria-pressed',String(session.flipped));
   }
   function moveStudy(delta){
     if(!session||session.transitioning||!$('#study-complete').hidden)return;
-    const next=session.index+delta;
-    if(next<0||next>=session.cards.length)return;
-    session.index=next;
+    if(!window.WortwerkModel.navigateStudySession(session,delta))return;
     session.flipped=false;
     saveSessionProgress();
     renderStudyCard();
   }
   function nextStudyCard(){
     if(!session||session.transitioning||!$('#study-complete').hidden)return;
-    if(session.index<session.cards.length-1){moveStudy(1);return}
-    const next=window.WortwerkModel.nextUnratedIndex(session.results,session.index);
-    if(next>=0){session.index=next;session.flipped=false;saveSessionProgress();renderStudyCard()}
-    else finishStudy();
+    if(window.WortwerkModel.getNextStudyCardId(session)){moveStudy(1);return}
+    if(window.WortwerkModel.getStudyResults(session).every(result=>result!==null))finishStudy();
   }
   function scoreCard(known){
     if(!session||session.transitioning||!$('#study-complete').hidden)return;
-    const activeSession=session,card=session.cards[session.index],timestamp=new Date().toISOString();
+    const activeSession=session,card=window.WortwerkModel.getStudyCard(session),cardId=card?.id,previous=window.WortwerkModel.getStudyResult(session),timestamp=new Date().toISOString();
+    if(!card||!cardId)return;
     session.transitioning=true;
-    window.WortwerkModel.recordCardAnswer(card,known,timestamp);
-    session.results[session.index]=known;
-    const nextIndex=window.WortwerkModel.nextUnratedIndex(session.results,session.index),hasNext=nextIndex>=0;
-    saveSessionProgress(hasNext?nextIndex:session.index);
+    window.WortwerkModel.updateCardAnswer(card,previous,known,timestamp);
+    window.WortwerkModel.setStudyAnswer(session,cardId,known);
+    const remaining=window.WortwerkModel.getStudyResults(session).some(result=>result===null);
+    const nextCardId=remaining?window.WortwerkModel.getNextStudyCardId(session):null,hasNext=Boolean(nextCardId);
+    if(hasNext)window.WortwerkModel.visitStudyCard(session,nextCardId);
+    saveSessionProgress();
     updateStudyScoreCounts();
 
     $('#session-stat').textContent=known?'Gewusst':'Noch zu üben';
@@ -385,7 +385,7 @@
 
     // Ensure stack card has the next card's content ready and cleanly upright
     if(hasNext){
-      const nextCard=session.cards[nextIndex];
+      const nextCard=window.WortwerkModel.getStudyCard(session,nextCardId);
       stack.frontText.textContent=nextCard.front;
       stack.backText.textContent=nextCard.back;
       resetSlotOrientation(stack);
@@ -432,7 +432,6 @@
       if(session!==activeSession)return;
       if(hasNext){
         activeSlotIndex=1-activeSlotIndex;
-        session.index=nextIndex;
         session.flipped=false;
 
         active.slot.className='study-card-slot is-hidden';
@@ -452,15 +451,15 @@
       }
     }
   }
-  function finishStudy(){if(!session)return;if(!session.completionRecorded)completeSession({id:session.id,setId:session.setId,startedAt:session.startedAt,cardIds:session.cards.map(card=>card.id),results:session.results});const {known,missed,unrated,percentage}=window.WortwerkModel.summarizeResults(session.results);const evaluated=known+missed,circumference=2*Math.PI*42,knownLength=circumference*(evaluated?known/evaluated:0),missedLength=circumference*(evaluated?missed/evaluated:0);$('#study-progress-bar').style.width='100%';$('#study-progress-track').setAttribute('aria-valuenow',String(session.cards.length));$('#complete-copy').textContent=`${evaluated} von ${session.cards.length} Karten bewertet`;$('#score-value').textContent=`${percentage}%`;$('#score-ring-known').style.strokeDasharray=`${knownLength} ${circumference-knownLength}`;$('#score-ring-missed').style.strokeDasharray=`${missedLength} ${circumference-missedLength}`;$('#score-ring-missed').style.strokeDashoffset=String(-knownLength);$('#result-chart').setAttribute('aria-label',`${percentage} Prozent richtig: ${known} gewusst und ${missed} noch zu üben`);$('#result-known').textContent=String(known);$('#result-missed').textContent=String(missed);$('#result-unrated').textContent=String(unrated);$('#retry-missed').hidden=missed===0;$('#study-complete').hidden=false;updateMissedSetActions()}
-  function retryMissed(){if(!session)return;const cards=session.cards.filter((card,index)=>session.results[index]===false);if(!cards.length)return;session={id:id(),setId:session.setId,startedAt:new Date().toISOString(),cards,index:0,flipped:false,results:Array(cards.length).fill(null),missedCardIdsCopied:new Set(),missedSetPending:false};activeSlotIndex=0;saveSessionProgress();$('#study-title').textContent=`Wiederholung · ${setById(session.setId)?.name||'Lernsession'}`;$('#study-complete').hidden=true;$('#shuffle-toggle').setAttribute('aria-pressed','false');renderStudyCard()}
+  function finishStudy(){if(!session)return;const results=window.WortwerkModel.getStudyResults(session);if(!session.completionRecorded)completeSession({id:session.id,setId:session.setId,startedAt:session.startedAt,cardIds:session.cards.map(card=>card.id),results});const {known,missed,unrated,percentage}=window.WortwerkModel.summarizeResults(results);const evaluated=known+missed,circumference=2*Math.PI*42,knownLength=circumference*(evaluated?known/evaluated:0),missedLength=circumference*(evaluated?missed/evaluated:0);$('#study-progress-bar').style.width='100%';$('#study-progress-track').setAttribute('aria-valuenow',String(session.cards.length));$('#complete-copy').textContent=`${evaluated} von ${session.cards.length} Karten bewertet`;$('#score-value').textContent=`${percentage}%`;$('#score-ring-known').style.strokeDasharray=`${knownLength} ${circumference-knownLength}`;$('#score-ring-missed').style.strokeDasharray=`${missedLength} ${circumference-missedLength}`;$('#score-ring-missed').style.strokeDashoffset=String(-knownLength);$('#result-chart').setAttribute('aria-label',`${percentage} Prozent richtig: ${known} gewusst und ${missed} noch zu üben`);$('#result-known').textContent=String(known);$('#result-missed').textContent=String(missed);$('#result-unrated').textContent=String(unrated);$('#retry-missed').hidden=missed===0;$('#study-complete').hidden=false;updateMissedSetActions()}
+  function retryMissed(){if(!session)return;const cards=session.cards.filter(card=>window.WortwerkModel.getStudyResult(session,card.id)===false);if(!cards.length)return;const retryState=window.WortwerkModel.createStudySession(cards);session={...retryState,id:id(),setId:session.setId,startedAt:new Date().toISOString(),flipped:false,missedCardIdsCopied:new Set(),missedSetPending:false};activeSlotIndex=0;saveSessionProgress();$('#study-title').textContent=`Wiederholung · ${setById(session.setId)?.name||'Lernsession'}`;$('#study-complete').hidden=true;$('#shuffle-toggle').setAttribute('aria-pressed','false');renderStudyCard()}
   const studyDialog=$('#study-dialog');
   function syncFullscreenButton(){const active=document.fullscreenElement===studyDialog||studyDialog.classList.contains('is-fullscreen'),button=$('#study-expand');button.setAttribute('aria-pressed',String(active));button.setAttribute('aria-label',active?'Vollbild verlassen':'Lernmodus im Vollbild öffnen');button.title=active?'Vollbild verlassen':'Vollbild';$('#study-expand-label').textContent=active?'Fenster':'Vollbild'}
   async function toggleStudyFullscreen(){if(document.fullscreenElement===studyDialog||studyDialog.classList.contains('is-fullscreen')){studyDialog.classList.remove('is-fullscreen');if(document.fullscreenElement===studyDialog){try{await document.exitFullscreen()}catch(error){console.warn('Vollbildmodus konnte nicht beendet werden.',error)}}syncFullscreenButton();return}try{if(studyDialog.requestFullscreen)await studyDialog.requestFullscreen();else studyDialog.classList.add('is-fullscreen')}catch(error){studyDialog.classList.add('is-fullscreen')}syncFullscreenButton()}
   function endStudy(){const setId=session?.setId;if(document.fullscreenElement===studyDialog)document.exitFullscreen().catch(()=>{});studyDialog.classList.remove('is-fullscreen');studyDialog.close();session=null;syncFullscreenButton();if(setId){const label=sessionForSet(setId)?'Fortsetzen':'Lernen';if(activeSet===setId){const button=$('#start-study');if(button)button.textContent=label}document.querySelectorAll('[data-quick-study]').forEach(button=>{if(button.dataset.quickStudy===setId)button.textContent=label})}}
   studyDialog.addEventListener('fullscreenchange',syncFullscreenButton);
   $('#study-expand').onclick=toggleStudyFullscreen;
-  $('#study-card-0').onclick=flip;$('#study-card-1').onclick=flip;$('#answer-no').onclick=()=>scoreCard(false);$('#answer-yes').onclick=()=>scoreCard(true);$('#study-prev').onclick=()=>moveStudy(-1);$('#study-next').onclick=nextStudyCard;$('#study-close').onclick=endStudy;$('#finish-study').onclick=()=>{endStudy();render()};$('#retry-missed').onclick=retryMissed;$('#create-missed-set').onclick=openMissedSetCreation;$('#create-missed-set-complete').onclick=openMissedSetCreation;$('#study-manage').onclick=()=>{endStudy();render()};$('#shuffle-toggle').onclick=()=>{if(!session)return;const paired=session.cards.map((card,index)=>[card,session.results[index]]);for(let i=paired.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[paired[i],paired[j]]=[paired[j],paired[i]]}session.cards=paired.map(pair=>pair[0]);session.results=paired.map(pair=>pair[1]);session.index=0;session.flipped=false;activeSlotIndex=0;$('#study-complete').hidden=true;$('#shuffle-toggle').setAttribute('aria-pressed','true');saveSessionProgress();renderStudyCard()};
+  $('#study-card-0').onclick=flip;$('#study-card-1').onclick=flip;$('#answer-no').onclick=()=>scoreCard(false);$('#answer-yes').onclick=()=>scoreCard(true);$('#study-prev').onclick=()=>moveStudy(-1);$('#study-next').onclick=nextStudyCard;$('#study-close').onclick=endStudy;$('#finish-study').onclick=()=>{endStudy();render()};$('#retry-missed').onclick=retryMissed;$('#create-missed-set').onclick=openMissedSetCreation;$('#create-missed-set-complete').onclick=openMissedSetCreation;$('#study-manage').onclick=()=>{endStudy();render()};$('#shuffle-toggle').onclick=()=>{if(!session||session.transitioning||!$('#study-complete').hidden)return;window.WortwerkModel.shuffleUnvisitedStudyCards(session);$('#shuffle-toggle').setAttribute('aria-pressed','true');saveSessionProgress();renderStudyCard()};
   document.addEventListener('keydown',e=>{if(!$('#study-dialog').open)return;if(e.key==='Escape'){endStudy();return}if(e.target.matches('input,textarea,select,[contenteditable="true"]')||session?.transitioning)return;const focusedButton=e.target.closest('button');if(focusedButton&&!focusedButton.classList.contains('study-card'))return;if(e.key===' '){if(focusedButton?.classList.contains('study-card'))return;e.preventDefault();flip()}if(e.key==='ArrowLeft'){e.preventDefault();moveStudy(-1)}if(e.key==='ArrowRight'){e.preventDefault();nextStudyCard()}});
   $('#create-set').onclick=()=>openEntity('set');$('#import-open').onclick=()=>openImport(activeSet);$('#import-form').onsubmit=e=>e.preventDefault();
   window.addEventListener('library-save-error',()=>toast('Mit Supabase konnte nicht gespeichert werden. Bitte Verbindung prüfen und erneut versuchen.'));
