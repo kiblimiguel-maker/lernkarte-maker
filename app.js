@@ -200,7 +200,7 @@
   }
   function updateStudyScoreCounts(){if(!session)return;const known=session.results.filter(result=>result===true).length,missed=session.results.filter(result=>result===false).length;$('#known-count').textContent=String(known);$('#missed-count').textContent=String(missed);$('#study-known').textContent=`${known} ✓ · ${missed} ✕`;$('#answer-yes').setAttribute('aria-label',`Gewusst, bisher ${known}`);$('#answer-no').setAttribute('aria-label',`Nicht gewusst, bisher ${missed}`)}
   function renderStudyCard(options={}){if(!session)return;const {resetOrientation=false,keepTransition=false}=options,total=session.cards.length,index=session.index,card=session.cards[index],studyCard=$('#study-card'),swipeLayer=$('#study-card-swipe-layer'),inner=$('#study-card-inner'),nextCard=$('#study-next-card');if(!keepTransition)nextCard.classList.remove('is-visible');$('#study-progress-label').textContent=`${index+1} von ${total}`;const reviewed=session.results.filter(result=>result!==null).length;$('#study-progress-bar').style.width=`${Math.round(reviewed/total*100)}%`;$('#study-progress-track').setAttribute('aria-valuemax',String(total));$('#study-progress-track').setAttribute('aria-valuenow',String(reviewed));updateStudyScoreCounts();
-    const result=session.results[index];$('#session-stat').textContent=result===null?'Noch nicht bewertet':result?'Diese Karte: gewusst':'Diese Karte: noch üben';if(resetOrientation)inner.classList.add('no-flip-transition');inner.classList.toggle('flipped',session.flipped);if(resetOrientation)requestAnimationFrame(()=>inner.classList.remove('no-flip-transition'));$('#card-front').textContent=card.front;$('#card-back').textContent=card.back;studyCard.setAttribute('aria-label',session.flipped?'Rückseite: '+card.back:'Vorderseite: '+card.front);studyCard.setAttribute('aria-pressed',String(session.flipped));if(!keepTransition){studyCard.classList.toggle('is-final-card',index===total-1);studyCard.disabled=false;swipeLayer.classList.remove('is-swiping');$('#answer-no').disabled=false;$('#answer-yes').disabled=false;$('#study-prev').disabled=index===0;$('#study-next').disabled=false}}
+    const result=session.results[index];$('#session-stat').textContent=result===null?'Noch nicht bewertet':result?'Diese Karte: gewusst':'Diese Karte: noch üben';if(resetOrientation)inner.classList.add('no-flip-transition');inner.classList.toggle('flipped',session.flipped);if(resetOrientation)requestAnimationFrame(()=>inner.classList.remove('no-flip-transition'));$('#card-front').textContent=card.front;$('#card-back').textContent=card.back;studyCard.setAttribute('aria-label',session.flipped?'Rückseite: '+card.back:'Vorderseite: '+card.front);studyCard.setAttribute('aria-pressed',String(session.flipped));if(!keepTransition){studyCard.classList.toggle('is-final-card',index===total-1);studyCard.disabled=false;swipeLayer.classList.remove('is-swiping','is-correct','is-incorrect');const feedbackEl=$('#study-feedback');if(feedbackEl){feedbackEl.classList.remove('is-visible')}$('#answer-no').disabled=false;$('#answer-yes').disabled=false;$('#study-prev').disabled=index===0;$('#study-next').disabled=false}}
   function flip(){if(!session||session.transitioning||!$('#study-complete').hidden)return;session.flipped=!session.flipped;renderStudyCard()}
   function moveStudy(delta){if(!session||session.transitioning||!$('#study-complete').hidden)return;const next=session.index+delta;if(next<0||next>=session.cards.length)return;session.index=next;session.flipped=false;saveSessionProgress();renderStudyCard()}
   function nextStudyCard(){if(!session||session.transitioning||!$('#study-complete').hidden)return;if(session.index<session.cards.length-1){moveStudy(1);return}const next=window.WortwerkModel.nextUnratedIndex(session.results,session.index);if(next>=0){session.index=next;session.flipped=false;saveSessionProgress();renderStudyCard()}else finishStudy()}
@@ -212,23 +212,64 @@
     const nextIndex=window.WortwerkModel.nextUnratedIndex(session.results,session.index),hasNext=nextIndex>=0;
     saveSessionProgress(hasNext?nextIndex:session.index);
     updateStudyScoreCounts();
-    const studyCard=$('#study-card'),swipeLayer=$('#study-card-swipe-layer'),nextCard=$('#study-next-card');
+    const studyCard=$('#study-card'),swipeLayer=$('#study-card-swipe-layer'),nextCard=$('#study-next-card'),
+          inner=$('#study-card-inner'),feedbackEl=$('#study-feedback'),feedbackText=$('#study-feedback-text');
     $('#session-stat').textContent=known?'Gewusst':'Noch zu üben';
     studyCard.classList.toggle('is-final-card',!hasNext);
-    swipeLayer.classList.add('is-swiping');
     studyCard.disabled=true;$('#answer-no').disabled=true;$('#answer-yes').disabled=true;$('#study-prev').disabled=true;$('#study-next').disabled=true;
+
+    // ── Step 1: Show feedback overlay ────────────────────────────────────────
+    // The overlay sits outside the 3D inner, so it is always flat and visible
+    // regardless of whether the front or back is showing.
+    feedbackText.textContent=known?'Ok ✓':'Das nächste Mal klappt es bestimmt!';
+    swipeLayer.classList.toggle('is-correct',known);
+    swipeLayer.classList.toggle('is-incorrect',!known);
+    feedbackEl.classList.add('is-visible');
+
+    // ── Step 2: Prepare next-card preview ────────────────────────────────────
     if(hasNext){$('#next-card-front').textContent=session.cards[nextIndex].front;nextCard.classList.add('is-visible')}
+
+    // ── Step 3: Freeze the flip transform, then start swipe ──────────────────
+    // We add no-flip-transition so the inner element cannot accidentally animate
+    // its rotateY during the swipe phase, regardless of its current flip state.
+    inner.classList.add('no-flip-transition');
+
+    // Use requestAnimationFrame to allow the feedback overlay to paint before
+    // the swipe animation starts (avoids a flash on reduced-motion devices).
+    requestAnimationFrame(()=>{
+      swipeLayer.classList.add('is-swiping');
+    });
+
+    // ── Step 4: Finish transition ─────────────────────────────────────────────
     let completed=false,fallback;
     const finishTransition=()=>{
       if(completed||session!==activeSession)return;
       completed=true;clearTimeout(fallback);swipeLayer.removeEventListener('animationend',onAnimationEnd);
-      if(hasNext){session.index=nextIndex;session.flipped=false;renderStudyCard({resetOrientation:true,keepTransition:true})}
-      swipeLayer.classList.remove('is-swiping');nextCard.classList.remove('is-visible');session.transitioning=false;
-      if(!hasNext)finishStudy();else renderStudyCard()
+
+      // Tear down feedback and swipe state
+      swipeLayer.classList.remove('is-swiping','is-correct','is-incorrect');
+      feedbackEl.classList.remove('is-visible');
+      nextCard.classList.remove('is-visible');
+
+      if(hasNext){
+        session.index=nextIndex;
+        // Reset flip state without transition – must happen before inner.classList
+        // removes no-flip-transition so there is never a visible Y-rotation.
+        session.flipped=false;
+        inner.classList.toggle('flipped',false);
+        // Remove the freeze after the style change has been committed
+        requestAnimationFrame(()=>inner.classList.remove('no-flip-transition'));
+        session.transitioning=false;
+        renderStudyCard({resetOrientation:false,keepTransition:false});
+      }else{
+        inner.classList.remove('no-flip-transition');
+        session.transitioning=false;
+        finishStudy();
+      }
     };
     const onAnimationEnd=event=>{if(event.target===swipeLayer&&!event.pseudoElement&&event.animationName==='card-swipe-away')finishTransition()};
     swipeLayer.addEventListener('animationend',onAnimationEnd);
-    fallback=window.setTimeout(finishTransition,window.matchMedia('(prefers-reduced-motion: reduce)').matches?100:820);
+    fallback=window.setTimeout(finishTransition,window.matchMedia('(prefers-reduced-motion: reduce)').matches?120:900);
   }
   function finishStudy(){if(!session)return;if(!session.completionRecorded)completeSession({id:session.id,setId:session.setId,startedAt:session.startedAt,cardIds:session.cards.map(card=>card.id),results:session.results});const {known,missed,unrated,percentage}=window.WortwerkModel.summarizeResults(session.results);const evaluated=known+missed,circumference=2*Math.PI*42,knownLength=circumference*(evaluated?known/evaluated:0),missedLength=circumference*(evaluated?missed/evaluated:0);$('#study-progress-bar').style.width='100%';$('#study-progress-track').setAttribute('aria-valuenow',String(session.cards.length));$('#complete-copy').textContent=`${evaluated} von ${session.cards.length} Karten bewertet`;$('#score-value').textContent=`${percentage}%`;$('#score-ring-known').style.strokeDasharray=`${knownLength} ${circumference-knownLength}`;$('#score-ring-missed').style.strokeDasharray=`${missedLength} ${circumference-missedLength}`;$('#score-ring-missed').style.strokeDashoffset=String(-knownLength);$('#result-chart').setAttribute('aria-label',`${percentage} Prozent richtig: ${known} gewusst und ${missed} noch zu üben`);$('#result-known').textContent=String(known);$('#result-missed').textContent=String(missed);$('#result-unrated').textContent=String(unrated);$('#retry-missed').hidden=missed===0;$('#study-complete').hidden=false}
   function retryMissed(){if(!session)return;const cards=session.cards.filter((card,index)=>session.results[index]===false);if(!cards.length)return;session={id:id(),setId:session.setId,startedAt:new Date().toISOString(),cards,index:0,flipped:false,results:Array(cards.length).fill(null)};saveSessionProgress();$('#study-title').textContent=`Wiederholung · ${setById(session.setId)?.name||'Lernsession'}`;$('#study-complete').hidden=true;$('#shuffle-toggle').setAttribute('aria-pressed','false');renderStudyCard()}
