@@ -41,6 +41,45 @@
     }));
   }
 
+  function createCopiedCards(cards, { setId, position = 0, timestamp, createId }) {
+    return records(cards).map((card, index) => ({
+      ...card,
+      id: createId(),
+      setId,
+      position: position + index,
+      correctCount: 0,
+      incorrectCount: 0,
+      attemptCount: 0,
+      lastReviewedAt: null,
+      nextReviewAt: null,
+      createdAt: timestamp,
+      updatedAt: timestamp
+    }));
+  }
+
+  function nextSetName(sets, subjectId, folderId = null) {
+    const used = new Set();
+    for (const set of records(sets)) {
+      if (set.subjectId !== subjectId || (set.folderId || null) !== (folderId || null)) continue;
+      const match = typeof set.name === 'string' ? set.name.match(/^Lernstapel\s+(\d+)$/i) : null;
+      if (match) used.add(Number(match[1]));
+    }
+    let number = 1;
+    while (used.has(number)) number++;
+    return `Lernstapel ${number}`;
+  }
+
+  function swapSetCardSides(cards, setId, timestamp) {
+    let swapped = 0;
+    for (const card of records(cards)) {
+      if (card.setId !== setId) continue;
+      [card.front, card.back] = [card.back, card.front];
+      if (timestamp) card.updatedAt = timestamp;
+      swapped++;
+    }
+    return swapped;
+  }
+
   function recordCardAnswer(card, known, timestamp) {
     if (known) card.correctCount = count(card.correctCount) + 1;
     else card.incorrectCount = count(card.incorrectCount) + 1;
@@ -107,7 +146,7 @@
     return -1;
   }
 
-  const api = { normalizeLibrary, createImportedCards, recordCardAnswer, getCardProgress, getSetProgress, resetSetProgress, summarizeResults, summarizeSession, nextUnratedIndex };
+  const api = { normalizeLibrary, createImportedCards, createCopiedCards, nextSetName, swapSetCardSides, recordCardAnswer, getCardProgress, getSetProgress, resetSetProgress, summarizeResults, summarizeSession, nextUnratedIndex };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (typeof globalThis !== 'undefined') globalThis.WortwerkModel = api;
 })();

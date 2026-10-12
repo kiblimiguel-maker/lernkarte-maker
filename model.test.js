@@ -1,7 +1,7 @@
 'use strict';
 
 const assert = require('node:assert/strict');
-const { normalizeLibrary, createImportedCards, recordCardAnswer, getSetProgress, resetSetProgress, summarizeResults, summarizeSession, nextUnratedIndex } = require('./model.js');
+const { normalizeLibrary, createImportedCards, createCopiedCards, nextSetName, swapSetCardSides, recordCardAnswer, getSetProgress, resetSetProgress, summarizeResults, summarizeSession, nextUnratedIndex } = require('./model.js');
 
 assert.deepEqual(normalizeLibrary(null), { subjects: [], folders: [], sets: [], cards: [], recent: [], studySessions: {}, studyHistory: [] });
 const malformedCollections = normalizeLibrary({
@@ -50,10 +50,11 @@ const completedSummary = summarizeSession({ id: 'session-1', setId: 'set-1', sta
 assert.deepEqual([completedSummary.cardCount, completedSummary.known, completedSummary.missed, completedSummary.percentage], [2, 1, 1, 50]);
 
 const restoredSession = normalizeLibrary({ studySessions: {
-  'set-1': { id: 'session-2', setId: 'set-1', cardIds: ['card-1', 'card-2'], results: [true, null], index: 1 }
+  'set-1': { id: 'session-2', setId: 'set-1', cardIds: ['card-1', 'card-2'], results: [true, null], index: 1, missedCardIdsCopied: ['card-old'] }
 }, studyHistory: [completedSummary] });
 assert.equal(restoredSession.studySessions['set-1'].index, 1, 'in-progress session position survives reload');
 assert.deepEqual(restoredSession.studySessions['set-1'].results, [true, null]);
+assert.deepEqual(restoredSession.studySessions['set-1'].missedCardIdsCopied, ['card-old'], 'copied-card state survives reload to prevent duplicate exports');
 assert.equal(restoredSession.studyHistory[0].percentage, 50, 'completed session history survives reload');
 assert.deepEqual(normalizeLibrary({ studySessions: { broken: { cardIds: ['a'], results: [] } } }).studySessions, {}, 'invalid session state is discarded without affecting the library');
 
@@ -91,6 +92,47 @@ assert.equal(resetReload.studySessions['set-1'], undefined, 'removed resume poin
 assert.equal(resetSetProgress(resetReload, 'set-1'), 2, 'reset is safe when repeated');
 assert.equal(resetSetProgress(resetReload, 'missing-set'), 0, 'unknown set reset is a no-op');
 
+assert.equal(nextSetName([
+  { subjectId: 'subject-1', folderId: null, name: 'Lernstapel 1' },
+  { subjectId: 'subject-1', folderId: null, name: 'Lernstapel 2' },
+  { subjectId: 'subject-1', folderId: 'folder-1', name: 'Lernstapel 3' },
+  { subjectId: 'subject-1', folderId: null, name: 'Lernstapel 4' },
+  { subjectId: 'subject-2', folderId: null, name: 'Lernstapel 3' }
+], 'subject-1', null), 'Lernstapel 3', 'automatic name fills a free number in the selected location');
+assert.equal(nextSetName([{ subjectId: 'subject-1', name: 'Vokabeln' }], 'subject-1', null), 'Lernstapel 1');
+
+const sourceForCopy = [
+  { id: 'source-1', setId: 'source-set', front: ' das Haus ', back: 'la maison = une maison', position: 8, correctCount: 4, incorrectCount: 1, attemptCount: 5, lastReviewedAt: 'old', nextReviewAt: 'later' },
+  { id: 'source-2', setId: 'source-set', front: 'être', back: 'to be', position: 9, correctCount: 2, incorrectCount: 0, attemptCount: 2 }
+];
+const sourceSnapshot = structuredClone(sourceForCopy);
+const copiedCards = createCopiedCards(sourceForCopy, {
+  setId: 'missed-set', position: 0, timestamp: '2026-10-12T12:00:00.000Z',
+  createId: (() => { let next = 0; return () => `copy-${next++}`; })()
+});
+assert.equal(new Set(copiedCards.map(card => card.id)).size, 2, 'each copied card receives a unique id');
+assert.deepEqual(copiedCards.map(card => [card.front, card.back, card.setId, card.position]), [
+  [' das Haus ', 'la maison = une maison', 'missed-set', 0], ['être', 'to be', 'missed-set', 1]
+], 'copied card content is preserved exactly while attaching to the new stack');
+assert.deepEqual(copiedCards.map(card => [card.correctCount, card.incorrectCount, card.attemptCount, card.lastReviewedAt, card.nextReviewAt]), [
+  [0, 0, 0, null, null], [0, 0, 0, null, null]
+], 'copied cards start with independent learning progress');
+assert.deepEqual(sourceForCopy, sourceSnapshot, 'copying does not mutate source cards or their progress');
+
+const swapCards = [
+  { id: 'swap-1', setId: 'set-1', front: 'das Haus', back: 'la maison', position: 0, correctCount: 2, attemptCount: 2, updatedAt: 'old' },
+  { id: 'swap-2', setId: 'set-1', front: 'la rue', back: 'die Strasse', position: 1, incorrectCount: 1, attemptCount: 1 },
+  { id: 'swap-other', setId: 'set-2', front: '2+2', back: '4', attemptCount: 3 }
+];
+const swapOtherSnapshot = structuredClone(swapCards[2]);
+assert.equal(swapSetCardSides(swapCards, 'set-1', '2026-10-12T12:30:00.000Z'), 2);
+assert.deepEqual(swapCards.slice(0, 2).map(card => [card.front, card.back, card.id, card.setId, card.position, card.attemptCount]), [
+  ['la maison', 'das Haus', 'swap-1', 'set-1', 0, 2], ['die Strasse', 'la rue', 'swap-2', 'set-1', 1, 1]
+]);
+assert.equal(swapCards[0].updatedAt, '2026-10-12T12:30:00.000Z');
+assert.deepEqual(swapCards[2], swapOtherSnapshot, 'side swap does not affect another stack');
+assert.equal(swapSetCardSides([], 'set-1'), 0, 'side swap safely handles an empty stack');
+
 const rows = Array.from({ length: 50000 }, (_, index) => ({ front: `Begriff ${index}`, back: `Definition ${index}` }));
 const created = createImportedCards(rows, {
   setId: 'set-1', position: 7, timestamp: '2026-10-05T12:00:00.000Z', createId: (() => { let next = 0; return () => `card-${next++}`; })()
@@ -106,4 +148,4 @@ assert.equal(combined.at(-1).setId, 'set-1');
 const largeProgress = getSetProgress(Array.from({ length: 20000 }, (_, index) => ({ attemptCount: 2, correctCount: index % 2 ? 0 : 2, incorrectCount: index % 2 ? 2 : 0 })));
 assert.deepEqual([largeProgress.total, largeProgress.secure, largeProgress.practice], [20000, 10000, 10000]);
 
-console.log('Data checks passed: resilient storage, attempt tracking across reloads and sessions, per-set mastery, session summaries/resume state, and 50,000-card import batches.');
+console.log('Data checks passed: storage and session restore, learning progress, auto-naming, independent missed-card copies, side swapping, and 50,000-card import batches.');
