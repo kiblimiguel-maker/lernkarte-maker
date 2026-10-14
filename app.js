@@ -19,11 +19,6 @@
   ];
   const icons = ['📚','🌐','📐','🏛️','🧪','🎨'];
   const $ = (s, root=document) => root.querySelector(s);
-  const STUDY_TRANSITION_MS = (() => {
-    const value = getComputedStyle(document.documentElement).getPropertyValue('--study-transition-duration').trim();
-    const duration = Number.parseFloat(value);
-    return Number.isFinite(duration) ? duration * (value.endsWith('ms') ? 1 : 1000) : 580;
-  })();
   const STUDY_SWIPE_MS = (() => {
     const value = getComputedStyle(document.documentElement).getPropertyValue('--study-swipe-duration').trim();
     const duration = Number.parseFloat(value);
@@ -53,9 +48,14 @@
     document.querySelectorAll('[data-view]').forEach(button=>button.onclick=event=>{
       event.preventDefault();activeSubject=null;activeFolder=null;activeSet=null;view=button.dataset.view;render();
     });
+    const atLibraryRoot=!activeSubject&&!activeFolder&&!activeSet;
+    document.querySelectorAll('.topbar [data-view]').forEach(button=>{
+      const current=button.dataset.view==='recent'?view==='recent':button.dataset.view==='library'&&view==='library'&&atLibraryRoot;
+      if(current)button.setAttribute('aria-current','page');else button.removeAttribute('aria-current');
+    });
     crumbs(view==='recent'?['Zuletzt gelernt']:['Dein Lernraum']);
   }
-  function crumbs(parts){const last=parts.length-1;$('#breadcrumbs').setAttribute('aria-label','Aktueller Ort');$('#breadcrumbs').innerHTML=parts.map((part,index)=>`<span>${index===last?`<b aria-current="location">${esc(part)}</b>`:`<button type="button" class="breadcrumb-link" data-crumb-index="${index}">${esc(part)}</button>`}</span>`).join('');$('#breadcrumbs').querySelectorAll('[data-crumb-index]').forEach(button=>button.onclick=()=>{const level=Number(button.dataset.crumbIndex);if(level===0){activeSubject=null;activeFolder=null;activeSet=null;view='library'}else if(level===1){activeFolder=null;activeSet=null}else if(level===2){activeSet=null}render()})}
+  function crumbs(parts){const last=parts.length-1;$('#breadcrumbs').setAttribute('aria-label','Brotkrumennavigation');$('#breadcrumbs').innerHTML=parts.map((part,index)=>`<span>${index===last?`<b aria-current="location">${esc(part)}</b>`:`<button type="button" class="breadcrumb-link" data-crumb-index="${index}">${esc(part)}</button>`}</span>`).join('');$('#breadcrumbs').querySelectorAll('[data-crumb-index]').forEach(button=>button.onclick=()=>{const level=Number(button.dataset.crumbIndex);if(level===0){activeSubject=null;activeFolder=null;activeSet=null;view='library'}else if(level===1){activeFolder=null;activeSet=null}else if(level===2){activeSet=null}render()})}
   function renderLibrary(){
     activeSubject=null;activeFolder=null;activeSet=null;
     const recentSets=(data.recent||[]).map(item=>setById(item.setId)).filter(Boolean).filter((set,index,list)=>list.findIndex(candidate=>candidate.id===set.id)===index).slice(0,4);
@@ -249,7 +249,7 @@
   let activeSlotIndex = 0;
   let cancelActiveStudyTransition = null;
   function clearActiveStudyTransition(){if(cancelActiveStudyTransition){const cleanup=cancelActiveStudyTransition;cancelActiveStudyTransition=null;cleanup()}}
-  function animateStudyTransition({owner,layer,startClass,stackSlot=null,delay=0,duration=STUDY_TRANSITION_MS,syncStackDuration=false,complete}){
+  function animateStudyTransition({owner,layer,startClass,stackSlot=null,delay=0,duration=STUDY_SWIPE_MS,syncStackDuration=false,complete}){
     clearActiveStudyTransition();
     let delayTimer=null,fallbackTimer=null,frame=0,finished=false;
     const reduced=window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -366,16 +366,16 @@
     if(!window.WortwerkModel.navigateStudySession(session,delta))return;
     const targetCard=window.WortwerkModel.getStudyCard(session);
     if(!targetCard){session.currentCardId=previousCardId;return}
-    const owner=session,active=getSlot(activeSlotIndex),stack=getSlot(1-activeSlotIndex);
-    session.transitioning=true;
     session.flipped=false;
     saveSessionProgress();
-    stack.frontText.textContent=targetCard.front;stack.backText.textContent=targetCard.back;
-    stack.button.setAttribute('aria-label',`Karte: ${targetCard.front}`);stack.button.setAttribute('aria-pressed','false');stack.button.disabled=true;stack.button.tabIndex=-1;
-    resetSlotOrientation(stack);stack.slot.className='study-card-slot is-stack';stack.swipeLayer.className='study-card-swipe-layer';stack.feedback.classList.remove('is-visible');
-    active.button.disabled=true;$('#answer-no').disabled=true;$('#answer-yes').disabled=true;$('#study-prev').disabled=true;$('#study-next').disabled=true;$('#shuffle-toggle').disabled=true;
-    const directionClass=delta>0?'is-navigation-forward':'is-navigation-backward';
-    animateStudyTransition({owner,layer:active.swipeLayer,startClass:directionClass,stackSlot:stack.slot,duration:STUDY_TRANSITION_MS,complete:()=>{activeSlotIndex=1-activeSlotIndex;active.slot.className='study-card-slot is-hidden';active.swipeLayer.className='study-card-swipe-layer';active.feedback.classList.remove('is-visible');session.transitioning=false;renderStudyCard()}});
+    const dialog=$('#study-dialog');
+    dialog.classList.add('is-instant-navigation');
+    activeSlotIndex=1-activeSlotIndex;
+    renderStudyCard();
+    // Commit the new slot roles while transitions are disabled, so the next
+    // interaction can still use the independent rating swipe animation.
+    void dialog.offsetWidth;
+    dialog.classList.remove('is-instant-navigation');
   }
   function nextStudyCard(){
     if(!session||session.transitioning||!$('#study-complete').hidden)return;
@@ -429,9 +429,7 @@
       stack.slot.className='study-card-slot is-hidden';
     }
 
-    const isReduced=window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    const pauseTime=isReduced?0:160;
-    animateStudyTransition({owner:activeSession,layer:active.swipeLayer,startClass:'is-swiping',stackSlot:hasNext?stack.slot:null,delay:pauseTime,duration:STUDY_SWIPE_MS,syncStackDuration:true,complete:completeCardTransition});
+    animateStudyTransition({owner:activeSession,layer:active.swipeLayer,startClass:'is-swiping',stackSlot:hasNext?stack.slot:null,duration:STUDY_SWIPE_MS,syncStackDuration:true,complete:completeCardTransition});
 
     function completeCardTransition(){
       if(session!==activeSession)return;
