@@ -23,6 +23,8 @@
   --radius-dialog: 16px;
   --study-transition-duration: 580ms;
   --study-transition-easing: cubic-bezier(.42,0,.58,1);
+  --study-swipe-duration: 510ms;
+  --study-swipe-easing: cubic-bezier(.35,.12,.25,1);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -241,6 +243,10 @@ button:disabled { opacity: .45; cursor: not-allowed; }
   opacity: 1;
 }
 
+/* A scored card and the card beneath it leave/advance on the same clock. */
+.study-card-slot.is-score-elevating { transition-duration: var(--study-swipe-duration); }
+.study-card-slot.is-score-elevating .study-face { transition-duration: var(--study-swipe-duration); }
+
 .study-card-slot.is-hidden {
   z-index: 0;
   opacity: 0;
@@ -267,12 +273,13 @@ button:disabled { opacity: .45; cursor: not-allowed; }
   transform-style: flat;
 }
 
-/* Smooth, dignified swipe-away animation (560ms synchronized with elevation) */
+/* Rating swipe is deliberately separate from the unchanged manual card transition. */
 .study-card-swipe-layer.is-swiping {
   will-change: transform, opacity;
   pointer-events: none;
-  animation: card-swipe-away var(--study-transition-duration) var(--study-transition-easing) forwards;
+  animation: card-swipe-known var(--study-swipe-duration) var(--study-swipe-easing) forwards;
 }
+.study-card-slot.is-incorrect .study-card-swipe-layer.is-swiping { animation-name: card-swipe-missed; }
 .study-card-swipe-layer.is-navigation-forward,
 .study-card-swipe-layer.is-navigation-backward {
   will-change: transform, opacity;
@@ -284,11 +291,17 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .study-card-swipe-layer.is-navigation-forward { animation-name: card-navigate-forward; }
 .study-card-swipe-layer.is-navigation-backward { animation-name: card-navigate-backward; }
 
-@keyframes card-swipe-away {
-  0% { transform: translate3d(0, 0, 0) rotate(0deg); opacity: 1; }
-  24% { transform: translate3d(9%, -1%, 0) rotate(.55deg); opacity: .98; }
-  68% { transform: translate3d(57%, -2%, 0) rotate(1.55deg); opacity: .76; }
-  100% { transform: translate3d(120%, -2%, 0) rotate(2.2deg); opacity: 0; }
+@keyframes card-swipe-known {
+  0% { transform: translate3d(0, 0, 0) rotate(0deg) scale(1); opacity: 1; }
+  20% { transform: translate3d(7%, -1%, 0) rotate(.55deg) scale(.997); opacity: .99; }
+  66% { transform: translate3d(58%, -2%, 0) rotate(1.55deg) scale(.985); opacity: .76; }
+  100% { transform: translate3d(120%, -2%, 0) rotate(2.2deg) scale(.975); opacity: 0; }
+}
+@keyframes card-swipe-missed {
+  0% { transform: translate3d(0, 0, 0) rotate(0deg) scale(1); opacity: 1; }
+  20% { transform: translate3d(-7%, -1%, 0) rotate(-.55deg) scale(.997); opacity: .99; }
+  66% { transform: translate3d(-58%, -2%, 0) rotate(-1.55deg) scale(.985); opacity: .76; }
+  100% { transform: translate3d(-120%, -2%, 0) rotate(-2.2deg) scale(.975); opacity: 0; }
 }
 
 @keyframes card-navigate-forward {

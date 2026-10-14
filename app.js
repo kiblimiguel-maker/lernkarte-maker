@@ -24,6 +24,11 @@
     const duration = Number.parseFloat(value);
     return Number.isFinite(duration) ? duration * (value.endsWith('ms') ? 1 : 1000) : 580;
   })();
+  const STUDY_SWIPE_MS = (() => {
+    const value = getComputedStyle(document.documentElement).getPropertyValue('--study-swipe-duration').trim();
+    const duration = Number.parseFloat(value);
+    return Number.isFinite(duration) ? duration * (value.endsWith('ms') ? 1 : 1000) : 510;
+  })();
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const id = () => crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const initial = () => ({subjects:[],folders:[],sets:[],cards:[],recent:[],studySessions:{},studyHistory:[]});
@@ -244,7 +249,7 @@
   let activeSlotIndex = 0;
   let cancelActiveStudyTransition = null;
   function clearActiveStudyTransition(){if(cancelActiveStudyTransition){const cleanup=cancelActiveStudyTransition;cancelActiveStudyTransition=null;cleanup()}}
-  function animateStudyTransition({owner,layer,startClass,stackSlot=null,delay=0,duration=STUDY_TRANSITION_MS,complete}){
+  function animateStudyTransition({owner,layer,startClass,stackSlot=null,delay=0,duration=STUDY_TRANSITION_MS,syncStackDuration=false,complete}){
     clearActiveStudyTransition();
     let delayTimer=null,fallbackTimer=null,frame=0,finished=false;
     const reduced=window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -252,7 +257,7 @@
     const finish=event=>{if(event&&event.target!==layer)return;if(finished)return;finished=true;cleanup();if(cancelActiveStudyTransition===cleanup)cancelActiveStudyTransition=null;if(session===owner)complete()};
     const onAnimationEnd=event=>finish(event);
     cancelActiveStudyTransition=cleanup;
-    const start=()=>{if(session!==owner){clearActiveStudyTransition();return}if(reduced){finish();return}layer.addEventListener('animationend',onAnimationEnd);layer.classList.add(startClass);if(stackSlot){stackSlot.classList.remove('is-stack');stackSlot.classList.add('is-elevating')}fallbackTimer=setTimeout(()=>finish(),duration+100)};
+    const start=()=>{if(session!==owner){clearActiveStudyTransition();return}if(reduced){finish();return}layer.addEventListener('animationend',onAnimationEnd);layer.classList.add(startClass);if(stackSlot){if(syncStackDuration)stackSlot.classList.add('is-score-elevating');stackSlot.classList.remove('is-stack');stackSlot.classList.add('is-elevating')}fallbackTimer=setTimeout(()=>finish(),duration+100)};
     if(reduced)start();else if(delay>0)delayTimer=setTimeout(()=>{frame=requestAnimationFrame(start)},delay);else frame=requestAnimationFrame(start);
   }
   function getSlot(idx){
@@ -426,7 +431,7 @@
 
     const isReduced=window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     const pauseTime=isReduced?0:160;
-    animateStudyTransition({owner:activeSession,layer:active.swipeLayer,startClass:'is-swiping',stackSlot:hasNext?stack.slot:null,delay:pauseTime,duration:STUDY_TRANSITION_MS,complete:completeCardTransition});
+    animateStudyTransition({owner:activeSession,layer:active.swipeLayer,startClass:'is-swiping',stackSlot:hasNext?stack.slot:null,delay:pauseTime,duration:STUDY_SWIPE_MS,syncStackDuration:true,complete:completeCardTransition});
 
     function completeCardTransition(){
       if(session!==activeSession)return;
