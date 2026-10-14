@@ -23,8 +23,8 @@
   --radius-dialog: 16px;
   --study-transition-duration: 580ms;
   --study-transition-easing: cubic-bezier(.42,0,.58,1);
-  --study-swipe-duration: 510ms;
-  --study-swipe-easing: cubic-bezier(.35,.12,.25,1);
+  --study-swipe-duration: 500ms;
+  --study-swipe-easing: cubic-bezier(.22,.68,.32,1);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-synthesis: none;
   text-rendering: optimizeLegibility;

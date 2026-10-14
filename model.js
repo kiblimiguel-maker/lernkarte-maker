@@ -225,9 +225,15 @@
     for (const [cardId, result] of Object.entries(session.resultsByCardId)) if (result !== null) visited.add(cardId);
     const unvisited = session.cards.filter(card => !visited.has(card.id));
     if (unvisited.length < 2) return false;
+    const originalOrder = unvisited.map(card => card.id);
     for (let index = unvisited.length - 1; index > 0; index--) {
       const target = Math.floor(random() * (index + 1));
       [unvisited[index], unvisited[target]] = [unvisited[target], unvisited[index]];
+    }
+    // A random shuffle can legitimately reproduce the same order. Make the
+    // action visibly effective for small stacks instead of silently doing nothing.
+    if (unvisited.every((card, index) => card.id === originalOrder[index])) {
+      [unvisited[0], unvisited[1]] = [unvisited[1], unvisited[0]];
     }
     let next = 0;
     session.cards = session.cards.map(card => visited.has(card.id) ? card : unvisited[next++]);

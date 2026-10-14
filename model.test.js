@@ -196,6 +196,12 @@ assert.equal(navigateStudySession(singleCardSession, 1), false, 'a single-card s
 assert.equal(createStudySession([]).currentCardId, null, 'an empty stack has no invalid current card');
 assert.equal(navigateStudySession(createStudySession([]), -1), false, 'an empty stack safely rejects navigation');
 
+const predictableShuffleSession = createStudySession(navigationCards);
+const predictableBefore = predictableShuffleSession.cards.map(card => card.id);
+assert.equal(shuffleUnvisitedStudyCards(predictableShuffleSession, () => 0.99), true, 'shuffle reports a successful change when random samples initially preserve order');
+assert.notDeepEqual(predictableShuffleSession.cards.map(card => card.id), predictableBefore, 'shuffle always produces a visibly different pending order');
+assert.equal(predictableShuffleSession.currentCardId, predictableBefore[0], 'shuffle leaves the visible card in place');
+
 const rapidSession = createStudySession(navigationCards);
 for (const action of [1, 1, -1, 'shuffle', 1, -1, 'shuffle', 1, 1, -1]) {
   if (action === 'shuffle') shuffleUnvisitedStudyCards(rapidSession, () => 0.37);
