@@ -179,6 +179,7 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .preview-line { display: grid; grid-template-columns: 34px minmax(0, 1fr) minmax(0, 1fr) 36px; align-items: center; gap: 7px; padding: 7px 0; border-top: 1px solid var(--line); font-size: 10px; }
 .preview-index { color: var(--muted); }
 .preview-line input { min-width: 0; }
+.preview-example { grid-column: 2 / 4; color: var(--muted) !important; }
 .preview-line.bad { grid-template-columns: 64px 1fr; color: var(--danger); line-height: 1.5; }
 .preview-line code { color: #c3ccd1; white-space: pre-wrap; overflow-wrap: anywhere; }
 .row-remove { width: 36px; height: 36px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); }
@@ -362,7 +363,19 @@ button:disabled { opacity: .45; cursor: not-allowed; }
   transform: rotateY(180deg);
   background: #4FC3F7;
 }
-.study-face > span:nth-child(2) {
+.study-face > .study-copy {
+  display: flex;
+  max-width: 100%;
+  max-height: 100%;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  text-align: center;
+}
+.study-copy-main {
   max-width: 100%;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
@@ -371,6 +384,19 @@ button:disabled { opacity: .45; cursor: not-allowed; }
   line-height: 1.4;
   text-align: center;
 }
+.study-example {
+  max-width: min(100%, 620px);
+  overflow-wrap: anywhere;
+  color: #52636d;
+  font-size: clamp(14px, 2vw, 18px);
+  font-weight: 450;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  text-align: center;
+}
+.study-back .study-example { color: #24566b; }
+.card-content-main { display: block; overflow-wrap: anywhere; white-space: pre-wrap; }
+.card-example { display: block; margin-top: 4px; color: var(--muted); font-size: 11px; line-height: 1.45; white-space: pre-wrap; }
 .study-face .card-side-label {
   position: absolute;
   top: 18px;

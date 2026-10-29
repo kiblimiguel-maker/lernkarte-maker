@@ -30,6 +30,8 @@
       setId,
       front: row.front,
       back: row.back,
+      ...(row.frontExampleSentence ? { frontExampleSentence: row.frontExampleSentence } : {}),
+      ...(row.backExampleSentence ? { backExampleSentence: row.backExampleSentence } : {}),
       position: position + index,
       correctCount: 0,
       incorrectCount: 0,
@@ -74,6 +76,9 @@
     for (const card of records(cards)) {
       if (card.setId !== setId) continue;
       [card.front, card.back] = [card.back, card.front];
+      [card.frontExampleSentence, card.backExampleSentence] = [card.backExampleSentence, card.frontExampleSentence];
+      if (!card.frontExampleSentence) delete card.frontExampleSentence;
+      if (!card.backExampleSentence) delete card.backExampleSentence;
       if (timestamp) card.updatedAt = timestamp;
       swapped++;
     }

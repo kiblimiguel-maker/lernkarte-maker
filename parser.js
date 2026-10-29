@@ -1,6 +1,16 @@
 (() => {
   'use strict';
 
+  function parseExampleSide(value) {
+    const text = String(value ?? '').trim();
+    const match = text.match(/^(.*?)\s*\(\(([\s\S]*)\)\)\s*$/);
+    if (!match) return null;
+
+    const term = match[1].trim();
+    const exampleSentence = match[2].trim();
+    return term && exampleSentence ? { term, exampleSentence } : null;
+  }
+
   function parseImport(text) {
     const rows = [];
     const errors = [];
@@ -33,14 +43,15 @@
       } else if (!back) {
         errors.push({ line: index + 1, text: raw, reason: 'Rückseite fehlt' });
       } else {
-        rows.push({ line: index + 1, front, back });
+        const example = parseExampleSide(back);
+        rows.push({ line: index + 1, front, back: example?.term || back, ...(example ? { backExampleSentence: example.exampleSentence } : {}) });
       }
     });
 
     return { rows, errors };
   }
 
-  const api = { parseImport };
+  const api = { parseImport, parseExampleSide };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (typeof globalThis !== 'undefined') globalThis.WortwerkParser = api;
 })();

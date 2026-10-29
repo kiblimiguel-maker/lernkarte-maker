@@ -119,9 +119,24 @@ assert.deepEqual(copiedCards.map(card => [card.correctCount, card.incorrectCount
 ], 'copied cards start with independent learning progress');
 assert.deepEqual(sourceForCopy, sourceSnapshot, 'copying does not mutate source cards or their progress');
 
+const importedExampleCards = createImportedCards([{
+  front: 'eine Burg', back: 'un château fort', backExampleSentence: 'Le village a un vieux château fort.'
+}], {
+  setId: 'example-set', position: 0, timestamp: '2026-10-29T12:00:00.000Z', createId: () => 'example-card'
+});
+assert.equal(importedExampleCards[0].back, 'un château fort', 'the example markup is not stored as part of the term');
+assert.equal(importedExampleCards[0].backExampleSentence, 'Le village a un vieux château fort.');
+assert.equal(normalizeLibrary(JSON.parse(JSON.stringify({ cards: importedExampleCards }))).cards[0].backExampleSentence, 'Le village a un vieux château fort.', 'example sentences persist through library normalization and reload');
+const copiedExampleCard = createCopiedCards(importedExampleCards, {
+  setId: 'example-copy', timestamp: '2026-10-29T12:01:00.000Z', createId: () => 'example-copy-card'
+})[0];
+assert.deepEqual([copiedExampleCard.back, copiedExampleCard.backExampleSentence], [
+  'un château fort', 'Le village a un vieux château fort.'
+], 'copying a card preserves its example sentence');
+
 const swapCards = [
-  { id: 'swap-1', setId: 'set-1', front: 'das Haus', back: 'la maison', position: 0, correctCount: 2, attemptCount: 2, updatedAt: 'old' },
-  { id: 'swap-2', setId: 'set-1', front: 'la rue', back: 'die Strasse', position: 1, incorrectCount: 1, attemptCount: 1 },
+  { id: 'swap-1', setId: 'set-1', front: 'das Haus', back: 'la maison', backExampleSentence: 'La maison est ancienne.', position: 0, correctCount: 2, attemptCount: 2, updatedAt: 'old' },
+  { id: 'swap-2', setId: 'set-1', front: 'la rue', back: 'die Strasse', frontExampleSentence: 'La rue est calme.', position: 1, incorrectCount: 1, attemptCount: 1 },
   { id: 'swap-other', setId: 'set-2', front: '2+2', back: '4', attemptCount: 3 }
 ];
 const swapOtherSnapshot = structuredClone(swapCards[2]);
@@ -129,6 +144,9 @@ assert.equal(swapSetCardSides(swapCards, 'set-1', '2026-10-12T12:30:00.000Z'), 2
 assert.deepEqual(swapCards.slice(0, 2).map(card => [card.front, card.back, card.id, card.setId, card.position, card.attemptCount]), [
   ['la maison', 'das Haus', 'swap-1', 'set-1', 0, 2], ['die Strasse', 'la rue', 'swap-2', 'set-1', 1, 1]
 ]);
+assert.deepEqual(swapCards.slice(0, 2).map(card => [card.frontExampleSentence || null, card.backExampleSentence || null]), [
+  ['La maison est ancienne.', null], [null, 'La rue est calme.']
+], 'side swapping keeps each example sentence attached to its term');
 assert.equal(swapCards[0].updatedAt, '2026-10-12T12:30:00.000Z');
 assert.deepEqual(swapCards[2], swapOtherSnapshot, 'side swap does not affect another stack');
 assert.equal(swapSetCardSides([], 'set-1'), 0, 'side swap safely handles an empty stack');

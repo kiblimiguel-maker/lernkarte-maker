@@ -28,6 +28,22 @@ oneCard('das Haus = la maison = Zusatzinformation', 'das Haus', 'la maison = Zus
 oneCard('x = y = z', 'x', 'y = z');
 oneCard('\uFEFF1. déjà vu = schon gesehen', 'déjà vu', 'schon gesehen');
 
+const exampleImport = parseImport('eine Burg = un château fort ((Le village a un vieux château fort.))');
+assert.equal(exampleImport.errors.length, 0);
+assert.deepEqual(exampleImport.rows[0], {
+  line: 1,
+  front: 'eine Burg',
+  back: 'un château fort',
+  backExampleSentence: 'Le village a un vieux château fort.'
+}, 'double parentheses split the back into a term and an example sentence');
+const nestedPunctuationExample = parseImport('das Schloss = le château ((Le château (ancien) est près du village.))');
+assert.deepEqual([nestedPunctuationExample.rows[0].back, nestedPunctuationExample.rows[0].backExampleSentence], [
+  'le château', 'Le château (ancien) est près du village.'
+], 'single parentheses inside an example sentence are preserved');
+oneCard('der Artikel = le château (m.)', 'der Artikel', 'le château (m.)');
+oneCard('Doppelte Klammer bleibt bei fehlerhafter Eingabe = Begriff ((ohne Abschluss)', 'Doppelte Klammer bleibt bei fehlerhafter Eingabe', 'Begriff ((ohne Abschluss)');
+oneCard('Leere Beispielsatzmarkierung = Begriff (())', 'Leere Beispielsatzmarkierung', 'Begriff (())');
+
 const invalid = parseImport([
   'der Hund',
   '= la maison',
