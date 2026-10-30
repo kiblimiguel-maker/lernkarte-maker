@@ -1,4 +1,17 @@
+import { inject } from '@vercel/analytics';
 import { isSupabaseConfigured, supabase } from './supabaseClient.js';
+
+inject({
+  mode: import.meta.env.PROD ? 'production' : 'development',
+  beforeSend(event) {
+    // OAuth callbacks can include one-time codes or tokens in the URL.
+    // Keep those parameters out of analytics while retaining the page view.
+    const url = new URL(event.url, window.location.origin);
+    url.search = '';
+    url.hash = '';
+    return { ...event, url: url.toString() };
+  }
+});
 
 const authScreen = document.querySelector('#auth-screen');
 const bootScreen = document.querySelector('#boot-screen');
