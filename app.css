@@ -170,7 +170,18 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .emoji-option:hover, .emoji-option.selected { border-color: var(--line-strong); background: var(--surface-raised); }
 .emoji-option.selected { outline: 1px solid var(--soft); }
 .sr-only { position: absolute !important; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+.import-dialog .dialog-head { margin-bottom: 16px; }
+.import-description { max-width: 64ch; margin: 7px 0 0; color: var(--muted); font-size: 12px; line-height: 1.55; }
+.import-description code { padding: 2px 5px; border: 1px solid var(--line); border-radius: 5px; background: var(--surface); color: var(--soft); font-size: 11px; }
+.import-source { padding-bottom: 14px; border-bottom: 1px solid var(--line); }
+.import-source .field-label { margin-top: 0; }
+.import-source textarea { min-height: 150px; }
 .import-meta { margin-top: 12px; }
+.import-meta .field-label { margin-top: 0; }
+.import-actions { align-items: center; justify-content: space-between; gap: 16px; }
+.import-action-hint { max-width: 42%; margin: 0; color: var(--muted); font-size: 11px; line-height: 1.45; }
+.import-action-buttons { display: flex; flex: none; align-items: center; gap: 8px; }
+.import-action-buttons #import-submit { min-width: 168px; }
 .import-file-row { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
 .file-button { cursor: pointer; }
 .import-file-row input[type="file"] { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
@@ -562,6 +573,10 @@ button:disabled { opacity: .45; cursor: not-allowed; }
   .study-foot .text-button { margin-left: 0; }
   .study-foot #create-missed-set { margin-left: auto; }
   .dialog form { padding: 18px; }
+  .import-actions { align-items: stretch; flex-direction: column; gap: 10px; }
+  .import-action-hint { max-width: none; }
+  .import-action-buttons { justify-content: flex-end; }
+  .import-action-buttons #import-submit { min-width: 0; }
   .color-palette { grid-template-columns: repeat(5, minmax(38px, 1fr)); gap: 9px; }
   .emoji-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); max-height: 165px; }
   .preview-line { grid-template-columns: 27px minmax(0, 1fr) minmax(0, 1fr) 34px; gap: 5px; }
