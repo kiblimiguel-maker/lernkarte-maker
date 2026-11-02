@@ -165,7 +165,7 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .theme-choice-group { min-width: 0; margin: 0; padding: 0; border: 0; }
 .theme-choice-group legend { margin-bottom: 5px; color: var(--text); font-size: 13px; font-weight: 600; }
 .theme-choice-hint { margin: 0 0 13px; color: var(--muted); font-size: 11px; line-height: 1.5; }
-.card-theme-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.card-theme-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .card-theme-option { position: relative; min-width: 0; display: block; padding: 12px; border: 1px solid var(--line); border-radius: 9px; background: #090d11; cursor: pointer; transition: border-color .14s, background-color .14s; }
 .card-theme-option:hover { border-color: var(--line-strong); background: var(--surface); }
 .card-theme-option.is-selected { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, #090d11); }

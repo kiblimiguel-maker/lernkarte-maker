@@ -2,21 +2,34 @@
   'use strict';
 
   const STORAGE_KEY = 'wortwerk-card-theme-v1';
-  const DEFAULT_THEME_ID = 'ion-blue-drift-silver';
+  const DEFAULT_THEME_ID = 'wortwerk-original';
 
   // Card surfaces use the exact reference colors. Text and gender markers are
   // chosen per surface so that the cards remain readable in every palette.
   const themes = [
     {
+      id: 'wortwerk-original',
+      name: 'Wortwerk Original',
+      description: 'Das ursprüngliche helle Kartendesign',
+      front: {
+        surface: '#DDE3EA', text: '#0B0D10', muted: '#0B0D10', border: '#C6D0D6',
+        'gender-masculine': '#063D6B', 'gender-feminine': '#84162E'
+      },
+      back: {
+        surface: '#EAF2F8', text: '#0B0D10', muted: '#0B0D10', border: '#C6D0D6',
+        'gender-masculine': '#063D6B', 'gender-feminine': '#84162E'
+      }
+    },
+    {
       id: 'ultra-violet-soft-apricot',
       name: 'Ultra Violet · Soft Apricot',
       description: 'Violett und warmes Apricot',
       front: {
-        surface: '#6A00F4', text: '#FFD6A5', muted: '#E7C6F8', border: '#8A3BEA',
+        surface: '#6A00F4', text: '#FFFFFF', muted: '#FFFFFF', border: '#8A3BEA',
         'gender-masculine': '#A8D9FF', 'gender-feminine': '#FFC0C8'
       },
       back: {
-        surface: '#FFD6A5', text: '#6A00F4', muted: '#60467B', border: '#E7BD86',
+        surface: '#FFD6A5', text: '#0B0D10', muted: '#0B0D10', border: '#E7BD86',
         'gender-masculine': '#063D6B', 'gender-feminine': '#84162E'
       }
     },
@@ -25,11 +38,11 @@
       name: 'Sky Mint · Graphite',
       description: 'Helles Mint und tiefes Graphit',
       front: {
-        surface: '#B8F7E4', text: '#25272C', muted: '#526A63', border: '#91DDC8',
+        surface: '#B8F7E4', text: '#0B0D10', muted: '#0B0D10', border: '#91DDC8',
         'gender-masculine': '#063D6B', 'gender-feminine': '#84162E'
       },
       back: {
-        surface: '#25272C', text: '#B8F7E4', muted: '#A2CFC2', border: '#414950',
+        surface: '#25272C', text: '#FFFFFF', muted: '#FFFFFF', border: '#414950',
         'gender-masculine': '#A8D9FF', 'gender-feminine': '#FFC0C8'
       }
     },
@@ -38,11 +51,11 @@
       name: 'Ion Blue · Drift Silver',
       description: 'Klares Blau und kühles Silber',
       front: {
-        surface: '#4FC3F7', text: '#25272C', muted: '#244456', border: '#31A9E1',
+        surface: '#4FC3F7', text: '#0B0D10', muted: '#0B0D10', border: '#31A9E1',
         'gender-masculine': '#063D6B', 'gender-feminine': '#84162E'
       },
       back: {
-        surface: '#DDE3EA', text: '#176A8F', muted: '#52636D', border: '#C6D0D6',
+        surface: '#DDE3EA', text: '#0B0D10', muted: '#0B0D10', border: '#C6D0D6',
         'gender-masculine': '#063D6B', 'gender-feminine': '#84162E'
       }
     }

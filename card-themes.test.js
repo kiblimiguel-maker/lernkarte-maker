@@ -14,8 +14,10 @@ function contrast(first, second) {
   return (values[0] + 0.05) / (values[1] + 0.05);
 }
 
-assert.equal(themes.length, 3, 'exactly the three reference palettes are available');
+assert.equal(themes.length, 4, 'the original design and all three reference palettes are available');
+assert.equal(themes[0].id, DEFAULT_THEME_ID, 'the original design is the default');
 assert.deepEqual(themes.map(theme => [theme.front.surface, theme.back.surface]), [
+  ['#DDE3EA', '#EAF2F8'],
   ['#6A00F4', '#FFD6A5'],
   ['#B8F7E4', '#25272C'],
   ['#4FC3F7', '#DDE3EA']
@@ -24,6 +26,8 @@ assert.deepEqual(themes.map(theme => [theme.front.surface, theme.back.surface]),
 for (const theme of themes) {
   for (const side of ['front', 'back']) {
     const face = theme[side];
+    assert.ok(['#0B0D10', '#FFFFFF'].includes(face.text), `${theme.name} ${side} uses black or white text`);
+    assert.equal(face.muted, face.text, `${theme.name} ${side} supporting text keeps the same high-contrast color`);
     assert.ok(contrast(face.surface, face.text) >= 4.5, `${theme.name} ${side} text has readable contrast`);
     assert.ok(contrast(face.surface, face.muted) >= 4.5, `${theme.name} ${side} supporting text has readable contrast`);
     assert.ok(contrast(face.surface, face['gender-masculine']) >= 4.5, `${theme.name} ${side} masculine marker has readable contrast`);
@@ -46,7 +50,7 @@ const applied = new Map();
 const root = { dataset: {}, style: { setProperty(key, value) { applied.set(key, value); } } };
 assert.equal(applyTheme(themes[1].id, root), themes[1].id);
 assert.equal(root.dataset.cardTheme, themes[1].id);
-assert.equal(applied.get('--study-front-surface'), '#B8F7E4');
-assert.equal(applied.get('--study-back-gender-feminine'), '#FFC0C8');
+assert.equal(applied.get('--study-front-surface'), '#6A00F4');
+assert.equal(applied.get('--study-back-gender-feminine'), '#84162E');
 
 console.log('Card theme tests passed');
