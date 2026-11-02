@@ -6,7 +6,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node parser.test.js && node model.test.js && node presentation.test.js"
+    "test": "node parser.test.js && node model.test.js && node presentation.test.js && node card-themes.test.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "2.117.2",

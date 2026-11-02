@@ -83,7 +83,7 @@ async function loadExistingApp() {
   bootScreen.hidden = false;
   appShell.hidden = true;
   appLoaded = true;
-  import('./parser.js').then(() => import('./presentation.js')).then(() => import('./model.js')).then(() => import('./repository.js')).then(module => {
+  import('./parser.js').then(() => import('./presentation.js')).then(() => import('./card-themes.js')).then(() => import('./model.js')).then(() => import('./repository.js')).then(module => {
     window.WortwerkRepository = module;
     return import('./app.js');
   }).then(() => {

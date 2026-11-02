@@ -10,6 +10,9 @@
   ];
   const colors = palette.map(([hex])=>hex);
   const safeColor = (value,fallback=colors[0]) => typeof value==='string' && /^#[0-9a-f]{6}$/i.test(value) ? value : fallback;
+  const cardThemes = window.WortwerkCardThemes;
+  let activeCardThemeId = cardThemes.readThemeId();
+  cardThemes.applyTheme(activeCardThemeId);
   const emojiChoices = [
     ['📚','lernen buch bücher bildung','Lernen'],['📖','buch lesen','Lernen'],['✏️','stift schreiben','Lernen'],['📝','notizen schreiben','Lernen'],['🎓','abschluss schule','Lernen'],['💡','idee wissen','Lernen'],['🧠','gehirn wissen','Lernen'],['🔬','wissenschaft labor','Lernen'],['🧪','chemie labor','Lernen'],['🧮','mathe rechnen','Lernen'],['💻','computer informatik','Lernen'],['🌍','welt erde geografie','Lernen'],
     ['🇬🇧','england flagge englisch sprache','Sprachen'],['🇫🇷','frankreich flagge französisch sprache','Sprachen'],['🇪🇸','spanien flagge spanisch sprache','Sprachen'],['🇮🇹','italien flagge italienisch sprache','Sprachen'],['🇩🇪','deutschland flagge deutsch sprache','Sprachen'],['🗣️','sprechen sprache','Sprachen'],['💬','dialog sprache','Sprachen'],['🔤','buchstaben alphabet','Sprachen'],['📜','geschichte dokument','Sprachen'],['✍️','schreiben text','Sprachen'],
@@ -57,6 +60,20 @@
     slot.backText.innerHTML=genderMarkup(back.term);slot.backExampleText.textContent=back.exampleSentence?`(${back.exampleSentence})`:'';slot.backExampleText.hidden=!back.exampleSentence;
   }
   function toast(message){const el=document.createElement('div');el.className='toast';el.textContent=message;document.body.append(el);setTimeout(()=>el.remove(),2400)}
+  function renderCardThemeOptions(){
+    const container=$('#card-theme-options');
+    container.innerHTML=cardThemes.themes.map(theme=>`<label class="card-theme-option${theme.id===activeCardThemeId?' is-selected':''}"><input class="card-theme-radio" type="radio" name="card-theme" value="${esc(theme.id)}"${theme.id===activeCardThemeId?' checked':''}><span class="card-theme-option-copy"><span class="card-theme-option-heading"><strong>${esc(theme.name)}</strong><span class="card-theme-selected-label" aria-live="polite">${theme.id===activeCardThemeId?'Ausgewählt':''}</span></span><small>${esc(theme.description)}</small><span class="card-theme-preview" aria-hidden="true">${['front','back'].map(side=>{const palette=theme[side];return `<span class="card-theme-preview-face" style="--preview-surface:${palette.surface};--preview-text:${palette.text};--preview-muted:${palette.muted};--preview-border:${palette.border};--preview-gender-m:${palette['gender-masculine']};--preview-gender-f:${palette['gender-feminine']}"><span class="card-theme-preview-label">${side==='front'?'Vorderseite':'Rückseite'}</span><span class="card-theme-preview-term"><span class="gender-${side==='front'?'masculine':'feminine'}">${side==='front'?'un':'une'}</span> ${side==='front'?'livre':'maison'}</span><span class="card-theme-preview-example">(${side==='front'?'un livre ancien':'une maison calme'})</span></span>`}).join('')}</span></span></label>`).join('');
+  }
+  function applySelectedCardTheme(themeId){
+    const result=cardThemes.saveTheme(themeId);
+    activeCardThemeId=cardThemes.applyTheme(result.theme.id);
+    document.querySelectorAll('.card-theme-option').forEach(option=>{
+      const selected=option.querySelector('.card-theme-radio').value===activeCardThemeId;
+      option.classList.toggle('is-selected',selected);
+      option.querySelector('.card-theme-selected-label').textContent=selected?'Ausgewählt':'';
+    });
+    if(!result.persisted)toast('Farbschema übernommen. Die dauerhafte Speicherung ist in diesem Browser nicht verfügbar.');
+  }
   function render(){
     renderNav();
     if(activeSet&&setById(activeSet)){renderSet();return}
@@ -495,6 +512,14 @@
   function finishStudy(){if(!session)return;const results=window.WortwerkModel.getStudyResults(session);if(!session.completionRecorded)completeSession({id:session.id,setId:session.setId,startedAt:session.startedAt,cardIds:session.cards.map(card=>card.id),results});const {known,missed,unrated,percentage}=window.WortwerkModel.summarizeResults(results);const evaluated=known+missed,circumference=2*Math.PI*42,knownLength=circumference*(evaluated?known/evaluated:0),missedLength=circumference*(evaluated?missed/evaluated:0);$('#study-progress-bar').style.width='100%';$('#study-progress-track').setAttribute('aria-valuenow',String(session.cards.length));$('#complete-copy').textContent=`${evaluated} von ${session.cards.length} Karten bewertet`;$('#score-value').textContent=`${percentage}%`;$('#score-ring-known').style.strokeDasharray=`${knownLength} ${circumference-knownLength}`;$('#score-ring-missed').style.strokeDasharray=`${missedLength} ${circumference-missedLength}`;$('#score-ring-missed').style.strokeDashoffset=String(-knownLength);$('#result-chart').setAttribute('aria-label',`${percentage} Prozent richtig: ${known} gewusst und ${missed} noch zu üben`);$('#result-known').textContent=String(known);$('#result-missed').textContent=String(missed);$('#result-unrated').textContent=String(unrated);$('#retry-missed').hidden=missed===0;$('#study-complete').hidden=false;updateMissedSetActions()}
   function retryMissed(){if(!session)return;const cards=session.cards.filter(card=>window.WortwerkModel.getStudyResult(session,card.id)===false);if(!cards.length)return;const retryState=window.WortwerkModel.createStudySession(cards);session={...retryState,id:id(),setId:session.setId,startedAt:new Date().toISOString(),flipped:false,missedCardIdsCopied:new Set(),missedSetPending:false};activeSlotIndex=0;saveSessionProgress();$('#study-title').textContent=`Wiederholung · ${setById(session.setId)?.name||'Lernsession'}`;$('#study-complete').hidden=true;$('#shuffle-toggle').setAttribute('aria-pressed','false');renderStudyCard()}
   const studyDialog=$('#study-dialog');
+  const settingsDialog=$('#settings-dialog');
+  $('#card-theme-open').onclick=()=>{renderCardThemeOptions();settingsDialog.showModal()};
+  $('#card-theme-options').addEventListener('change',event=>{
+    const input=event.target.closest('.card-theme-radio');
+    if(input?.checked)applySelectedCardTheme(input.value);
+  });
+  $('#settings-close').onclick=()=>settingsDialog.close();
+  $('#settings-done').onclick=()=>settingsDialog.close();
   function syncFullscreenButton(){const active=document.fullscreenElement===studyDialog||studyDialog.classList.contains('is-fullscreen'),button=$('#study-expand');button.setAttribute('aria-pressed',String(active));button.setAttribute('aria-label',active?'Vollbild verlassen':'Lernmodus im Vollbild öffnen');button.title=active?'Vollbild verlassen':'Vollbild';$('#study-expand-label').textContent=active?'Fenster':'Vollbild'}
   async function toggleStudyFullscreen(){if(document.fullscreenElement===studyDialog||studyDialog.classList.contains('is-fullscreen')){studyDialog.classList.remove('is-fullscreen');if(document.fullscreenElement===studyDialog){try{await document.exitFullscreen()}catch(error){console.warn('Vollbildmodus konnte nicht beendet werden.',error)}}syncFullscreenButton();return}try{if(studyDialog.requestFullscreen)await studyDialog.requestFullscreen();else studyDialog.classList.add('is-fullscreen')}catch(error){studyDialog.classList.add('is-fullscreen')}syncFullscreenButton()}
   function endStudy(){const setId=session?.setId;clearActiveStudyTransition();if(document.fullscreenElement===studyDialog)document.exitFullscreen().catch(()=>{});studyDialog.classList.remove('is-fullscreen');studyDialog.close();session=null;syncFullscreenButton();if(setId){const label=studyActionLabel(setId);if(activeSet===setId){const button=$('#start-study');if(button)button.textContent=label}document.querySelectorAll('[data-quick-study]').forEach(button=>{if(button.dataset.quickStudy===setId)button.textContent=label})}}
