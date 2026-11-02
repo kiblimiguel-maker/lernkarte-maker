@@ -17,6 +17,12 @@
   --cyan: var(--neon);
   --success: color-mix(in srgb, var(--neon) 52%, var(--candy));
   --danger: #e69b98;
+  --gender-masculine-dark-surface: #78bde8;
+  --gender-feminine-dark-surface: #ef9292;
+  --gender-masculine-light-surface: #2563a3;
+  --gender-feminine-light-surface: #b23d4a;
+  --gender-masculine-cyan-surface: #075477;
+  --gender-feminine-cyan-surface: #a52d3b;
   --shadow: 0 20px 60px #0009;
   --radius-control: 8px;
   --radius-card: 10px;
@@ -406,13 +412,11 @@ button:disabled { opacity: .45; cursor: not-allowed; }
   text-align: center;
 }
 .study-back .study-example { color: #24566b; }
-.study-copy-main .gender-masculine { color: #2563a3; }
-.study-copy-main .gender-feminine { color: #b23d4a; }
-.study-back .study-copy-main .gender-masculine { color: #075477; }
-.study-back .study-copy-main .gender-feminine { color: #a52d3b; }
+.study-front { --gender-masculine-color: var(--gender-masculine-light-surface); --gender-feminine-color: var(--gender-feminine-light-surface); }
+.study-back { --gender-masculine-color: var(--gender-masculine-cyan-surface); --gender-feminine-color: var(--gender-feminine-cyan-surface); }
+.gender-masculine { color: var(--gender-masculine-color, var(--gender-masculine-dark-surface)); }
+.gender-feminine { color: var(--gender-feminine-color, var(--gender-feminine-dark-surface)); }
 .card-content-main { display: block; overflow-wrap: anywhere; white-space: pre-wrap; }
-.flash-row .gender-masculine { color: #78bde8; }
-.flash-row .gender-feminine { color: #ef9292; }
 .card-example { display: block; margin-top: 4px; color: var(--muted); font-size: 11px; line-height: 1.45; white-space: pre-wrap; }
 .study-face .card-side-label {
   position: absolute;
