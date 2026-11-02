@@ -19,10 +19,8 @@
   --danger: #e69b98;
   --gender-masculine-dark-surface: #78bde8;
   --gender-feminine-dark-surface: #ef9292;
-  --gender-masculine-light-surface: #2563a3;
-  --gender-feminine-light-surface: #b23d4a;
-  --gender-masculine-cyan-surface: #075477;
-  --gender-feminine-cyan-surface: #a52d3b;
+  --gender-masculine-card-surface: #1558a6;
+  --gender-feminine-card-surface: #b42336;
   --shadow: 0 20px 60px #0009;
   --radius-control: 8px;
   --radius-card: 10px;
@@ -378,7 +376,7 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 }
 .study-back {
   transform: rotateY(180deg);
-  background: #4FC3F7;
+  background: #EAF2F8;
 }
 .study-face > .study-copy {
   display: flex;
@@ -412,10 +410,10 @@ button:disabled { opacity: .45; cursor: not-allowed; }
   text-align: center;
 }
 .study-back .study-example { color: #24566b; }
-.study-front { --gender-masculine-color: var(--gender-masculine-light-surface); --gender-feminine-color: var(--gender-feminine-light-surface); }
-.study-back { --gender-masculine-color: var(--gender-masculine-cyan-surface); --gender-feminine-color: var(--gender-feminine-cyan-surface); }
+.study-front, .study-back { --gender-masculine-color: var(--gender-masculine-card-surface); --gender-feminine-color: var(--gender-feminine-card-surface); }
 .gender-masculine { color: var(--gender-masculine-color, var(--gender-masculine-dark-surface)); }
 .gender-feminine { color: var(--gender-feminine-color, var(--gender-feminine-dark-surface)); }
+.study-copy-main .gender-masculine, .study-copy-main .gender-feminine { font-weight: 700; }
 .card-content-main { display: block; overflow-wrap: anywhere; white-space: pre-wrap; }
 .card-example { display: block; margin-top: 4px; color: var(--muted); font-size: 11px; line-height: 1.45; white-space: pre-wrap; }
 .study-face .card-side-label {
