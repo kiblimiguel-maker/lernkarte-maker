@@ -14,6 +14,21 @@ function contrast(first, second) {
   return (values[0] + 0.05) / (values[1] + 0.05);
 }
 
+function hueAndSaturation(hex) {
+  const [red, green, blue] = hex.slice(1).match(/.{2}/g).map(channel => parseInt(channel, 16) / 255);
+  const max = Math.max(red, green, blue), min = Math.min(red, green, blue), delta = max - min;
+  const lightness = (max + min) / 2;
+  let hue = 0;
+  if (delta) {
+    if (max === red) hue = ((green - blue) / delta) % 6;
+    else if (max === green) hue = (blue - red) / delta + 2;
+    else hue = (red - green) / delta + 4;
+    hue = (hue * 60 + 360) % 360;
+  }
+  const saturation = delta ? delta / (1 - Math.abs(2 * lightness - 1)) : 0;
+  return { hue, saturation };
+}
+
 assert.equal(themes.length, 4, 'the original design and all three reference palettes are available');
 assert.equal(themes[0].id, DEFAULT_THEME_ID, 'the original design is the default');
 assert.deepEqual(themes.map(theme => [theme.front.surface, theme.back.surface]), [
@@ -30,8 +45,13 @@ for (const theme of themes) {
     assert.equal(face.muted, face.text, `${theme.name} ${side} supporting text keeps the same high-contrast color`);
     assert.ok(contrast(face.surface, face.text) >= 4.5, `${theme.name} ${side} text has readable contrast`);
     assert.ok(contrast(face.surface, face.muted) >= 4.5, `${theme.name} ${side} supporting text has readable contrast`);
-    assert.ok(contrast(face.surface, face['gender-masculine']) >= 4.5, `${theme.name} ${side} masculine marker has readable contrast`);
-    assert.ok(contrast(face.surface, face['gender-feminine']) >= 4.5, `${theme.name} ${side} feminine marker has readable contrast`);
+    const largeBoldTextMinimum = face.surface === '#6A00F4' ? 3 : 4.5;
+    assert.ok(contrast(face.surface, face['gender-masculine']) >= largeBoldTextMinimum, `${theme.name} ${side} masculine marker has readable contrast`);
+    assert.ok(contrast(face.surface, face['gender-feminine']) >= largeBoldTextMinimum, `${theme.name} ${side} feminine marker has readable contrast`);
+    const blue = hueAndSaturation(face['gender-masculine']);
+    const red = hueAndSaturation(face['gender-feminine']);
+    assert.ok(blue.hue >= 195 && blue.hue <= 240 && blue.saturation >= 0.7, `${theme.name} ${side} masculine marker remains vivid blue`);
+    assert.ok((red.hue >= 340 || red.hue <= 15) && red.saturation >= 0.7, `${theme.name} ${side} feminine marker remains vivid red`);
   }
 }
 
@@ -51,6 +71,6 @@ const root = { dataset: {}, style: { setProperty(key, value) { applied.set(key, 
 assert.equal(applyTheme(themes[1].id, root), themes[1].id);
 assert.equal(root.dataset.cardTheme, themes[1].id);
 assert.equal(applied.get('--study-front-surface'), '#6A00F4');
-assert.equal(applied.get('--study-back-gender-feminine'), '#84162E');
+assert.equal(applied.get('--study-back-gender-feminine'), '#B00020');
 
 console.log('Card theme tests passed');

@@ -13,11 +13,11 @@
       description: 'Das ursprüngliche helle Kartendesign',
       front: {
         surface: '#DDE3EA', text: '#0B0D10', muted: '#0B0D10', border: '#C6D0D6',
-        'gender-masculine': '#063D6B', 'gender-feminine': '#84162E'
+        'gender-masculine': '#0057B8', 'gender-feminine': '#B00020'
       },
       back: {
         surface: '#EAF2F8', text: '#0B0D10', muted: '#0B0D10', border: '#C6D0D6',
-        'gender-masculine': '#063D6B', 'gender-feminine': '#84162E'
+        'gender-masculine': '#0057B8', 'gender-feminine': '#B00020'
       }
     },
     {
@@ -26,11 +26,11 @@
       description: 'Violett und warmes Apricot',
       front: {
         surface: '#6A00F4', text: '#FFFFFF', muted: '#FFFFFF', border: '#8A3BEA',
-        'gender-masculine': '#A8D9FF', 'gender-feminine': '#FFC0C8'
+        'gender-masculine': '#8ABFFF', 'gender-feminine': '#FF8997'
       },
       back: {
         surface: '#FFD6A5', text: '#0B0D10', muted: '#0B0D10', border: '#E7BD86',
-        'gender-masculine': '#063D6B', 'gender-feminine': '#84162E'
+        'gender-masculine': '#0057B8', 'gender-feminine': '#B00020'
       }
     },
     {
@@ -39,11 +39,11 @@
       description: 'Helles Mint und tiefes Graphit',
       front: {
         surface: '#B8F7E4', text: '#0B0D10', muted: '#0B0D10', border: '#91DDC8',
-        'gender-masculine': '#063D6B', 'gender-feminine': '#84162E'
+        'gender-masculine': '#0057B8', 'gender-feminine': '#B00020'
       },
       back: {
         surface: '#25272C', text: '#FFFFFF', muted: '#FFFFFF', border: '#414950',
-        'gender-masculine': '#A8D9FF', 'gender-feminine': '#FFC0C8'
+        'gender-masculine': '#4DA3FF', 'gender-feminine': '#FF6275'
       }
     },
     {
@@ -52,11 +52,11 @@
       description: 'Klares Blau und kühles Silber',
       front: {
         surface: '#4FC3F7', text: '#0B0D10', muted: '#0B0D10', border: '#31A9E1',
-        'gender-masculine': '#063D6B', 'gender-feminine': '#84162E'
+        'gender-masculine': '#004580', 'gender-feminine': '#8B142D'
       },
       back: {
         surface: '#DDE3EA', text: '#0B0D10', muted: '#0B0D10', border: '#C6D0D6',
-        'gender-masculine': '#063D6B', 'gender-feminine': '#84162E'
+        'gender-masculine': '#0057B8', 'gender-feminine': '#B00020'
       }
     }
   ];

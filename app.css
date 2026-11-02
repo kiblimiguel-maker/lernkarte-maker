@@ -17,10 +17,10 @@
   --cyan: var(--neon);
   --success: color-mix(in srgb, var(--neon) 52%, var(--candy));
   --danger: #e69b98;
-  --gender-masculine-dark-surface: #78bde8;
-  --gender-feminine-dark-surface: #ef9292;
-  --gender-masculine-card-surface: #1558a6;
-  --gender-feminine-card-surface: #b42336;
+  --gender-masculine-dark-surface: #4da3ff;
+  --gender-feminine-dark-surface: #ff6275;
+  --gender-masculine-card-surface: #0057b8;
+  --gender-feminine-card-surface: #b00020;
   --shadow: 0 20px 60px #0009;
   --radius-control: 8px;
   --radius-card: 10px;
