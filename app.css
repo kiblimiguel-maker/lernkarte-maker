@@ -406,7 +406,13 @@ button:disabled { opacity: .45; cursor: not-allowed; }
   text-align: center;
 }
 .study-back .study-example { color: #24566b; }
+.study-copy-main .gender-masculine { color: #2563a3; }
+.study-copy-main .gender-feminine { color: #b23d4a; }
+.study-back .study-copy-main .gender-masculine { color: #075477; }
+.study-back .study-copy-main .gender-feminine { color: #a52d3b; }
 .card-content-main { display: block; overflow-wrap: anywhere; white-space: pre-wrap; }
+.flash-row .gender-masculine { color: #78bde8; }
+.flash-row .gender-feminine { color: #ef9292; }
 .card-example { display: block; margin-top: 4px; color: var(--muted); font-size: 11px; line-height: 1.45; white-space: pre-wrap; }
 .study-face .card-side-label {
   position: absolute;
