@@ -58,6 +58,84 @@
         surface: '#DDE3EA', text: '#0B0D10', muted: '#0B0D10', border: '#C6D0D6',
         'gender-masculine': '#0057B8', 'gender-feminine': '#B00020'
       }
+    },
+    {
+      id: 'plasma-magenta-core-black',
+      name: 'Plasma Magenta · Core Black',
+      description: 'Leuchtendes Magenta und tiefes Schwarz',
+      front: {
+        surface: '#E445FF', text: '#0B0D10', muted: '#0B0D10', border: '#C82FE1',
+        'gender-masculine': '#001F80', 'gender-feminine': '#75001F'
+      },
+      back: {
+        surface: '#141418', text: '#FFFFFF', muted: '#FFFFFF', border: '#34343B',
+        'gender-masculine': '#66B7FF', 'gender-feminine': '#FF7086'
+      }
+    },
+    {
+      id: 'lunar-navy-pearl-silver',
+      name: 'Lunar Navy · Pearl Silver',
+      description: 'Nächtliches Marineblau und sanftes Silber',
+      front: {
+        surface: '#111827', text: '#FFFFFF', muted: '#FFFFFF', border: '#30394A',
+        'gender-masculine': '#66B7FF', 'gender-feminine': '#FF7086'
+      },
+      back: {
+        surface: '#E7E5E0', text: '#0B0D10', muted: '#0B0D10', border: '#D0CDC7',
+        'gender-masculine': '#0057B8', 'gender-feminine': '#B00020'
+      }
+    },
+    {
+      id: 'tide-teal-mist-gray',
+      name: 'Tide Teal · Mist Gray',
+      description: 'Ruhiges Teal und kühles Nebelgrau',
+      front: {
+        surface: '#5FA6A6', text: '#0B0D10', muted: '#0B0D10', border: '#4B9292',
+        'gender-masculine': '#001F80', 'gender-feminine': '#75001F'
+      },
+      back: {
+        surface: '#E6EBEA', text: '#0B0D10', muted: '#0B0D10', border: '#CFD6D5',
+        'gender-masculine': '#0057B8', 'gender-feminine': '#B00020'
+      }
+    },
+    {
+      id: 'muted-blush-clay-beige',
+      name: 'Muted Blush · Clay Beige',
+      description: 'Gedämpftes Rosé und warmes Beige',
+      front: {
+        surface: '#D8A7A9', text: '#0B0D10', muted: '#0B0D10', border: '#C49396',
+        'gender-masculine': '#104B8B', 'gender-feminine': '#A4002D'
+      },
+      back: {
+        surface: '#E6D7C8', text: '#0B0D10', muted: '#0B0D10', border: '#D2C1B0',
+        'gender-masculine': '#0057B8', 'gender-feminine': '#B00020'
+      }
+    },
+    {
+      id: 'soft-lavender-stone-gray',
+      name: 'Soft Lavender · Stone Gray',
+      description: 'Sanftes Lavendel und helles Steingrau',
+      front: {
+        surface: '#B5A8B8', text: '#0B0D10', muted: '#0B0D10', border: '#A295A5',
+        'gender-masculine': '#174882', 'gender-feminine': '#9D1732'
+      },
+      back: {
+        surface: '#E3E0DB', text: '#0B0D10', muted: '#0B0D10', border: '#CECBC6',
+        'gender-masculine': '#0057B8', 'gender-feminine': '#B00020'
+      }
+    },
+    {
+      id: 'burnt-umber-sand-light',
+      name: 'Burnt Umber · Sand Light',
+      description: 'Warmes Umbra und heller Sand',
+      front: {
+        surface: '#7A3E2D', text: '#FFFFFF', muted: '#FFFFFF', border: '#965744',
+        'gender-masculine': '#75BCFF', 'gender-feminine': '#FF7A8C'
+      },
+      back: {
+        surface: '#E6D3B1', text: '#0B0D10', muted: '#0B0D10', border: '#D3BE98',
+        'gender-masculine': '#0057B8', 'gender-feminine': '#B00020'
+      }
     }
   ];
 

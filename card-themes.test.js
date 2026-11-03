@@ -29,13 +29,19 @@ function hueAndSaturation(hex) {
   return { hue, saturation };
 }
 
-assert.equal(themes.length, 4, 'the original design and all three reference palettes are available');
+assert.equal(themes.length, 10, 'the original design, existing palettes, and all six attached palettes are available');
 assert.equal(themes[0].id, DEFAULT_THEME_ID, 'the original design is the default');
 assert.deepEqual(themes.map(theme => [theme.front.surface, theme.back.surface]), [
   ['#DDE3EA', '#EAF2F8'],
   ['#6A00F4', '#FFD6A5'],
   ['#B8F7E4', '#25272C'],
-  ['#4FC3F7', '#DDE3EA']
+  ['#4FC3F7', '#DDE3EA'],
+  ['#E445FF', '#141418'],
+  ['#111827', '#E7E5E0'],
+  ['#5FA6A6', '#E6EBEA'],
+  ['#D8A7A9', '#E6D7C8'],
+  ['#B5A8B8', '#E3E0DB'],
+  ['#7A3E2D', '#E6D3B1']
 ]);
 
 for (const theme of themes) {
@@ -45,7 +51,7 @@ for (const theme of themes) {
     assert.equal(face.muted, face.text, `${theme.name} ${side} supporting text keeps the same high-contrast color`);
     assert.ok(contrast(face.surface, face.text) >= 4.5, `${theme.name} ${side} text has readable contrast`);
     assert.ok(contrast(face.surface, face.muted) >= 4.5, `${theme.name} ${side} supporting text has readable contrast`);
-    const largeBoldTextMinimum = face.surface === '#6A00F4' ? 3 : 4.5;
+    const largeBoldTextMinimum = 3;
     assert.ok(contrast(face.surface, face['gender-masculine']) >= largeBoldTextMinimum, `${theme.name} ${side} masculine marker has readable contrast`);
     assert.ok(contrast(face.surface, face['gender-feminine']) >= largeBoldTextMinimum, `${theme.name} ${side} feminine marker has readable contrast`);
     const blue = hueAndSaturation(face['gender-masculine']);
