@@ -1,3 +1,5 @@
+import { supabase } from './supabaseClient.js';
+
 (() => {
   'use strict';
   const STORAGE_KEY = 'wortwerk-library-v1';
@@ -30,7 +32,22 @@
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const id = () => crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const initial = () => ({subjects:[],folders:[],sets:[],cards:[],recent:[],studySessions:{},studyHistory:[]});
-  let data = initial(), activeSubject = null, activeFolder = null, activeSet = null, view = 'library';
+  let supportReturn = (() => {
+    const url = new URL(window.location.href);
+    const type = url.searchParams.get('support');
+    if (type !== 'success' && type !== 'cancelled') return null;
+    const sessionId = url.searchParams.get('session_id') || '';
+    url.searchParams.delete('support');
+    url.searchParams.delete('session_id');
+    window.history.replaceState(window.history.state, document.title, `${url.pathname}${url.search}${url.hash}`);
+    return { type, sessionId };
+  })();
+  let supportPayment = supportReturn?.type === 'success' ? { status: 'checking' } : null;
+  let supportStatusChecking = false;
+  let supportAmount = 10;
+  let supportPresetAmount = 10;
+  let supportSubmitting = false;
+  let data = initial(), activeSubject = null, activeFolder = null, activeSet = null, view = supportReturn ? 'support' : 'library';
   let formContext = null, importRows = [], importChecked = false, importHasErrors = false, session = null;
   function save(){try{localStorage.setItem(STORAGE_KEY,JSON.stringify(data))}catch(e){console.warn('Lokaler Cache konnte nicht aktualisiert werden.',e)}const pending=window.WortwerkRepository.saveLibrary(data);pending.catch(()=>{});return pending}
   const subject = key => data.subjects.find(x=>x.id===key);
@@ -76,6 +93,9 @@
   }
   function render(){
     renderNav();
+    if(view==='support'){
+      activeSubject=null;activeFolder=null;activeSet=null;renderSupport();return;
+    }
     if(activeSet&&setById(activeSet)){renderSet();return}
     if(activeFolder&&folder(activeFolder)){renderFolder();return}
     if(activeSubject&&subject(activeSubject)){renderSubject();return}
@@ -83,14 +103,92 @@
   }
   function renderNav(){
     document.querySelectorAll('[data-view]').forEach(button=>button.onclick=event=>{
-      event.preventDefault();activeSubject=null;activeFolder=null;activeSet=null;view=button.dataset.view;render();
+      event.preventDefault();activeSubject=null;activeFolder=null;activeSet=null;view=button.dataset.view;if(view!=='support'){supportReturn=null;supportPayment=null}render();
     });
     const atLibraryRoot=!activeSubject&&!activeFolder&&!activeSet;
     document.querySelectorAll('.topbar [data-view]').forEach(button=>{
-      const current=button.dataset.view==='recent'?view==='recent':button.dataset.view==='library'&&view==='library'&&atLibraryRoot;
+      const current=button.dataset.view==='recent'?view==='recent':button.dataset.view==='support'?view==='support':button.dataset.view==='library'&&view==='library'&&atLibraryRoot;
       if(current)button.setAttribute('aria-current','page');else button.removeAttribute('aria-current');
     });
-    crumbs(view==='recent'?['Zuletzt gelernt']:['Dein Lernraum']);
+    crumbs(view==='recent'?['Zuletzt gelernt']:view==='support'?['Dein Lernraum','Unterstützen']:['Dein Lernraum']);
+  }
+  function renderSupport(){
+    const resultMarkup=supportReturn?.type==='cancelled'
+      ? '<div class="support-result is-neutral" role="status">Zahlung abgebrochen. Du kannst jederzeit ohne Zahlung zur Bibliothek zurückkehren.</div>'
+      : supportReturn?.type==='success'
+        ? supportPayment?.status==='paid'
+          ? '<div class="support-result is-success" role="status">Danke! Stripe hat deine einmalige Unterstützung bestätigt.</div>'
+          : supportPayment?.status==='pending'
+            ? '<div class="support-result" role="status">Stripe verarbeitet die Zahlung noch. Prüfe den Status in Kürze erneut.</div>'
+            : supportPayment?.status==='unavailable'
+              ? '<div class="support-result" role="status">Der Zahlungsstatus ist gerade nicht erreichbar. Eine Zahlung wird erst nach Bestätigung durch Stripe angezeigt.</div>'
+            : supportPayment?.status==='failed'
+              ? '<div class="support-result is-neutral" role="status">Die Zahlung wurde nicht abgeschlossen. Es wurde keine erfolgreiche Zahlung bestätigt.</div>'
+              : '<div class="support-result" role="status" aria-live="polite">Zahlungsstatus wird sicher bei Stripe geprüft …</div>'
+        : '';
+    const amount=supportAmount;
+    $('#content').innerHTML=`<section class="support-page" aria-labelledby="support-title"><div class="support-heading"><div class="eyebrow">FREIWILLIGER SUPPORT</div><h1 class="page-title" id="support-title">Hilf mit, wortwerk weiterzuentwickeln.</h1><p class="page-subtitle">Deine Unterstützung hilft, die Lernkarten-App zu pflegen und weiter auszubauen. wortwerk bleibt kostenlos und alle Funktionen bleiben ohne Zahlung verfügbar.</p></div><div class="support-layout"><section class="support-panel" aria-labelledby="support-amount-title"><h2 id="support-amount-title">Einmalig unterstützen</h2><p class="support-panel-copy">Wähle einen Betrag. Es entsteht kein Abonnement.</p><fieldset class="support-amount-group"><legend class="field-label">Betrag in CHF</legend><div class="support-amount-options">${[5,10,20].map(value=>`<button class="support-amount-option${amount===value?' is-selected':''}" type="button" data-support-amount="${value}" aria-pressed="${amount===value}">CHF ${value}</button>`).join('')}</div></fieldset><label class="field-label support-custom-label" for="support-custom-amount">Oder eigener Betrag</label><div class="support-custom-input"><span aria-hidden="true">CHF</span><input id="support-custom-amount" type="number" inputmode="numeric" min="2" max="500" step="1" placeholder="2–500" aria-describedby="support-custom-hint"><span class="support-custom-suffix">einmalig</span></div><p class="field-hint" id="support-custom-hint">Ganze Franken, mindestens CHF 2 und höchstens CHF 500.</p><button class="primary-button support-submit" id="support-submit" type="button"${supportSubmitting?' disabled aria-busy="true"':''}>${supportSubmitting?'Weiter zu Stripe …':`Sicher mit Stripe unterstützen · CHF ${esc(amount)}`}</button><p class="support-assurance">Die Zahlung wird sicher bei Stripe abgewickelt. Lernkarten Maker speichert keine Karten- oder Zahlungsdaten. Es gibt keine Funktionen oder Vorteile, die an eine Zahlung gebunden sind.</p>${resultMarkup}${supportReturn?.type==='success'&&['pending','unavailable'].includes(supportPayment?.status)?'<button class="text-button support-recheck" id="support-recheck" type="button">Zahlungsstatus erneut prüfen</button>':''}<p class="support-error" id="support-error" role="alert" hidden></p></section><aside class="support-note"><div class="support-note-mark" aria-hidden="true">↗</div><h2>Freiwillig. Einmalig. Ohne Einschränkungen.</h2><p>Du entscheidest, ob und in welcher Höhe du unterstützen möchtest. Ohne Zahlung kannst du wortwerk weiterhin vollständig nutzen.</p><button class="text-button" type="button" id="support-library">Zurück zur Bibliothek</button></aside></div></section>`;
+    document.querySelectorAll('[data-support-amount]').forEach(button=>button.addEventListener('click',()=>{
+      supportPresetAmount=Number(button.dataset.supportAmount);supportAmount=supportPresetAmount;
+      const custom=$('#support-custom-amount');if(custom)custom.value='';
+      renderSupport();
+    }));
+    $('#support-custom-amount')?.addEventListener('input',event=>{
+      const raw=event.currentTarget.value,value=Number(raw);
+      if(Number.isInteger(value)&&value>=2&&value<=500){supportAmount=value;document.querySelectorAll('[data-support-amount]').forEach(button=>{const selected=Number(button.dataset.supportAmount)===value;button.classList.toggle('is-selected',selected);button.setAttribute('aria-pressed',String(selected))});}
+      else if(raw){supportAmount=NaN;document.querySelectorAll('[data-support-amount]').forEach(button=>{button.classList.remove('is-selected');button.setAttribute('aria-pressed','false')});}
+      else{supportAmount=supportPresetAmount;document.querySelectorAll('[data-support-amount]').forEach(button=>{const selected=Number(button.dataset.supportAmount)===supportPresetAmount;button.classList.toggle('is-selected',selected);button.setAttribute('aria-pressed',String(selected))});}
+      updateSupportButton();
+    });
+    $('#support-submit')?.addEventListener('click',startSupportCheckout);
+    $('#support-library')?.addEventListener('click',()=>{supportReturn=null;supportPayment=null;view='library';render()});
+    $('#support-recheck')?.addEventListener('click',refreshSupportPaymentStatus);
+    if(supportReturn?.type==='success'&&supportPayment?.status==='checking'&&!supportStatusChecking)refreshSupportPaymentStatus();
+  }
+  function updateSupportButton(){
+    const button=$('#support-submit');if(!button)return;
+    const valid=Number.isInteger(supportAmount)&&supportAmount>=2&&supportAmount<=500;
+    button.disabled=!valid||supportSubmitting;
+    button.setAttribute('aria-busy',String(supportSubmitting));
+    button.textContent=supportSubmitting?'Weiter zu Stripe …':valid?`Sicher mit Stripe unterstützen · CHF ${supportAmount}`:'Betrag zwischen CHF 2 und CHF 500 eingeben';
+  }
+  async function startSupportCheckout(){
+    if(supportSubmitting||!Number.isInteger(supportAmount)||supportAmount<2||supportAmount>500)return;
+    const button=$('#support-submit'),error=$('#support-error');
+    supportSubmitting=true;button.disabled=true;button.setAttribute('aria-busy','true');button.textContent='Weiter zu Stripe …';error.hidden=true;error.textContent='';
+    try{
+      const {data:{session},error:sessionError}=await supabase.auth.getSession();
+      if(sessionError||!session?.access_token)throw new Error('Melde dich erneut an, bevor du eine Unterstützung startest.');
+      const response=await fetch('/api/support-checkout',{method:'POST',headers:{'Content-Type':'application/json','Authorization':`Bearer ${session.access_token}`},body:JSON.stringify({amount:supportAmount})});
+      const payload=await response.json().catch(()=>({}));
+      if(!response.ok)throw new Error(payload.error||'Checkout konnte gerade nicht gestartet werden. Bitte versuche es später erneut.');
+      if(typeof payload.url!=='string')throw new Error('Stripe konnte keine Checkout-Adresse zurückgeben. Bitte versuche es später erneut.');
+      const checkoutUrl=new URL(payload.url);
+      if(checkoutUrl.origin!=='https://checkout.stripe.com')throw new Error('Stripe hat keine gültige Checkout-Adresse zurückgegeben.');
+      window.location.assign(checkoutUrl.toString());
+    }catch(cause){
+      error.textContent=cause.message||'Checkout konnte gerade nicht gestartet werden. Bitte versuche es später erneut.';error.hidden=false;
+      supportSubmitting=false;updateSupportButton();
+    }
+  }
+  async function refreshSupportPaymentStatus(){
+    if(supportStatusChecking)return;
+    supportStatusChecking=true;
+    if(!supportReturn?.sessionId){supportPayment={status:'failed'};supportStatusChecking=false;renderSupport();return}
+    supportPayment={status:'checking'};renderSupport();
+    try{
+      const {data:{session},error:sessionError}=await supabase.auth.getSession();
+      if(sessionError||!session?.access_token)throw new Error('Sitzung fehlt');
+      const response=await fetch(`/api/support-status?session_id=${encodeURIComponent(supportReturn.sessionId)}`,{headers:{'Authorization':`Bearer ${session.access_token}`}});
+      const payload=await response.json().catch(()=>({}));
+      if(!response.ok)throw new Error(payload.error||'Zahlungsstatus konnte nicht geprüft werden.');
+      supportPayment={status:payload.status};
+    }catch(error){
+      console.error('Stripe-Zahlungsstatus konnte nicht abgerufen werden.',error);
+      supportPayment={status:'unavailable'};
+    }
+    supportStatusChecking=false;
+    renderSupport();
   }
   function crumbs(parts){const last=parts.length-1;$('#breadcrumbs').setAttribute('aria-label','Brotkrumennavigation');$('#breadcrumbs').innerHTML=parts.map((part,index)=>`<span>${index===last?`<b aria-current="location">${esc(part)}</b>`:`<button type="button" class="breadcrumb-link" data-crumb-index="${index}">${esc(part)}</button>`}</span>`).join('');$('#breadcrumbs').querySelectorAll('[data-crumb-index]').forEach(button=>button.onclick=()=>{const level=Number(button.dataset.crumbIndex);if(level===0){activeSubject=null;activeFolder=null;activeSet=null;view='library'}else if(level===1){activeFolder=null;activeSet=null}else if(level===2){activeSet=null}render()})}
   function renderLibrary(){
