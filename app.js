@@ -1,4 +1,5 @@
 import { supabase } from './supabaseClient.js';
+import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown, parseDonationAmountCents, shouldShowDonationWelcome, setDonationReminderEnabled, isDonationReminderEnabled } from './donation-values.mjs';
 
 (() => {
   'use strict';
@@ -32,22 +33,24 @@ import { supabase } from './supabaseClient.js';
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const id = () => crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const initial = () => ({subjects:[],folders:[],sets:[],cards:[],recent:[],studySessions:{},studyHistory:[]});
-  let supportReturn = (() => {
+  let donationReturn = (() => {
     const url = new URL(window.location.href);
-    const type = url.searchParams.get('support');
+    const type = url.searchParams.get('donation') || url.searchParams.get('support');
     if (type !== 'success' && type !== 'cancelled') return null;
     const sessionId = url.searchParams.get('session_id') || '';
+    url.searchParams.delete('donation');
     url.searchParams.delete('support');
     url.searchParams.delete('session_id');
     window.history.replaceState(window.history.state, document.title, `${url.pathname}${url.search}${url.hash}`);
     return { type, sessionId };
   })();
-  let supportPayment = supportReturn?.type === 'success' ? { status: 'checking' } : null;
-  let supportStatusChecking = false;
-  let supportAmount = 10;
-  let supportPresetAmount = 10;
-  let supportSubmitting = false;
-  let data = initial(), activeSubject = null, activeFolder = null, activeSet = null, view = supportReturn ? 'support' : 'library';
+  let donationPayment = donationReturn?.type === 'success' ? { status: 'checking' } : null;
+  let donationStatusChecking = false;
+  let donationAmountCents = 1000;
+  let donationSubmitting = false;
+  let donationCheckoutRequestId = null;
+  let donationGreetingDismissed = false;
+  let data = initial(), activeSubject = null, activeFolder = null, activeSet = null, view = donationReturn ? 'donations' : 'library';
   let formContext = null, importRows = [], importChecked = false, importHasErrors = false, session = null;
   function save(){try{localStorage.setItem(STORAGE_KEY,JSON.stringify(data))}catch(e){console.warn('Lokaler Cache konnte nicht aktualisiert werden.',e)}const pending=window.WortwerkRepository.saveLibrary(data);pending.catch(()=>{});return pending}
   const subject = key => data.subjects.find(x=>x.id===key);
@@ -93,102 +96,118 @@ import { supabase } from './supabaseClient.js';
   }
   function render(){
     renderNav();
-    if(view==='support'){
-      activeSubject=null;activeFolder=null;activeSet=null;renderSupport();return;
+    if(view==='donations'){
+      activeSubject=null;activeFolder=null;activeSet=null;renderDonations();return;
     }
     if(activeSet&&setById(activeSet)){renderSet();return}
     if(activeFolder&&folder(activeFolder)){renderFolder();return}
     if(activeSubject&&subject(activeSubject)){renderSubject();return}
     renderLibrary();
+    if(view==='library')renderDonationWelcome();
   }
   function renderNav(){
     document.querySelectorAll('[data-view]').forEach(button=>button.onclick=event=>{
-      event.preventDefault();activeSubject=null;activeFolder=null;activeSet=null;view=button.dataset.view;if(view!=='support'){supportReturn=null;supportPayment=null}render();
+      event.preventDefault();activeSubject=null;activeFolder=null;activeSet=null;view=button.dataset.view;if(view!=='donations'){donationReturn=null;donationPayment=null}render();
     });
     const atLibraryRoot=!activeSubject&&!activeFolder&&!activeSet;
     document.querySelectorAll('.topbar [data-view]').forEach(button=>{
-      const current=button.dataset.view==='recent'?view==='recent':button.dataset.view==='support'?view==='support':button.dataset.view==='library'&&view==='library'&&atLibraryRoot;
+      const current=button.dataset.view==='recent'?view==='recent':button.dataset.view==='donations'?view==='donations':button.dataset.view==='library'&&view==='library'&&atLibraryRoot;
       if(current)button.setAttribute('aria-current','page');else button.removeAttribute('aria-current');
     });
-    crumbs(view==='recent'?['Zuletzt gelernt']:view==='support'?['Dein Lernraum','Unterstützen']:['Dein Lernraum']);
+    crumbs(view==='recent'?['Zuletzt gelernt']:view==='donations'?['Dein Lernraum','Spenden']:['Dein Lernraum']);
   }
-  function renderSupport(){
-    const resultMarkup=supportReturn?.type==='cancelled'
-      ? '<div class="support-result is-neutral" role="status">Zahlung abgebrochen. Du kannst jederzeit ohne Zahlung zur Bibliothek zurückkehren.</div>'
-      : supportReturn?.type==='success'
-        ? supportPayment?.status==='paid'
-          ? '<div class="support-result is-success" role="status">Danke! Stripe hat deine einmalige Unterstützung bestätigt.</div>'
-          : supportPayment?.status==='pending'
-            ? '<div class="support-result" role="status">Stripe verarbeitet die Zahlung noch. Prüfe den Status in Kürze erneut.</div>'
-            : supportPayment?.status==='unavailable'
-              ? '<div class="support-result" role="status">Der Zahlungsstatus ist gerade nicht erreichbar. Eine Zahlung wird erst nach Bestätigung durch Stripe angezeigt.</div>'
-            : supportPayment?.status==='failed'
-              ? '<div class="support-result is-neutral" role="status">Die Zahlung wurde nicht abgeschlossen. Es wurde keine erfolgreiche Zahlung bestätigt.</div>'
-              : '<div class="support-result" role="status" aria-live="polite">Zahlungsstatus wird sicher bei Stripe geprüft …</div>'
+  function renderDonations(){
+    const resultMarkup=donationReturn?.type==='cancelled'
+      ? '<div class="donation-result is-neutral" role="status">Der Checkout wurde abgebrochen. Du kannst jederzeit ohne Spende zur App zurückkehren.</div>'
+      : donationReturn?.type==='success'
+        ? donationPayment?.status==='paid'
+          ? `<div class="donation-result is-success" role="status"><strong>Vielen Dank für deine Spende!</strong><span>Deine Spende über ${esc(formatDonationAmount(donationPayment.amountCents))} hilft dabei, wortwerk weiterzuentwickeln.</span></div>`
+          : donationPayment?.status==='pending'
+            ? '<div class="donation-result" role="status">Stripe verarbeitet die Spende noch. Der bestätigte Betrag erscheint hier, sobald Stripe die Zahlung bestätigt hat.</div>'
+            : donationPayment?.status==='unavailable'
+              ? '<div class="donation-result" role="status">Der Zahlungsstatus ist gerade nicht erreichbar. Eine Spende wird erst nach Bestätigung durch Stripe angezeigt.</div>'
+            : donationPayment?.status==='failed'||donationPayment?.status==='expired'
+              ? '<div class="donation-result is-neutral" role="status">Die Zahlung wurde nicht abgeschlossen. Es wurde keine Spende bestätigt.</div>'
+              : '<div class="donation-result" role="status" aria-live="polite">Zahlungsstatus wird sicher bei Stripe geprüft …</div>'
         : '';
-    const amount=supportAmount;
-    $('#content').innerHTML=`<section class="support-page" aria-labelledby="support-title"><div class="support-heading"><div class="eyebrow">FREIWILLIGER SUPPORT</div><h1 class="page-title" id="support-title">Hilf mit, wortwerk weiterzuentwickeln.</h1><p class="page-subtitle">Deine Unterstützung hilft, die Lernkarten-App zu pflegen und weiter auszubauen. wortwerk bleibt kostenlos und alle Funktionen bleiben ohne Zahlung verfügbar.</p></div><div class="support-layout"><section class="support-panel" aria-labelledby="support-amount-title"><h2 id="support-amount-title">Einmalig unterstützen</h2><p class="support-panel-copy">Wähle einen Betrag. Es entsteht kein Abonnement.</p><fieldset class="support-amount-group"><legend class="field-label">Betrag in CHF</legend><div class="support-amount-options">${[5,10,20].map(value=>`<button class="support-amount-option${amount===value?' is-selected':''}" type="button" data-support-amount="${value}" aria-pressed="${amount===value}">CHF ${value}</button>`).join('')}</div></fieldset><label class="field-label support-custom-label" for="support-custom-amount">Oder eigener Betrag</label><div class="support-custom-input"><span aria-hidden="true">CHF</span><input id="support-custom-amount" type="number" inputmode="numeric" min="2" max="500" step="1" placeholder="2–500" aria-describedby="support-custom-hint"><span class="support-custom-suffix">einmalig</span></div><p class="field-hint" id="support-custom-hint">Ganze Franken, mindestens CHF 2 und höchstens CHF 500.</p><button class="primary-button support-submit" id="support-submit" type="button"${supportSubmitting?' disabled aria-busy="true"':''}>${supportSubmitting?'Weiter zu Stripe …':`Sicher mit Stripe unterstützen · CHF ${esc(amount)}`}</button><p class="support-assurance">Die Zahlung wird sicher bei Stripe abgewickelt. Lernkarten Maker speichert keine Karten- oder Zahlungsdaten. Es gibt keine Funktionen oder Vorteile, die an eine Zahlung gebunden sind.</p>${resultMarkup}${supportReturn?.type==='success'&&['pending','unavailable'].includes(supportPayment?.status)?'<button class="text-button support-recheck" id="support-recheck" type="button">Zahlungsstatus erneut prüfen</button>':''}<p class="support-error" id="support-error" role="alert" hidden></p></section><aside class="support-note"><div class="support-note-mark" aria-hidden="true">↗</div><h2>Freiwillig. Einmalig. Ohne Einschränkungen.</h2><p>Du entscheidest, ob und in welcher Höhe du unterstützen möchtest. Ohne Zahlung kannst du wortwerk weiterhin vollständig nutzen.</p><button class="text-button" type="button" id="support-library">Zurück zur Bibliothek</button></aside></div></section>`;
-    document.querySelectorAll('[data-support-amount]').forEach(button=>button.addEventListener('click',()=>{
-      supportPresetAmount=Number(button.dataset.supportAmount);supportAmount=supportPresetAmount;
-      const custom=$('#support-custom-amount');if(custom)custom.value='';
-      renderSupport();
+    const selected=donationAmountCents;
+    $('#content').innerHTML=`<section class="donation-page" aria-labelledby="donation-title"><div class="donation-heading"><div class="eyebrow">FREIWILLIG UND EINMALIG</div><h1 class="page-title" id="donation-title">wortwerk unterstützen</h1><p class="page-subtitle">wortwerk ist kostenlos und soll es auch bleiben. Wenn dir die App gefällt, hilft deine freiwillige Spende dabei, sie weiterzuentwickeln.</p></div><div class="donation-layout"><section class="donation-panel" aria-labelledby="donation-amount-title"><h2 id="donation-amount-title">Eine Spende geben</h2><p class="donation-panel-copy">Wähle einen Betrag. Jede Zahlung ist einmalig; es gibt keine Abos und keine zusätzlichen Funktionen durch eine Spende.</p><fieldset class="donation-amount-group"><legend class="field-label">Vorgeschlagener Betrag</legend><div class="donation-amount-options">${DONATION_PRESETS_CENTS.map(cents=>`<button class="donation-amount-option${selected===cents?' is-selected':''}" type="button" data-donation-amount="${cents}" aria-pressed="${selected===cents}">${esc(formatDonationAmount(cents))}</button>`).join('')}</div></fieldset><label class="field-label donation-custom-label" for="donation-custom-amount">Oder eigener Betrag</label><div class="donation-custom-input"><span aria-hidden="true">CHF</span><input id="donation-custom-amount" type="text" inputmode="decimal" autocomplete="off" placeholder="z. B. 12.50" aria-describedby="donation-custom-hint"></div><p class="field-hint" id="donation-custom-hint">Mindestens CHF 0.50. Das Stripe-Limit liegt bei CHF 999’999.99.</p><button class="primary-button donation-submit" id="donation-submit" type="button"${donationSubmitting?' disabled aria-busy="true"':''}>${donationSubmitting?'Weiter zu Stripe …':`Sicher spenden · ${esc(formatDonationAmount(selected))}`}</button><p class="donation-assurance">Die Zahlung wird sicher über Stripe abgewickelt. wortwerk speichert keine Karten- oder Zahlungsdaten. Die App bleibt vollständig kostenlos.</p>${resultMarkup}${donationReturn?.type==='success'&&['pending','unavailable'].includes(donationPayment?.status)?'<button class="text-button donation-recheck" id="donation-recheck" type="button">Zahlungsstatus erneut prüfen</button>':''}<p class="donation-error" id="donation-error" role="alert" hidden></p></section><aside class="donation-note"><div class="donation-note-mark" aria-hidden="true">♡</div><h2>Freiwillig. Einmalig. Für alle kostenlos.</h2><p>Jede Unterstützung hilft. Vielen Dank! Du kannst wortwerk auch ohne Spende vollständig nutzen.</p><button class="text-button" type="button" id="donation-library">Weiter zur App</button></aside></div></section>`;
+    document.querySelectorAll('[data-donation-amount]').forEach(button=>button.addEventListener('click',()=>{
+      donationAmountCents=Number(button.dataset.donationAmount);donationCheckoutRequestId=null;
+      const custom=$('#donation-custom-amount');if(custom)custom.value='';
+      renderDonations();
     }));
-    $('#support-custom-amount')?.addEventListener('input',event=>{
-      const raw=event.currentTarget.value,value=Number(raw);
-      if(Number.isInteger(value)&&value>=2&&value<=500){supportAmount=value;document.querySelectorAll('[data-support-amount]').forEach(button=>{const selected=Number(button.dataset.supportAmount)===value;button.classList.toggle('is-selected',selected);button.setAttribute('aria-pressed',String(selected))});}
-      else if(raw){supportAmount=NaN;document.querySelectorAll('[data-support-amount]').forEach(button=>{button.classList.remove('is-selected');button.setAttribute('aria-pressed','false')});}
-      else{supportAmount=supportPresetAmount;document.querySelectorAll('[data-support-amount]').forEach(button=>{const selected=Number(button.dataset.supportAmount)===supportPresetAmount;button.classList.toggle('is-selected',selected);button.setAttribute('aria-pressed',String(selected))});}
-      updateSupportButton();
+    $('#donation-custom-amount')?.addEventListener('input',event=>{
+      const raw=event.currentTarget.value,parsed=parseDonationAmountCents(raw);
+      if(parsed!==null){donationAmountCents=parsed;donationCheckoutRequestId=null}
+      else if(raw.trim()){donationAmountCents=null;donationCheckoutRequestId=null}
+      document.querySelectorAll('[data-donation-amount]').forEach(button=>{const active=Number(button.dataset.donationAmount)===donationAmountCents;button.classList.toggle('is-selected',active);button.setAttribute('aria-pressed',String(active))});
+      updateDonationButton();
     });
-    $('#support-submit')?.addEventListener('click',startSupportCheckout);
-    $('#support-library')?.addEventListener('click',()=>{supportReturn=null;supportPayment=null;view='library';render()});
-    $('#support-recheck')?.addEventListener('click',refreshSupportPaymentStatus);
-    if(supportReturn?.type==='success'&&supportPayment?.status==='checking'&&!supportStatusChecking)refreshSupportPaymentStatus();
+    $('#donation-submit')?.addEventListener('click',startDonationCheckout);
+    $('#donation-library')?.addEventListener('click',()=>{donationReturn=null;donationPayment=null;view='library';render()});
+    $('#donation-recheck')?.addEventListener('click',refreshDonationPaymentStatus);
+    if(donationReturn?.type==='success'&&donationPayment?.status==='checking'&&!donationStatusChecking)refreshDonationPaymentStatus();
   }
-  function updateSupportButton(){
-    const button=$('#support-submit');if(!button)return;
-    const valid=Number.isInteger(supportAmount)&&supportAmount>=2&&supportAmount<=500;
-    button.disabled=!valid||supportSubmitting;
-    button.setAttribute('aria-busy',String(supportSubmitting));
-    button.textContent=supportSubmitting?'Weiter zu Stripe …':valid?`Sicher mit Stripe unterstützen · CHF ${supportAmount}`:'Betrag zwischen CHF 2 und CHF 500 eingeben';
+  function renderDonationWelcome(){
+    if(donationGreetingDismissed||!shouldShowDonationWelcome())return;
+    markDonationWelcomeShown();
+    const welcome=document.createElement('section');
+    welcome.className='donation-welcome';welcome.setAttribute('aria-labelledby','donation-welcome-title');
+    welcome.innerHTML=`<div class="donation-welcome-copy"><div class="eyebrow">EIN FREIWILLIGER BEITRAG</div><h2 id="donation-welcome-title">Schön, dass du wortwerk nutzt!</h2><p>wortwerk ist kostenlos und soll es auch bleiben. Wenn dir die App gefällt und du die Weiterentwicklung unterstützen möchtest, kannst du freiwillig eine Spende geben. Jede Unterstützung hilft. Vielen Dank!</p></div><div class="donation-welcome-actions"><button type="button" class="primary-button" data-donation-welcome="donate">Jetzt spenden</button><button type="button" class="quiet-button" data-donation-welcome="continue">Weiter zur App</button></div><button type="button" class="icon-button donation-welcome-close" data-donation-welcome="continue" aria-label="Begrüssung schliessen" title="Schliessen">×</button>`;
+    $('#content').prepend(welcome);
+    welcome.querySelectorAll('[data-donation-welcome]').forEach(button=>button.addEventListener('click',()=>{
+      donationGreetingDismissed=true;
+      if(button.dataset.donationWelcome==='donate'){view='donations';activeSubject=null;activeFolder=null;activeSet=null}
+      else welcome.remove();
+      render();
+    }));
   }
-  async function startSupportCheckout(){
-    if(supportSubmitting||!Number.isInteger(supportAmount)||supportAmount<2||supportAmount>500)return;
-    const button=$('#support-submit'),error=$('#support-error');
-    supportSubmitting=true;button.disabled=true;button.setAttribute('aria-busy','true');button.textContent='Weiter zu Stripe …';error.hidden=true;error.textContent='';
+  function updateDonationButton(){
+    const button=$('#donation-submit');if(!button)return;
+    const valid=Number.isSafeInteger(donationAmountCents)&&donationAmountCents>=50&&donationAmountCents<=99_999_999;
+    button.disabled=!valid||donationSubmitting;
+    button.setAttribute('aria-busy',String(donationSubmitting));
+    button.textContent=donationSubmitting?'Weiter zu Stripe …':valid?`Sicher spenden · ${formatDonationAmount(donationAmountCents)}`:'Betrag ab CHF 0.50 eingeben';
+  }
+  async function startDonationCheckout(){
+    if(donationSubmitting||!Number.isSafeInteger(donationAmountCents)||donationAmountCents<50||donationAmountCents>99_999_999)return;
+    const button=$('#donation-submit'),error=$('#donation-error');
+    donationSubmitting=true;button.disabled=true;button.setAttribute('aria-busy','true');button.textContent='Weiter zu Stripe …';error.hidden=true;error.textContent='';
     try{
       const {data:{session},error:sessionError}=await supabase.auth.getSession();
-      if(sessionError||!session?.access_token)throw new Error('Melde dich erneut an, bevor du eine Unterstützung startest.');
-      const response=await fetch('/api/support-checkout',{method:'POST',headers:{'Content-Type':'application/json','Authorization':`Bearer ${session.access_token}`},body:JSON.stringify({amount:supportAmount})});
+      if(sessionError||!session?.access_token)throw new Error('Melde dich an, um eine Spende zu geben.');
+      donationCheckoutRequestId ||= id();
+      const response=await fetch('/api/support-checkout',{method:'POST',headers:{'Content-Type':'application/json','Authorization':`Bearer ${session.access_token}`},body:JSON.stringify({amountCents:donationAmountCents,requestId:donationCheckoutRequestId})});
       const payload=await response.json().catch(()=>({}));
-      if(!response.ok)throw new Error(payload.error||'Checkout konnte gerade nicht gestartet werden. Bitte versuche es später erneut.');
+      if(!response.ok)throw new Error(payload.error||'Der Checkout konnte gerade nicht gestartet werden. Bitte versuche es später erneut.');
       if(typeof payload.url!=='string')throw new Error('Stripe konnte keine Checkout-Adresse zurückgeben. Bitte versuche es später erneut.');
       const checkoutUrl=new URL(payload.url);
       if(checkoutUrl.origin!=='https://checkout.stripe.com')throw new Error('Stripe hat keine gültige Checkout-Adresse zurückgegeben.');
       window.location.assign(checkoutUrl.toString());
     }catch(cause){
-      error.textContent=cause.message||'Checkout konnte gerade nicht gestartet werden. Bitte versuche es später erneut.';error.hidden=false;
-      supportSubmitting=false;updateSupportButton();
+      error.textContent=cause.message||'Der Checkout konnte gerade nicht gestartet werden. Bitte versuche es später erneut.';error.hidden=false;
+      donationSubmitting=false;updateDonationButton();
     }
   }
-  async function refreshSupportPaymentStatus(){
-    if(supportStatusChecking)return;
-    supportStatusChecking=true;
-    if(!supportReturn?.sessionId){supportPayment={status:'failed'};supportStatusChecking=false;renderSupport();return}
-    supportPayment={status:'checking'};renderSupport();
+  async function refreshDonationPaymentStatus(){
+    if(donationStatusChecking)return;
+    donationStatusChecking=true;
+    if(!donationReturn?.sessionId){donationPayment={status:'failed'};donationStatusChecking=false;renderDonations();return}
+    donationPayment={status:'checking'};renderDonations();
     try{
       const {data:{session},error:sessionError}=await supabase.auth.getSession();
       if(sessionError||!session?.access_token)throw new Error('Sitzung fehlt');
-      const response=await fetch(`/api/support-status?session_id=${encodeURIComponent(supportReturn.sessionId)}`,{headers:{'Authorization':`Bearer ${session.access_token}`}});
+      const response=await fetch(`/api/support-status?session_id=${encodeURIComponent(donationReturn.sessionId)}`,{headers:{'Authorization':`Bearer ${session.access_token}`}});
       const payload=await response.json().catch(()=>({}));
-      if(!response.ok)throw new Error(payload.error||'Zahlungsstatus konnte nicht geprüft werden.');
-      supportPayment={status:payload.status};
+      if(!response.ok)throw new Error(payload.error||'Der Spendenstatus konnte nicht geprüft werden.');
+      donationPayment={status:payload.status,amountCents:payload.amountCents};
     }catch(error){
-      console.error('Stripe-Zahlungsstatus konnte nicht abgerufen werden.',error);
-      supportPayment={status:'unavailable'};
+      console.error('Stripe-Spendenstatus konnte nicht abgerufen werden.',error);
+      donationPayment={status:'unavailable'};
     }
-    supportStatusChecking=false;
-    renderSupport();
+    donationStatusChecking=false;
+    renderDonations();
   }
   function crumbs(parts){const last=parts.length-1;$('#breadcrumbs').setAttribute('aria-label','Brotkrumennavigation');$('#breadcrumbs').innerHTML=parts.map((part,index)=>`<span>${index===last?`<b aria-current="location">${esc(part)}</b>`:`<button type="button" class="breadcrumb-link" data-crumb-index="${index}">${esc(part)}</button>`}</span>`).join('');$('#breadcrumbs').querySelectorAll('[data-crumb-index]').forEach(button=>button.onclick=()=>{const level=Number(button.dataset.crumbIndex);if(level===0){activeSubject=null;activeFolder=null;activeSet=null;view='library'}else if(level===1){activeFolder=null;activeSet=null}else if(level===2){activeSet=null}render()})}
   function renderLibrary(){
@@ -611,7 +630,12 @@ import { supabase } from './supabaseClient.js';
   function retryMissed(){if(!session)return;const cards=session.cards.filter(card=>window.WortwerkModel.getStudyResult(session,card.id)===false);if(!cards.length)return;const retryState=window.WortwerkModel.createStudySession(cards);session={...retryState,id:id(),setId:session.setId,startedAt:new Date().toISOString(),flipped:false,missedCardIdsCopied:new Set(),missedSetPending:false};activeSlotIndex=0;saveSessionProgress();$('#study-title').textContent=`Wiederholung · ${setById(session.setId)?.name||'Lernsession'}`;$('#study-complete').hidden=true;$('#shuffle-toggle').setAttribute('aria-pressed','false');renderStudyCard()}
   const studyDialog=$('#study-dialog');
   const settingsDialog=$('#settings-dialog');
-  $('#card-theme-open').onclick=()=>{renderCardThemeOptions();settingsDialog.showModal()};
+  $('#card-theme-open').onclick=()=>{renderCardThemeOptions();$('#donation-reminder-enabled').checked=isDonationReminderEnabled();settingsDialog.showModal()};
+  $('#donation-reminder-enabled').addEventListener('change',event=>{
+    const saved=setDonationReminderEnabled(event.currentTarget.checked);
+    if(!saved)toast('Diese Einstellung konnte in diesem Browser nicht gespeichert werden.');
+    if(event.currentTarget.checked)donationGreetingDismissed=false;
+  });
   $('#card-theme-options').addEventListener('change',event=>{
     const input=event.target.closest('.card-theme-radio');
     if(input?.checked)applySelectedCardTheme(input.value);

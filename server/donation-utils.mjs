@@ -14,6 +14,15 @@ export function getStripe() {
   return new Stripe(secretKey);
 }
 
+export function getDonationEventStore() {
+  const supabaseUrl = (process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '').trim();
+  const secretKey = (process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
+  if (!supabaseUrl || !secretKey) throw new Error('SUPABASE_SERVER_KEY_NOT_CONFIGURED');
+  return createClient(supabaseUrl, secretKey, {
+    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false }
+  });
+}
+
 export async function getAuthenticatedUser(request) {
   const authorization = request.headers.get('authorization') || '';
   const token = authorization.match(/^Bearer\s+(.+)$/i)?.[1];

@@ -117,7 +117,7 @@
       description: 'Sanftes Lavendel und helles Steingrau',
       front: {
         surface: '#B5A8B8', text: '#0B0D10', muted: '#0B0D10', border: '#A295A5',
-        'gender-masculine': '#174882', 'gender-feminine': '#9D1732'
+        'gender-masculine': '#124A8A', 'gender-feminine': '#9D1732'
       },
       back: {
         surface: '#E3E0DB', text: '#0B0D10', muted: '#0B0D10', border: '#CECBC6',

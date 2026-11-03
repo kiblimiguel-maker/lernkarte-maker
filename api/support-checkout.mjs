@@ -1,66 +1,84 @@
-import { getAuthenticatedUser, getStripe, isAllowedAppOrigin, json } from '../server/support-utils.mjs';
+import { createDonationCheckoutIdempotencyKey, isValidDonationAmountCents } from '../donation-values.mjs';
+import { getAuthenticatedUser, getStripe, isAllowedAppOrigin, json } from '../server/donation-utils.mjs';
 
-export async function POST(request) {
-  if (!isAllowedAppOrigin(request)) return json({ error: 'Diese Anfrage konnte nicht zugeordnet werden.' }, 403);
+function integrationIdentifier() {
+  const alphabet = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  const bytes = crypto.getRandomValues(new Uint8Array(8));
+  const suffix = Array.from(bytes, value => alphabet[value % alphabet.length]).join('');
+  return `wortwerk_donation_${suffix}`;
+}
 
-  const auth = await getAuthenticatedUser(request).catch(error => {
-    console.error('Support-Checkout Supabase-Authentifizierung fehlgeschlagen.', error.message);
-    return { error: json({ error: 'Die sichere Zahlungsprüfung ist noch nicht vollständig konfiguriert.' }, 503) };
-  });
-  if (auth.error) return auth.error;
+export function createDonationCheckoutHandler({ authenticate = getAuthenticatedUser, stripeClient = getStripe, allowedOrigin = isAllowedAppOrigin } = {}) {
+  return async function POST(request) {
+    if (!allowedOrigin(request)) return json({ error: 'Diese Anfrage konnte nicht zugeordnet werden.' }, 403);
 
-  let payload;
-  try {
-    payload = await request.json();
-  } catch {
-    return json({ error: 'Bitte wähle einen gültigen Betrag.' }, 400);
-  }
-  const amount = payload?.amount;
-  if (!Number.isInteger(amount) || amount < 2 || amount > 500) {
-    return json({ error: 'Der Betrag muss zwischen CHF 2 und CHF 500 liegen.' }, 400);
-  }
+    const auth = await authenticate(request).catch(error => {
+      console.error('Spenden-Checkout Supabase-Authentifizierung fehlgeschlagen.', error.message);
+      return { error: json({ error: 'Die sichere Zahlungsprüfung ist noch nicht vollständig konfiguriert.' }, 503) };
+    });
+    if (auth.error) return auth.error;
 
-  let baseUrl;
-  try {
-    const configuredUrl = new URL(process.env.APP_BASE_URL || '');
-    if (configuredUrl.protocol !== 'https:' && configuredUrl.hostname !== 'localhost') throw new Error('APP_BASE_URL must use HTTPS.');
-    baseUrl = configuredUrl.origin;
-  } catch (error) {
-    console.error('APP_BASE_URL ist nicht korrekt konfiguriert.', error.message);
-    return json({ error: 'Die Zahlungsseite ist noch nicht vollständig konfiguriert.' }, 503);
-  }
+    let payload;
+    try {
+      payload = await request.json();
+    } catch {
+      return json({ error: 'Bitte wähle einen gültigen Betrag.' }, 400);
+    }
+    const amountCents = payload?.amountCents;
+    if (!isValidDonationAmountCents(amountCents)) {
+      return json({ error: 'Bitte wähle einen gültigen Spendenbetrag zwischen CHF 0.50 und CHF 999’999.99.' }, 400);
+    }
+    const idempotencyKey = createDonationCheckoutIdempotencyKey(auth.user.id, payload?.requestId);
+    if (!idempotencyKey) return json({ error: 'Die Spendenanfrage ist ungültig. Bitte versuche es erneut.' }, 400);
 
-  let stripe;
-  try {
-    stripe = getStripe();
-  } catch {
-    return json({ error: 'Stripe ist noch nicht eingerichtet. Du kannst wortwerk weiterhin kostenlos nutzen.' }, 503);
-  }
+    let baseUrl;
+    try {
+      const configuredUrl = new URL(process.env.APP_BASE_URL || '');
+      if (configuredUrl.protocol !== 'https:' && configuredUrl.hostname !== 'localhost') throw new Error('APP_BASE_URL must use HTTPS.');
+      baseUrl = configuredUrl.origin;
+    } catch (error) {
+      console.error('APP_BASE_URL ist nicht korrekt konfiguriert.', error.message);
+      return json({ error: 'Die Zahlungsseite ist noch nicht vollständig konfiguriert.' }, 503);
+    }
 
-  try {
-    const checkoutSession = await stripe.checkout.sessions.create({
-      mode: 'payment',
-      line_items: [{
-        price_data: {
-          currency: 'chf',
-          unit_amount: amount * 100,
-          product_data: { name: 'Freiwillige Unterstützung für Lernkarten Maker' }
-        },
-        quantity: 1
-      }],
-      client_reference_id: auth.user.id,
-      metadata: { app: 'wortwerk', support: 'voluntary', user_id: auth.user.id },
-      success_url: `${baseUrl}/?support=success&session_id={CHECKOUT_SESSION_ID}#support`,
-      cancel_url: `${baseUrl}/?support=cancelled#support`
-    }, { idempotencyKey: `wortwerk-support-${auth.user.id}-${crypto.randomUUID()}` });
+    let stripe;
+    try {
+      stripe = stripeClient();
+    } catch {
+      return json({ error: 'Stripe ist noch nicht eingerichtet. Du kannst wortwerk weiterhin kostenlos nutzen.' }, 503);
+    }
 
-    if (!checkoutSession.url) return json({ error: 'Stripe konnte keine Checkout-Seite bereitstellen. Bitte versuche es erneut.' }, 502);
-    return json({ url: checkoutSession.url });
-  } catch (error) {
-    console.error('Stripe Checkout konnte nicht erstellt werden.', error.type || error.name || 'StripeError');
-    return json({ error: 'Stripe konnte die Zahlung gerade nicht vorbereiten. Bitte versuche es später erneut.' }, 502);
+    try {
+      const checkoutSession = await stripe.checkout.sessions.create({
+        mode: 'payment',
+        line_items: [{
+          price_data: {
+            currency: 'chf',
+            unit_amount: amountCents,
+            product_data: {
+              name: 'Freiwillige Spende für wortwerk',
+              description: 'Einmalige Spende ohne Gegenleistung. wortwerk bleibt vollständig kostenlos.'
+            }
+          },
+          quantity: 1
+        }],
+        client_reference_id: auth.user.id,
+        metadata: { app: 'wortwerk', purpose: 'voluntary_donation', user_id: auth.user.id },
+        success_url: `${baseUrl}/?donation=success&session_id={CHECKOUT_SESSION_ID}#donations`,
+        cancel_url: `${baseUrl}/?donation=cancelled#donations`,
+        integration_identifier: integrationIdentifier()
+      }, { idempotencyKey });
+
+      if (!checkoutSession.url) return json({ error: 'Stripe konnte keine Checkout-Seite bereitstellen. Bitte versuche es erneut.' }, 502);
+      return json({ url: checkoutSession.url });
+    } catch (error) {
+      console.error('Stripe Checkout konnte nicht erstellt werden.', error.type || error.name || 'StripeError');
+      return json({ error: 'Stripe konnte die Zahlung gerade nicht vorbereiten. Bitte versuche es später erneut.' }, 502);
+    }
   }
 }
+
+export const POST = createDonationCheckoutHandler();
 
 export function GET() {
   return json({ error: 'Diese Adresse unterstützt nur sichere POST-Anfragen.' }, 405);
