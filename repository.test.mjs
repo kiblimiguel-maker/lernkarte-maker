@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
-import { claimLegacyCache, deleteStaleRows, LIBRARY_STORAGE_KEY, LEGACY_MIGRATION_KEY, readAllRows, userLibraryCacheKey } from './repository-core.mjs';
+import { createRequire } from 'node:module';
+const { normalizeLibrary, reorderLibraryItems, getLibrarySiblings } = createRequire(import.meta.url)('./model.js');
+import { toLibraryRows, claimLegacyCache, deleteStaleRows, LIBRARY_STORAGE_KEY, LEGACY_MIGRATION_KEY, readAllRows, userLibraryCacheKey } from './repository-core.mjs';
 
 const rows = Array.from({ length: 50_251 }, (_, index) => ({ id: `card-${index}` }));
 const ranges = [];
@@ -113,5 +115,37 @@ await assert.rejects(claimLegacyCache({
   remote: { cards: [] }, normalize: value => value, persist: async () => {}, userId: 'account-d', storage
 }), /Lokale Bibliothek ist beschädigt/);
 assert.equal(storage.getItem(LIBRARY_STORAGE_KEY), '{broken', 'a corrupt legacy cache is left untouched for recovery');
+
+const sortable = normalizeLibrary({
+  subjects: [{ id: 'a-subject', name: 'French' }, { id: 'z-subject', name: 'Math' }],
+  folders: [
+    { id: 'a-folder', subjectId: 'a-subject', parentId: null },
+    { id: 'z-folder', subjectId: 'a-subject', parentId: null },
+    { id: 'child-a', subjectId: 'a-subject', parentId: 'a-folder' },
+    { id: 'child-z', subjectId: 'a-subject', parentId: 'a-folder' }
+  ],
+  sets: [{ id: 'a-set', subjectId: 'a-subject', folderId: 'a-folder' }, { id: 'z-set', subjectId: 'a-subject', folderId: 'a-folder' }],
+  cards: [{ id: 'card', setId: 'a-set', front: 'un livre', back: 'ein Buch', attemptCount: 2, correctCount: 2 }]
+});
+reorderLibraryItems(sortable, { type: 'subject', id: 'z-subject', targetId: 'a-subject' });
+reorderLibraryItems(sortable, { type: 'folder', id: 'z-folder', targetId: 'a-folder' });
+reorderLibraryItems(sortable, { type: 'folder', id: 'child-z', targetId: 'child-a' });
+reorderLibraryItems(sortable, { type: 'set', id: 'z-set', targetId: 'a-set' });
+const persisted = Object.fromEntries(['subjects', 'folders', 'sets', 'cards'].map(table => [table,
+  JSON.parse(JSON.stringify(toLibraryRows(table, sortable, 'owner-a'))).sort((a, b) => a.id.localeCompare(b.id))
+]));
+for (const table of Object.keys(persisted)) assert.ok(persisted[table].every(row => row.user_id === 'owner-a'), 'all persisted rows explicitly belong to the signed-in account');
+assert.equal(persisted.folders.find(row => row.id === 'child-a').subject_id, 'a-subject');
+assert.equal(persisted.folders.find(row => row.id === 'child-a').data.parentId, 'a-folder', 'nested relationships survive the real repository row encoding');
+assert.equal(persisted.sets.find(row => row.id === 'a-set').folder_id, 'a-folder');
+const restoredOrder = normalizeLibrary(Object.fromEntries(Object.entries(persisted).map(([table, rows]) => [table, rows.map(row => row.data)])));
+assert.deepEqual(restoredOrder.subjects.map(item => item.id), ['z-subject', 'a-subject']);
+assert.deepEqual(getLibrarySiblings(restoredOrder, 'folder', 'a-folder').map(item => item.id), ['z-folder', 'a-folder']);
+assert.deepEqual(getLibrarySiblings(restoredOrder, 'folder', 'child-a').map(item => item.id), ['child-z', 'child-a']);
+assert.deepEqual(restoredOrder.sets.map(item => item.id), ['z-set', 'a-set']);
+assert.deepEqual(restoredOrder.cards, sortable.cards, 'saving display order never alters learning content or progress');
+const otherOwnerRows = toLibraryRows('subjects', { subjects: [{ id: 'a-subject', name: 'Other account', position: 0 }] }, 'owner-b');
+assert.equal(otherOwnerRows[0].user_id, 'owner-b');
+assert.equal(persisted.subjects.find(row => row.id === 'a-subject').data.name, 'French', 'same record IDs remain namespaced by account');
 
 console.log('repository.test.mjs passed');

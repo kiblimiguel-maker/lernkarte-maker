@@ -6,11 +6,125 @@
   const records = value => Array.isArray(value) ? value.filter(isRecord) : [];
   const count = value => Number.isFinite(value) && value >= 0 ? value : 0;
 
+  const libraryCollectionKey = type => ({ subject: 'subjects', folder: 'folders', set: 'sets' })[type];
+  const libraryScope = (record, type) => type === 'subject' ? 'subjects' : JSON.stringify([
+    record.subjectId || null, type === 'folder' ? record.parentId || null : record.folderId || null
+  ]);
+  const hasLibraryPosition = record => Number.isSafeInteger(record.position) && record.position >= 0;
+  const orderedLibraryRecords = collection => collection.map((record, index) => ({ record, index })).sort((a, b) => {
+    if (hasLibraryPosition(a.record) && hasLibraryPosition(b.record)) return a.record.position - b.record.position || a.index - b.index;
+    if (hasLibraryPosition(a.record) !== hasLibraryPosition(b.record)) return hasLibraryPosition(a.record) ? -1 : 1;
+    return a.index - b.index;
+  }).map(({ record }) => record);
+
+  // Position lives inside each existing JSON record. Array indices are only
+  // presentation order and never identify a subject, folder, or learning set.
+  function normalizeLibraryOrder(collection, type) {
+    const scopes = new Map();
+    for (const record of collection) {
+      const key = libraryScope(record, type);
+      if (!scopes.has(key)) scopes.set(key, []);
+      scopes.get(key).push(record);
+    }
+    for (const [key, group] of scopes) scopes.set(key, { records: orderedLibraryRecords(group).map((record, position) => ({ ...record, position })), index: 0 });
+    return collection.map(record => {
+      const group = scopes.get(libraryScope(record, type));
+      return group.records[group.index++];
+    });
+  }
+
+  function normalizeFolderParents(folders) {
+    const byId = new Map(folders.map(folder => [folder.id, folder]));
+    for (const folder of folders) {
+      if (!folder.parentId) continue;
+      const parent = byId.get(folder.parentId);
+      if (!parent || parent.id === folder.id || parent.subjectId !== folder.subjectId) folder.parentId = null;
+    }
+    const state = new Map();
+    for (const folder of folders) {
+      if (state.has(folder.id)) continue;
+      const path = [];
+      let current = folder;
+      while (current && !state.has(current.id)) {
+        state.set(current.id, 'visiting');
+        path.push(current);
+        current = byId.get(current.parentId);
+      }
+      // Break one edge, retaining every folder and all learning set relations.
+      if (current && state.get(current.id) === 'visiting') current.parentId = null;
+      for (const item of path) state.set(item.id, 'done');
+    }
+    return folders;
+  }
+
+  function getFolderDescendantIds(library, folderId) {
+    const folders = records(library?.folders);
+    const root = folders.find(folder => folder.id === folderId);
+    if (!root) return [];
+    const children = new Map();
+    for (const folder of folders) {
+      if (folder.subjectId !== root.subjectId || !folder.parentId) continue;
+      if (!children.has(folder.parentId)) children.set(folder.parentId, []);
+      children.get(folder.parentId).push(folder.id);
+    }
+    const visited = new Set([folderId]);
+    const result = [];
+    const queue = [folderId];
+    for (let index = 0; index < queue.length; index++) {
+      for (const childId of children.get(queue[index]) || []) {
+        if (visited.has(childId)) continue;
+        visited.add(childId);
+        result.push(childId);
+        queue.push(childId);
+      }
+    }
+    return result;
+  }
+
+  function getLibrarySiblings(library, type, id) {
+    const key = libraryCollectionKey(type);
+    if (!key || !Array.isArray(library?.[key])) return [];
+    const collection = records(library[key]);
+    const source = collection.find(record => record.id === id);
+    if (!source) return [];
+    return orderedLibraryRecords(collection.filter(record => libraryScope(record, type) === libraryScope(source, type)));
+  }
+
+  // Call after changing an item's scope and before inserting a new item. The
+  // current record is excluded, so moving between folders always appends safely.
+  function nextLibraryPosition(library, type, item) {
+    const key = libraryCollectionKey(type);
+    if (!key || !isRecord(item)) return 0;
+    const siblings = records(library?.[key]).filter(record => record.id !== item.id && libraryScope(record, type) === libraryScope(item, type));
+    return siblings.reduce((last, record) => Math.max(last, hasLibraryPosition(record) ? record.position : -1), -1) + 1;
+  }
+
+  function reorderLibraryItems(library, { type, id, targetId, placement = 'before' } = {}) {
+    const key = libraryCollectionKey(type);
+    if (!key || typeof id !== 'string' || typeof targetId !== 'string' || id === targetId || !['before', 'after'].includes(placement)) return false;
+    const siblings = getLibrarySiblings(library, type, id);
+    if (!siblings.some(record => record.id === targetId) || new Set(siblings.map(record => record.id)).size !== siblings.length) return false;
+    const source = siblings.find(record => record.id === id);
+    const ordered = siblings.filter(record => record.id !== id);
+    const targetIndex = ordered.findIndex(record => record.id === targetId) + (placement === 'after' ? 1 : 0);
+    ordered.splice(targetIndex, 0, source);
+    if (ordered.every((record, index) => record === siblings[index])) return false;
+    ordered.forEach((record, position) => { record.position = position; });
+    let next = 0;
+    library[key] = library[key].map(record => isRecord(record) && libraryScope(record, type) === libraryScope(source, type) ? ordered[next++] : record);
+    return true;
+  }
+
   function normalizeLibrary(value) {
     if (!isRecord(value)) return emptyLibrary();
 
     const library = { ...emptyLibrary(), ...value };
     for (const key of ['subjects', 'folders', 'sets', 'recent', 'studyHistory']) library[key] = records(value[key]);
+    library.folders = normalizeFolderParents(library.folders.map(folder => ({ ...folder })));
+    for (const type of ['subject', 'folder', 'set']) {
+      const key = libraryCollectionKey(type);
+      library[key] = normalizeLibraryOrder(library[key], type);
+    }
     library.studySessions = isRecord(value.studySessions) ? Object.fromEntries(Object.entries(value.studySessions).filter(([, session]) =>
       isRecord(session) && Array.isArray(session.cardIds) && Array.isArray(session.results) && session.cardIds.length > 0 && session.cardIds.length === session.results.length && session.cardIds.every(cardId => typeof cardId === 'string') && session.results.every(result => result === null || typeof result === 'boolean') && Number.isInteger(session.index) && session.index >= 0 && session.index < session.cardIds.length
     )) : {};
@@ -308,7 +422,7 @@
     return -1;
   }
 
-  const api = { normalizeLibrary, createImportedCards, createCopiedCards, nextSetName, swapSetCardSides, recordCardAnswer, updateCardAnswer, createStudySession, getStudyResults, getStudyResult, getStudyCurrentIndex, getStudyCard, getNextStudyCardId, visitStudyCard, navigateStudySession, shuffleUnvisitedStudyCards, setStudyAnswer, getCardProgress, getSetProgress, resetSetProgress, summarizeResults, summarizeSession, nextUnratedIndex };
+  const api = { normalizeLibrary, getLibrarySiblings, reorderLibraryItems, nextLibraryPosition, getFolderDescendantIds, createImportedCards, createCopiedCards, nextSetName, swapSetCardSides, recordCardAnswer, updateCardAnswer, createStudySession, getStudyResults, getStudyResult, getStudyCurrentIndex, getStudyCard, getNextStudyCardId, visitStudyCard, navigateStudySession, shuffleUnvisitedStudyCards, setStudyAnswer, getCardProgress, getSetProgress, resetSetProgress, summarizeResults, summarizeSession, nextUnratedIndex };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (typeof globalThis !== 'undefined') globalThis.WortwerkModel = api;
 })();

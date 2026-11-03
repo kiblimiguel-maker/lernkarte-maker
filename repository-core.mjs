@@ -1,3 +1,10 @@
+export const LIBRARY_TABLE_FIELDS = { study_sessions: 'studySessions', study_history: 'studyHistory' };
+export function toLibraryRows(table, library, userId) {
+  const key = LIBRARY_TABLE_FIELDS[table];
+  const records = key === 'studySessions' ? Object.values(library[key] || {}) : library[key || table] || [];
+  return records.map(record => ({ user_id: userId, id: record.id, ...(table === 'folders' ? { subject_id: record.subjectId } : {}), ...(table === 'sets' ? { subject_id: record.subjectId, folder_id: record.folderId || null } : {}), ...(table === 'cards' ? { set_id: record.setId } : {}), ...(table === 'study_sessions' || table === 'study_history' ? { set_id: record.setId } : {}), data: record }));
+}
+
 export const LIBRARY_STORAGE_KEY = 'wortwerk-library-v1';
 export const LEGACY_MIGRATION_KEY = `${LIBRARY_STORAGE_KEY}:migrated`;
 export const LIBRARY_PAGE_SIZE = 500;

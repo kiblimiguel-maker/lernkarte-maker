@@ -1,14 +1,9 @@
 import { supabase } from './supabaseClient.js';
-import { claimLegacyCache, deleteStaleRows, LIBRARY_PAGE_SIZE, LIBRARY_STORAGE_KEY, LEGACY_MIGRATION_KEY, readAllRows, userLibraryCacheKey } from './repository-core.mjs';
+import { LIBRARY_TABLE_FIELDS, toLibraryRows, claimLegacyCache, deleteStaleRows, LIBRARY_PAGE_SIZE, LIBRARY_STORAGE_KEY, LEGACY_MIGRATION_KEY, readAllRows, userLibraryCacheKey } from './repository-core.mjs';
 
 const tables = ['subjects', 'folders', 'sets', 'cards', 'study_sessions', 'study_history'];
-const fieldMap = { study_sessions: 'studySessions', study_history: 'studyHistory' };
+const fieldMap = LIBRARY_TABLE_FIELDS;
 export { readAllRows, userLibraryCacheKey } from './repository-core.mjs';
-const toRows = (table, library, userId) => {
-  const key = fieldMap[table];
-  const records = key === 'studySessions' ? Object.values(library[key] || {}) : library[key || table] || [];
-  return records.map(record => ({ user_id: userId, id: record.id, ...(table === 'folders' ? { subject_id: record.subjectId } : {}), ...(table === 'sets' ? { subject_id: record.subjectId, folder_id: record.folderId || null } : {}), ...(table === 'cards' ? { set_id: record.setId } : {}), ...(table === 'study_sessions' || table === 'study_history' ? { set_id: record.setId } : {}), data: record }));
-};
 const fromRow = row => row.data;
 
 export async function loadLibrary(normalize, { client = supabase, storage = globalThis.localStorage, persist = saveLibrary } = {}) {
@@ -51,7 +46,7 @@ export function saveLibrary(library, suppliedUserId) {
     if (!userId) throw new Error('Keine aktive Sitzung');
     const pending = [];
     for (const table of tables) {
-      const rows = toRows(table, snapshot, userId);
+      const rows = toLibraryRows(table, snapshot, userId);
       for (let offset = 0; offset < rows.length; offset += 500) {
         const { error } = await supabase.from(table).upsert(rows.slice(offset, offset + 500), { onConflict: 'user_id,id' });
         if (error) throw error;

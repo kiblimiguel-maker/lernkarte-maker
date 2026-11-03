@@ -1,7 +1,7 @@
 'use strict';
 
 const assert = require('node:assert/strict');
-const { normalizeLibrary, createImportedCards, createCopiedCards, nextSetName, swapSetCardSides, recordCardAnswer, updateCardAnswer, createStudySession, getStudyResults, getStudyResult, getStudyCurrentIndex, getStudyCard, getNextStudyCardId, navigateStudySession, shuffleUnvisitedStudyCards, setStudyAnswer, getSetProgress, resetSetProgress, summarizeResults, summarizeSession, nextUnratedIndex } = require('./model.js');
+const { normalizeLibrary, getLibrarySiblings, reorderLibraryItems, nextLibraryPosition, getFolderDescendantIds, createImportedCards, createCopiedCards, nextSetName, swapSetCardSides, recordCardAnswer, updateCardAnswer, createStudySession, getStudyResults, getStudyResult, getStudyCurrentIndex, getStudyCard, getNextStudyCardId, navigateStudySession, shuffleUnvisitedStudyCards, setStudyAnswer, getSetProgress, resetSetProgress, summarizeResults, summarizeSession, nextUnratedIndex } = require('./model.js');
 
 assert.deepEqual(normalizeLibrary(null), { subjects: [], folders: [], sets: [], cards: [], recent: [], studySessions: {}, studyHistory: [] });
 const malformedCollections = normalizeLibrary({
@@ -246,5 +246,117 @@ assert.equal(combined.at(-1).setId, 'set-1');
 
 const largeProgress = getSetProgress(Array.from({ length: 20000 }, (_, index) => ({ attemptCount: 2, correctCount: index % 2 ? 0 : 2, incorrectCount: index % 2 ? 2 : 0 })));
 assert.deepEqual([largeProgress.total, largeProgress.secure, largeProgress.practice], [20000, 10000, 10000]);
+
+const orderedLibrary = normalizeLibrary({
+  subjects: [{ id: 'subject-z', name: 'French' }, { id: 'subject-a', name: 'German' }, { id: 'subject-m', name: 'Math' }],
+  folders: [
+    { id: 'folder-1', subjectId: 'subject-z', name: 'First' },
+    { id: 'other-subject-folder', subjectId: 'subject-a', name: 'Other' },
+    { id: 'folder-2', subjectId: 'subject-z', name: 'Second' },
+    { id: 'child-1', subjectId: 'subject-z', parentId: 'folder-1', name: 'Child 1' },
+    { id: 'child-2', subjectId: 'subject-z', parentId: 'folder-1', name: 'Child 2' },
+    { id: 'grandchild', subjectId: 'subject-z', parentId: 'child-1', name: 'Grandchild' }
+  ],
+  sets: [
+    { id: 'set-z', subjectId: 'subject-z', folderId: null },
+    { id: 'other-subject-set', subjectId: 'subject-a', folderId: null },
+    { id: 'set-a', subjectId: 'subject-z', folderId: null },
+    { id: 'set-child-1', subjectId: 'subject-z', folderId: 'folder-1' },
+    { id: 'set-child-2', subjectId: 'subject-z', folderId: 'folder-1' }
+  ],
+  cards: navigationCards,
+  studySessions: { 'nav-set': { id: 'sort-session', setId: 'nav-set', cardIds: ['nav-1', 'nav-2'], results: [true, false], index: 1 } },
+  studyHistory: [completedSummary]
+});
+const learningBeforeSort = structuredClone({ cards: orderedLibrary.cards, sessions: orderedLibrary.studySessions, history: orderedLibrary.studyHistory });
+assert.equal(reorderLibraryItems(orderedLibrary, { type: 'subject', id: 'subject-m', targetId: 'subject-z' }), true);
+assert.deepEqual(orderedLibrary.subjects.map(item => item.id), ['subject-m', 'subject-z', 'subject-a']);
+assert.equal(reorderLibraryItems(orderedLibrary, { type: 'folder', id: 'folder-2', targetId: 'folder-1' }), true);
+assert.deepEqual(getLibrarySiblings(orderedLibrary, 'folder', 'folder-1').map(item => item.id), ['folder-2', 'folder-1']);
+assert.equal(reorderLibraryItems(orderedLibrary, { type: 'folder', id: 'child-1', targetId: 'child-2', placement: 'after' }), true);
+assert.deepEqual(getLibrarySiblings(orderedLibrary, 'folder', 'child-1').map(item => item.id), ['child-2', 'child-1']);
+assert.equal(reorderLibraryItems(orderedLibrary, { type: 'set', id: 'set-a', targetId: 'set-z' }), true);
+assert.equal(reorderLibraryItems(orderedLibrary, { type: 'set', id: 'set-child-2', targetId: 'set-child-1' }), true);
+const libraryBeforeInvalidMove = structuredClone(orderedLibrary);
+for (const move of [
+  { type: 'folder', id: 'folder-1', targetId: 'other-subject-folder' },
+  { type: 'folder', id: 'folder-1', targetId: 'child-1' },
+  { type: 'set', id: 'set-a', targetId: 'set-child-1' },
+  { type: 'set', id: 'set-a', targetId: 'other-subject-set' },
+  { type: 'set', id: 'set-a', targetId: 'set-a' },
+  { type: 'set', id: 'missing', targetId: 'set-a' },
+  { type: 'set', id: 'set-a', targetId: 'missing' },
+  { type: 'card', id: 'nav-1', targetId: 'nav-2' },
+  { type: 'set', id: 'set-a', targetId: 'set-z', placement: 'invalid' }
+]) assert.equal(reorderLibraryItems(orderedLibrary, move), false, 'cross-level, cross-subject and invalid moves never mutate the library');
+assert.deepEqual(orderedLibrary, libraryBeforeInvalidMove);
+assert.deepEqual({ cards: orderedLibrary.cards, sessions: orderedLibrary.studySessions, history: orderedLibrary.studyHistory }, learningBeforeSort, 'library sorting preserves every card, learning answer and saved session');
+assert.deepEqual(getFolderDescendantIds(orderedLibrary, 'folder-1').sort(), ['child-1', 'child-2', 'grandchild']);
+assert.deepEqual(getFolderDescendantIds(orderedLibrary, 'unknown'), []);
+
+// Simulate database records being returned by primary key rather than display order.
+const remoteOrder = structuredClone(orderedLibrary);
+for (const key of ['subjects', 'folders', 'sets']) remoteOrder[key].sort((a, b) => a.id.localeCompare(b.id));
+const sortedReload = normalizeLibrary(JSON.parse(JSON.stringify(remoteOrder)));
+assert.deepEqual(sortedReload.subjects.map(item => item.id), ['subject-m', 'subject-z', 'subject-a']);
+assert.deepEqual(getLibrarySiblings(sortedReload, 'folder', 'folder-1').map(item => item.id), ['folder-2', 'folder-1']);
+assert.deepEqual(getLibrarySiblings(sortedReload, 'folder', 'child-1').map(item => item.id), ['child-2', 'child-1']);
+assert.deepEqual(getLibrarySiblings(sortedReload, 'set', 'set-a').map(item => item.id), ['set-a', 'set-z']);
+assert.deepEqual(getLibrarySiblings(sortedReload, 'set', 'set-child-1').map(item => item.id), ['set-child-2', 'set-child-1']);
+sortedReload.subjects.unshift({ id: 'subject-new', name: 'New' });
+assert.deepEqual(normalizeLibrary(sortedReload).subjects.map(item => item.id), ['subject-m', 'subject-z', 'subject-a', 'subject-new'], 'new unpositioned records append after the stored custom order');
+assert.deepEqual(normalizeLibrary({ subjects: [{ id: 'old-a' }, { id: 'old-b' }] }).subjects.map(item => item.id), ['old-a', 'old-b'], 'legacy collections preserve their existing order');
+assert.equal(reorderLibraryItems(normalizeLibrary({}), { type: 'subject', id: 'missing', targetId: 'none' }), false);
+assert.equal(reorderLibraryItems({ subjects: [{ id: 'only' }] }, { type: 'subject', id: 'only', targetId: 'only' }), false);
+
+const repeatedLibrarySort = structuredClone(orderedLibrary);
+const setRelationsBefore = repeatedLibrarySort.sets.map(item => [item.id, item.subjectId, item.folderId]).sort();
+for (let iteration = 0; iteration < 100; iteration++) {
+  reorderLibraryItems(repeatedLibrarySort, { type: 'subject', id: iteration % 2 ? 'subject-a' : 'subject-m', targetId: 'subject-z', placement: iteration % 3 ? 'before' : 'after' });
+  reorderLibraryItems(repeatedLibrarySort, { type: 'set', id: 'set-z', targetId: 'set-a', placement: iteration % 2 ? 'before' : 'after' });
+  assert.equal(new Set(repeatedLibrarySort.subjects.map(item => item.id)).size, 3);
+  assert.equal(new Set(repeatedLibrarySort.sets.map(item => item.id)).size, 5);
+}
+assert.deepEqual(repeatedLibrarySort.sets.map(item => [item.id, item.subjectId, item.folderId]).sort(), setRelationsBefore, 'repeated sorting never duplicates entries or changes their subject/folder membership');
+
+const appendOrder = normalizeLibrary({
+  subjects: [{ id: 'z' }, { id: 'a' }],
+  folders: [{ id: 'parent', subjectId: 'z' }, { id: 'existing-root', subjectId: 'z' }, { id: 'child', subjectId: 'z', parentId: 'parent' }],
+  sets: [{ id: 'existing-set', subjectId: 'z', folderId: null }, { id: 'moved-set', subjectId: 'z', folderId: 'parent' }]
+});
+assert.deepEqual(appendOrder.subjects.map(item => item.position), [0, 1], 'legacy records receive stable explicit positions when loaded');
+const newSubject = { id: 'new-a' };
+newSubject.position = nextLibraryPosition(appendOrder, 'subject', newSubject);
+appendOrder.subjects.push(newSubject);
+const secondNewSubject = { id: 'new-z' };
+secondNewSubject.position = nextLibraryPosition(appendOrder, 'subject', secondNewSubject);
+appendOrder.subjects.push(secondNewSubject);
+assert.deepEqual(appendOrder.subjects.map(item => item.position), [0, 1, 2, 3]);
+const movedChild = appendOrder.folders.find(item => item.id === 'child');
+movedChild.parentId = null;
+movedChild.position = nextLibraryPosition(appendOrder, 'folder', movedChild);
+assert.equal(movedChild.position, 2, 'reparented folder appends without retaining its old level position');
+const movedSet = appendOrder.sets.find(item => item.id === 'moved-set');
+movedSet.folderId = null;
+movedSet.position = nextLibraryPosition(appendOrder, 'set', movedSet);
+assert.equal(movedSet.position, 1, 'moving a learning set appends in its target folder');
+for (const key of ['subjects', 'folders', 'sets']) appendOrder[key].sort((a, b) => a.id.localeCompare(b.id));
+const appendReload = normalizeLibrary(JSON.parse(JSON.stringify(appendOrder)));
+assert.deepEqual(appendReload.subjects.map(item => item.id), ['z', 'a', 'new-a', 'new-z']);
+assert.deepEqual(getLibrarySiblings(appendReload, 'folder', 'child').map(item => item.id), ['parent', 'existing-root', 'child']);
+assert.deepEqual(appendReload.sets.map(item => item.id), ['existing-set', 'moved-set']);
+assert.equal(nextLibraryPosition(appendReload, 'set', { id: 'another-subject', subjectId: 'other', folderId: null }), 0, 'append position belongs to its own subject and folder');
+
+const malformedParents = normalizeLibrary({ folders: [
+  { id: 'cycle-a', subjectId: 'a', parentId: 'cycle-b' },
+  { id: 'cycle-b', subjectId: 'a', parentId: 'cycle-a' },
+  { id: 'self', subjectId: 'a', parentId: 'self' },
+  { id: 'missing', subjectId: 'a', parentId: 'gone' },
+  { id: 'cross-subject', subjectId: 'b', parentId: 'cycle-b' }
+] });
+assert.equal(malformedParents.folders.length, 5, 'invalid ancestry never removes a folder');
+assert.equal(malformedParents.folders.filter(item => item.id.startsWith('cycle-') && !item.parentId).length, 1, 'one cycle edge is safely detached');
+assert.deepEqual(malformedParents.folders.slice(2).map(item => item.parentId), [null, null, null]);
+assert.ok(getFolderDescendantIds(malformedParents, 'cycle-a').length <= 1);
 
 console.log('Data checks passed: storage and session restore, learning progress, auto-naming, independent missed-card copies, side swapping, and 50,000-card import batches.');
