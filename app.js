@@ -3,7 +3,6 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
 
 (() => {
   'use strict';
-  const STORAGE_KEY = 'wortwerk-library-v1';
   const palette = [
     ['#E76F51','Terrakotta'],['#DC2626','Rot'],['#F97316','Orange'],['#D97706','Bernstein'],
     ['#EAB308','Gelb'],['#65A30D','Oliv'],['#16A34A','Grün'],['#15803D','Waldgrün'],
@@ -48,11 +47,13 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
   let donationStatusChecking = false;
   let donationAmountCents = 1000;
   let donationSubmitting = false;
+  let donationCheckoutAvailable = null;
+  let donationReadinessRequest = null;
   let donationCheckoutRequestId = null;
   let donationGreetingDismissed = false;
   let data = initial(), activeSubject = null, activeFolder = null, activeSet = null, view = donationReturn ? 'donations' : 'library';
   let formContext = null, importRows = [], importChecked = false, importHasErrors = false, session = null;
-  function save(){try{localStorage.setItem(STORAGE_KEY,JSON.stringify(data))}catch(e){console.warn('Lokaler Cache konnte nicht aktualisiert werden.',e)}const pending=window.WortwerkRepository.saveLibrary(data);pending.catch(()=>{});return pending}
+  function save(){const pending=window.WortwerkRepository.saveLibrary(data);pending.catch(()=>{});return pending}
   const subject = key => data.subjects.find(x=>x.id===key);
   const folder = key => data.folders.find(x=>x.id===key);
   const setById = key => data.sets.find(x=>x.id===key);
@@ -131,7 +132,7 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
               : '<div class="donation-result" role="status" aria-live="polite">Zahlungsstatus wird sicher bei Stripe geprüft …</div>'
         : '';
     const selected=donationAmountCents;
-    $('#content').innerHTML=`<section class="donation-page" aria-labelledby="donation-title"><div class="donation-heading"><div class="eyebrow">FREIWILLIG UND EINMALIG</div><h1 class="page-title" id="donation-title">wortwerk unterstützen</h1><p class="page-subtitle">wortwerk ist kostenlos und soll es auch bleiben. Wenn dir die App gefällt, hilft deine freiwillige Spende dabei, sie weiterzuentwickeln.</p></div><div class="donation-layout"><section class="donation-panel" aria-labelledby="donation-amount-title"><h2 id="donation-amount-title">Eine Spende geben</h2><p class="donation-panel-copy">Wähle einen Betrag. Jede Zahlung ist einmalig; es gibt keine Abos und keine zusätzlichen Funktionen durch eine Spende.</p><fieldset class="donation-amount-group"><legend class="field-label">Vorgeschlagener Betrag</legend><div class="donation-amount-options">${DONATION_PRESETS_CENTS.map(cents=>`<button class="donation-amount-option${selected===cents?' is-selected':''}" type="button" data-donation-amount="${cents}" aria-pressed="${selected===cents}">${esc(formatDonationAmount(cents))}</button>`).join('')}</div></fieldset><label class="field-label donation-custom-label" for="donation-custom-amount">Oder eigener Betrag</label><div class="donation-custom-input"><span aria-hidden="true">CHF</span><input id="donation-custom-amount" type="text" inputmode="decimal" autocomplete="off" placeholder="z. B. 12.50" aria-describedby="donation-custom-hint"></div><p class="field-hint" id="donation-custom-hint">Mindestens CHF 0.50. Das Stripe-Limit liegt bei CHF 999’999.99.</p><button class="primary-button donation-submit" id="donation-submit" type="button"${donationSubmitting?' disabled aria-busy="true"':''}>${donationSubmitting?'Weiter zu Stripe …':`Sicher spenden · ${esc(formatDonationAmount(selected))}`}</button><p class="donation-assurance">Die Zahlung wird sicher über Stripe abgewickelt. wortwerk speichert keine Karten- oder Zahlungsdaten. Die App bleibt vollständig kostenlos.</p>${resultMarkup}${donationReturn?.type==='success'&&['pending','unavailable'].includes(donationPayment?.status)?'<button class="text-button donation-recheck" id="donation-recheck" type="button">Zahlungsstatus erneut prüfen</button>':''}<p class="donation-error" id="donation-error" role="alert" hidden></p></section><aside class="donation-note"><div class="donation-note-mark" aria-hidden="true">♡</div><h2>Freiwillig. Einmalig. Für alle kostenlos.</h2><p>Jede Unterstützung hilft. Vielen Dank! Du kannst wortwerk auch ohne Spende vollständig nutzen.</p><button class="text-button" type="button" id="donation-library">Weiter zur App</button></aside></div></section>`;
+    $('#content').innerHTML=`<section class="donation-page" aria-labelledby="donation-title"><div class="donation-heading"><div class="eyebrow">FREIWILLIG UND EINMALIG</div><h1 class="page-title" id="donation-title">wortwerk unterstützen</h1><p class="page-subtitle">wortwerk ist kostenlos und soll es auch bleiben. Wenn dir die App gefällt, hilft deine freiwillige Spende dabei, sie weiterzuentwickeln.</p></div><div class="donation-layout"><section class="donation-panel" aria-labelledby="donation-amount-title"><h2 id="donation-amount-title">Eine Spende geben</h2><p class="donation-panel-copy">Wähle einen Betrag. Jede Zahlung ist einmalig; es gibt keine Abos und keine zusätzlichen Funktionen durch eine Spende.</p><fieldset class="donation-amount-group"><legend class="field-label">Vorgeschlagener Betrag</legend><div class="donation-amount-options">${DONATION_PRESETS_CENTS.map(cents=>`<button class="donation-amount-option${selected===cents?' is-selected':''}" type="button" data-donation-amount="${cents}" aria-pressed="${selected===cents}">${esc(formatDonationAmount(cents))}</button>`).join('')}</div></fieldset><label class="field-label donation-custom-label" for="donation-custom-amount">Oder eigener Betrag</label><div class="donation-custom-input"><span aria-hidden="true">CHF</span><input id="donation-custom-amount" type="text" inputmode="decimal" autocomplete="off" placeholder="z. B. 12.50" aria-describedby="donation-custom-hint"></div><p class="field-hint" id="donation-custom-hint">Mindestens CHF 0.50. Das Stripe-Limit liegt bei CHF 999’999.99.</p><button class="primary-button donation-submit" id="donation-submit" type="button" disabled aria-busy="${donationCheckoutAvailable===null}" >${donationCheckoutAvailable===true?`Sicher spenden · ${esc(formatDonationAmount(selected))}`:donationCheckoutAvailable===false?'Spenden derzeit nicht verfügbar':'Zahlungsanbindung wird geprüft …'}</button><p class="donation-setup-note donation-result is-neutral" id="donation-setup-note" role="status" aria-live="polite" hidden></p><p class="donation-assurance">Die Zahlung wird sicher über Stripe abgewickelt. wortwerk speichert keine Karten- oder Zahlungsdaten. Die App bleibt vollständig kostenlos.</p>${resultMarkup}${donationReturn?.type==='success'&&['pending','unavailable'].includes(donationPayment?.status)?'<button class="text-button donation-recheck" id="donation-recheck" type="button">Zahlungsstatus erneut prüfen</button>':''}<p class="donation-error" id="donation-error" role="alert" hidden></p></section><aside class="donation-note"><div class="donation-note-mark" aria-hidden="true">♡</div><h2>Freiwillig. Einmalig. Für alle kostenlos.</h2><p>Jede Unterstützung hilft. Vielen Dank! Du kannst wortwerk auch ohne Spende vollständig nutzen.</p><button class="text-button" type="button" id="donation-library">Weiter zur App</button></aside></div></section>`;
     document.querySelectorAll('[data-donation-amount]').forEach(button=>button.addEventListener('click',()=>{
       donationAmountCents=Number(button.dataset.donationAmount);donationCheckoutRequestId=null;
       const custom=$('#donation-custom-amount');if(custom)custom.value='';
@@ -147,6 +148,8 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
     $('#donation-submit')?.addEventListener('click',startDonationCheckout);
     $('#donation-library')?.addEventListener('click',()=>{donationReturn=null;donationPayment=null;view='library';render()});
     $('#donation-recheck')?.addEventListener('click',refreshDonationPaymentStatus);
+    updateDonationButton();
+    checkDonationReadiness();
     if(donationReturn?.type==='success'&&donationPayment?.status==='checking'&&!donationStatusChecking)refreshDonationPaymentStatus();
   }
   function renderDonationWelcome(){
@@ -166,12 +169,34 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
   function updateDonationButton(){
     const button=$('#donation-submit');if(!button)return;
     const valid=Number.isSafeInteger(donationAmountCents)&&donationAmountCents>=50&&donationAmountCents<=99_999_999;
-    button.disabled=!valid||donationSubmitting;
+    const available=donationCheckoutAvailable===true;
+    button.disabled=!valid||!available||donationSubmitting;
     button.setAttribute('aria-busy',String(donationSubmitting));
-    button.textContent=donationSubmitting?'Weiter zu Stripe …':valid?`Sicher spenden · ${formatDonationAmount(donationAmountCents)}`:'Betrag ab CHF 0.50 eingeben';
+    button.textContent=donationSubmitting?'Weiter zu Stripe …':!available?(donationCheckoutAvailable===false?'Spenden derzeit nicht verfügbar':'Zahlungsanbindung wird geprüft …'):valid?`Sicher spenden · ${formatDonationAmount(donationAmountCents)}`:'Betrag ab CHF 0.50 eingeben';
+    const note=$('#donation-setup-note');
+    if(note){note.hidden=available;note.textContent=donationCheckoutAvailable===false?'Spenden sind derzeit noch nicht verfügbar, weil die sichere Zahlungsanbindung eingerichtet wird. wortwerk bleibt vollständig kostenlos.':'Die Verfügbarkeit der sicheren Zahlungsanbindung wird geprüft …'}
+  }
+  function checkDonationReadiness(){
+    if(donationCheckoutAvailable!==null)return Promise.resolve(donationCheckoutAvailable);
+    if(donationReadinessRequest)return donationReadinessRequest;
+    donationReadinessRequest=(async()=>{
+      try{
+        const response=await fetch('/api/support-readiness',{cache:'no-store'});
+        if(!response.ok)throw new Error('Spendenstatus nicht verfügbar');
+        const payload=await response.json();
+        donationCheckoutAvailable=payload.configured===true;
+      }catch{
+        donationCheckoutAvailable=false;
+      }finally{
+        donationReadinessRequest=null;
+      }
+      if(view==='donations')updateDonationButton();
+      return donationCheckoutAvailable;
+    })();
+    return donationReadinessRequest;
   }
   async function startDonationCheckout(){
-    if(donationSubmitting||!Number.isSafeInteger(donationAmountCents)||donationAmountCents<50||donationAmountCents>99_999_999)return;
+    if(donationSubmitting||donationCheckoutAvailable!==true||!Number.isSafeInteger(donationAmountCents)||donationAmountCents<50||donationAmountCents>99_999_999)return;
     const button=$('#donation-submit'),error=$('#donation-error');
     donationSubmitting=true;button.disabled=true;button.setAttribute('aria-busy','true');button.textContent='Weiter zu Stripe …';error.hidden=true;error.textContent='';
     try{

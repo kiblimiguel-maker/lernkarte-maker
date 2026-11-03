@@ -18,8 +18,19 @@ import {
 import { createStripeWebhookHandler } from './api/stripe-webhook.mjs';
 import { POST as createCheckout, createDonationCheckoutHandler } from './api/support-checkout.mjs';
 import { GET as checkDonationStatus, createDonationStatusHandler } from './api/support-status.mjs';
+import { GET as checkDonationReadiness, isDonationCheckoutConfigured } from './api/support-readiness.mjs';
 
 assert.deepEqual(DONATION_PRESETS_CENTS, [500, 1000, 2000]);
+const completeDonationConfig = {
+  STRIPE_SECRET_KEY: 'configured', STRIPE_WEBHOOK_SECRET: 'configured',
+  VITE_SUPABASE_URL: 'https://example.supabase.co', VITE_SUPABASE_PUBLISHABLE_KEY: 'configured',
+  SUPABASE_SECRET_KEY: 'configured', APP_BASE_URL: 'https://wortwerk.example'
+};
+assert.equal(isDonationCheckoutConfigured(completeDonationConfig), true);
+assert.equal(isDonationCheckoutConfigured({ ...completeDonationConfig, STRIPE_WEBHOOK_SECRET: '' }), false);
+assert.equal(isDonationCheckoutConfigured({ ...completeDonationConfig, SUPABASE_SECRET_KEY: '' }), false);
+assert.equal(isDonationCheckoutConfigured({ ...completeDonationConfig, APP_BASE_URL: 'http://wortwerk.example' }), false);
+assert.equal((await checkDonationReadiness()).status, 200);
 assert.equal(parseDonationAmountCents('0.50'), 50);
 assert.equal(parseDonationAmountCents('12,5'), 1250);
 assert.equal(parseDonationAmountCents('999999.99'), DONATION_MAX_CENTS);

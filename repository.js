@@ -1,8 +1,9 @@
 import { supabase } from './supabaseClient.js';
+import { claimLegacyCache, deleteStaleRows, LIBRARY_PAGE_SIZE, LIBRARY_STORAGE_KEY, LEGACY_MIGRATION_KEY, readAllRows, userLibraryCacheKey } from './repository-core.mjs';
 
 const tables = ['subjects', 'folders', 'sets', 'cards', 'study_sessions', 'study_history'];
-const storageKey = 'wortwerk-library-v1';
 const fieldMap = { study_sessions: 'studySessions', study_history: 'studyHistory' };
+export { readAllRows, userLibraryCacheKey } from './repository-core.mjs';
 const toRows = (table, library, userId) => {
   const key = fieldMap[table];
   const records = key === 'studySessions' ? Object.values(library[key] || {}) : library[key || table] || [];
@@ -10,28 +11,29 @@ const toRows = (table, library, userId) => {
 };
 const fromRow = row => row.data;
 
-export async function loadLibrary(normalize) {
-  const { data: { user }, error: userError } = await supabase.auth.getUser();
+export async function loadLibrary(normalize, { client = supabase, storage = globalThis.localStorage, persist = saveLibrary } = {}) {
+  const { data: { user }, error: userError } = await client.auth.getUser();
   if (userError || !user) throw userError || new Error('Keine aktive Sitzung');
   activeUserId = user.id;
-  const result = {};
-  for (const table of tables) {
-    const { data, error } = await supabase.from(table).select('*');
-    if (error) throw error;
-    result[fieldMap[table] || table] = data.map(fromRow);
-  }
+  const tableResults = await Promise.all(tables.map(async table => {
+    const rows = await readAllRows(client.from(table).select('*').eq('user_id', user.id).order('id', { ascending: true }));
+    return [fieldMap[table] || table, rows.map(fromRow)];
+  }));
+  const result = Object.fromEntries(tableResults);
   result.studySessions = Object.fromEntries(result.studySessions.map(record => [record.setId, record]));
   const remote = normalize(result);
-  const localRaw = localStorage.getItem(storageKey);
   const hasRemote = tables.some(table => result[fieldMap[table] || table].length);
-  const migrationKey = `${storageKey}:migrated`;
-  if (!hasRemote && localRaw && !localStorage.getItem(migrationKey)) {
-    let local;
-    try { local = normalize(JSON.parse(localRaw)); } catch (error) { throw new Error(`Lokale Bibliothek ist beschädigt und blieb unangetastet: ${error.message}`); }
-    await saveLibrary(local, user.id);
-    localStorage.setItem(migrationKey, new Date().toISOString());
-    return local;
+  let localRaw = null;
+  let migrationOwner = null;
+  try {
+    localRaw = storage?.getItem(LIBRARY_STORAGE_KEY) ?? null;
+    migrationOwner = storage?.getItem(LEGACY_MIGRATION_KEY) ?? null;
+  } catch (error) {
+    migrationOwner = 'unavailable';
+    console.warn('Lokaler Lernkarten-Cache konnte nicht geprüft werden.', error);
   }
+  const legacy = await claimLegacyCache({ legacyRaw: localRaw, migrationOwner, hasRemote, remote, normalize, persist, userId: user.id, storage });
+  if (legacy.imported || (localRaw && !migrationOwner)) return legacy.library;
   return remote;
 }
 
@@ -40,6 +42,11 @@ let activeUserId = null;
 export function saveLibrary(library, suppliedUserId) {
   const userId = suppliedUserId || activeUserId;
   const snapshot = JSON.parse(JSON.stringify(library));
+  try {
+    if (userId) globalThis.localStorage?.setItem(userLibraryCacheKey(userId), JSON.stringify(snapshot));
+  } catch (error) {
+    console.warn('Lokaler Lernkarten-Cache konnte nicht aktualisiert werden.', error);
+  }
   const operation = writeQueue.then(async () => {
     if (!userId) throw new Error('Keine aktive Sitzung');
     const pending = [];
@@ -53,10 +60,15 @@ export function saveLibrary(library, suppliedUserId) {
     }
     for (const { table, rows } of pending.reverse()) {
       const ids = rows.map(row => row.id);
-      let query = supabase.from(table).delete().eq('user_id', userId);
-      if (ids.length) query = query.not('id', 'in', `(${ids.map(id => `"${id}"`).join(',')})`);
-      const { error } = await query;
-      if (error) throw error;
+      if (ids.length <= LIBRARY_PAGE_SIZE) {
+        let query = supabase.from(table).delete().eq('user_id', userId);
+        if (ids.length) query = query.not('id', 'in', `(${ids.map(id => `"${id}"`).join(',')})`);
+        const { error } = await query;
+        if (error) throw error;
+        continue;
+      }
+
+      await deleteStaleRows(supabase, table, userId, ids);
     }
   });
   writeQueue = operation.catch(error => { console.error('Supabase-Speichern fehlgeschlagen.', error); window.dispatchEvent(new CustomEvent('library-save-error', { detail: error })); });
