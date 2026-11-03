@@ -27,9 +27,9 @@ New model/repository cases cover subject/folder/subfolder/set sorting, repeated 
 
 ## Browser verification
 
-Used the actual app markup, styles and modules in a disposable local fixture with separate test-user storage. Test scaffolding is excluded from Git and the production build. No production learner data was changed.
+Used the actual app markup, styles and modules in a disposable local fixture with separate test-user storage. Test scaffolding is excluded from Git and the production build. Creation, import and learning interactions used only disposable data. A separate production sorting smoke test is recorded below.
 
-Verified at 1280px, 834px, 390px and 320px viewport widths:
+Layouts were inspected at 1280px, 834px, 390px and 320px viewport widths. The following flows were exercised on desktop or the 390px viewport:
 
 - Library, subject, nested folder and set navigation.
 - Sorting via arrow controls; pointer drag-and-drop; ordering retained after a new page load.
@@ -40,6 +40,10 @@ Verified at 1280px, 834px, 390px and 320px viewport widths:
 - All ten theme options can be selected; original design remains available and selected by default.
 - Settings previews, mobile donations and the real signed-out login presentation.
 - No document-width overflow in the checked library layouts at 320px and 834px.
+
+## Production smoke test
+
+Production deployment of implementation commit `5d823b1` reached READY. The actual signed-in library loaded successfully with its 3 sets and 400 cards. One set was moved one place, the successful save was awaited, and the changed order survived a complete reload from Supabase. The original order was then restored and confirmed after another full reload. No cards were created, edited, rated or removed in production. Browser error logs for this live test were empty; the initial deployment runtime error scan returned no errors.
 
 ## External verification and limits
 
