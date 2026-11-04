@@ -4,11 +4,9 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
 (() => {
   'use strict';
   const palette = [
-    ['#E76F51','Terrakotta'],['#DC2626','Rot'],['#F97316','Orange'],['#D97706','Bernstein'],
-    ['#EAB308','Gelb'],['#65A30D','Oliv'],['#16A34A','Grün'],['#15803D','Waldgrün'],
-    ['#0F766E','Petrol'],['#14B8A6','Türkis'],['#0891B2','Cyan'],['#0284C7','Himmelblau'],
-    ['#2563EB','Blau'],['#1D4ED8','Kobaltblau'],['#1E3A8A','Marineblau'],['#475569','Graphit'],
-    ['#64748B','Schiefer'],['#8B5E3C','Kastanie'],['#DB2777','Pink'],['#F8FAFC','Weiß']
+    ['#3378F6','Kobaltblau'],['#0AA4CF','Azur'],['#00A88F','Jade'],['#26A65B','Smaragd'],
+    ['#99B62A','Limette'],['#E7A623','Safran'],['#EE7937','Mandarine'],['#DC4D5A','Koralle'],
+    ['#CE458B','Himbeere'],['#9359DB','Amethyst'],['#6264DA','Indigo'],['#77889E','Schiefer']
   ];
   const colors = palette.map(([hex])=>hex);
   const safeColor = (value,fallback=colors[0]) => typeof value==='string' && /^#[0-9a-f]{6}$/i.test(value) ? value : fallback;
@@ -52,7 +50,7 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
   let donationCheckoutRequestId = null;
   let donationGreetingDismissed = false;
   let data = initial(), activeSubject = null, activeFolder = null, activeSet = null, view = donationReturn ? 'donations' : 'library';
-  let librarySorting = false, librarySortSaving = false;
+  let librarySorting = false, librarySortSaving = false, entitySaving = false;
   let formContext = null, importRows = [], importChecked = false, importHasErrors = false, session = null;
   function save(){const pending=window.WortwerkRepository.saveLibrary(data);pending.catch(()=>{});return pending}
   const subject = key => data.subjects.find(x=>x.id===key);
@@ -81,10 +79,12 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
     slot.frontText.innerHTML=genderMarkup(front.term);slot.frontExampleText.textContent=front.exampleSentence?`(${front.exampleSentence})`:'';slot.frontExampleText.hidden=!front.exampleSentence;
     slot.backText.innerHTML=genderMarkup(back.term);slot.backExampleText.textContent=back.exampleSentence?`(${back.exampleSentence})`:'';slot.backExampleText.hidden=!back.exampleSentence;
   }
-  function toast(message){const el=document.createElement('div');el.className='toast';el.setAttribute('role','status');el.textContent=message;document.body.append(el);setTimeout(()=>el.remove(),2400)}
+  function toast(message){const inline=$('#form-save-error');if($('#form-dialog')?.open&&inline){inline.textContent=message;inline.hidden=false;return}const el=document.createElement('div');el.className='toast';el.setAttribute('role','status');el.textContent=message;document.body.append(el);setTimeout(()=>el.remove(),2400)}
+  function cardThemePreview(theme){
+    return `<span class="card-theme-preview" aria-hidden="true">${['front','back'].map(side=>{const color=theme[side];return `<span class="card-theme-preview-face" style="--preview-surface:${color.surface};--preview-text:${color.text};--preview-muted:${color.muted};--preview-border:${color.border};--preview-gender-m:${color['gender-masculine']};--preview-gender-f:${color['gender-feminine']}"><span class="card-theme-preview-label">${side==='front'?'Vorderseite':'Rückseite'}</span><span class="card-theme-preview-term"><span class="gender-${side==='front'?'masculine':'feminine'}">${side==='front'?'un':'une'}</span> ${side==='front'?'livre':'maison'}</span><span class="card-theme-preview-example">(${side==='front'?'un livre ancien':'une maison calme'})</span></span>`}).join('')}</span>`;
+  }
   function renderCardThemeOptions(){
-    const container=$('#card-theme-options');
-    container.innerHTML=cardThemes.themes.map(theme=>`<label class="card-theme-option${theme.id===activeCardThemeId?' is-selected':''}"><input class="card-theme-radio" type="radio" name="card-theme" value="${esc(theme.id)}"${theme.id===activeCardThemeId?' checked':''}><span class="card-theme-option-copy"><span class="card-theme-option-heading"><strong>${esc(theme.name)}</strong><span class="card-theme-selected-label" aria-live="polite">${theme.id===activeCardThemeId?'Ausgewählt':''}</span></span><small>${esc(theme.description)}</small><span class="card-theme-preview" aria-hidden="true">${['front','back'].map(side=>{const palette=theme[side];return `<span class="card-theme-preview-face" style="--preview-surface:${palette.surface};--preview-text:${palette.text};--preview-muted:${palette.muted};--preview-border:${palette.border};--preview-gender-m:${palette['gender-masculine']};--preview-gender-f:${palette['gender-feminine']}"><span class="card-theme-preview-label">${side==='front'?'Vorderseite':'Rückseite'}</span><span class="card-theme-preview-term"><span class="gender-${side==='front'?'masculine':'feminine'}">${side==='front'?'un':'une'}</span> ${side==='front'?'livre':'maison'}</span><span class="card-theme-preview-example">(${side==='front'?'un livre ancien':'une maison calme'})</span></span>`}).join('')}</span></span></label>`).join('');
+    $('#card-theme-options').innerHTML=cardThemes.themes.map(theme=>`<label class="card-theme-option${theme.id===activeCardThemeId?' is-selected':''}"><input class="card-theme-radio" type="radio" name="card-theme" value="${esc(theme.id)}"${theme.id===activeCardThemeId?' checked':''}><span class="card-theme-option-copy"><span class="card-theme-option-heading"><strong>${esc(theme.name)}</strong><span class="card-theme-selected-label" aria-live="polite">${theme.id===activeCardThemeId?'Ausgewählt':''}</span></span><small>${esc(theme.description)}</small>${cardThemePreview(theme)}</span></label>`).join('');
   }
   function applySelectedCardTheme(themeId){
     const result=cardThemes.saveTheme(themeId);
@@ -94,7 +94,7 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
       option.classList.toggle('is-selected',selected);
       option.querySelector('.card-theme-selected-label').textContent=selected?'Ausgewählt':'';
     });
-    if(!result.persisted)toast('Farbschema übernommen. Die dauerhafte Speicherung ist in diesem Browser nicht verfügbar.');
+    if(!result.persisted)toast('Farbschema übernommen. Die dauerhafte Speicherung ist in diesem Browser nicht verfügbar.');render();
   }
   function render(){
     if(view!=='library'||activeSet)librarySorting=false;
@@ -118,8 +118,9 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
       const current=button.dataset.view==='recent'?view==='recent':button.dataset.view==='donations'?view==='donations':button.dataset.view==='library'&&view==='library'&&atLibraryRoot;
       if(current)button.setAttribute('aria-current','page');else button.removeAttribute('aria-current');
     });
-    $('#sidebar-subjects').innerHTML=data.subjects.map(item=>`<button data-sidebar-subject="${esc(item.id)}" ${view==='library'&&activeSubject===item.id?'aria-current="page"':''}><span class="sidebar-dot" style="--dot:${safeColor(item.color)}"></span><span>${esc(item.name)}</span></button>`).join('')||'<p class="sidebar-empty">Deine Fächer erscheinen hier.</p>';
+    $('#sidebar-subjects').innerHTML=data.subjects.map(item=>`<button data-sidebar-subject="${esc(item.id)}" data-drop-folder="" data-drop-subject="${esc(item.id)}" ${view==='library'&&activeSubject===item.id&&!activeFolder?'aria-current="page"':''}><span class="sidebar-dot" style="--dot:${safeColor(item.color)}"></span><span>${esc(item.name)}</span></button>${view==='library'&&activeSubject===item.id?sidebarFolders(item.id):''}`).join('')||'<p class="sidebar-empty">Deine Fächer erscheinen hier.</p>';
     document.querySelectorAll('[data-sidebar-subject]').forEach(button=>button.onclick=()=>{closeNavigation();librarySorting=false;view='library';activeSubject=button.dataset.sidebarSubject;activeFolder=null;activeSet=null;render()});
+    document.querySelectorAll('[data-sidebar-folder]').forEach(button=>button.onclick=()=>{closeNavigation();librarySorting=false;view='library';activeFolder=button.dataset.sidebarFolder;activeSubject=folder(activeFolder)?.subjectId;activeSet=null;render()});
     crumbs(view==='recent'?['Zuletzt gelernt']:view==='donations'?['Bibliothek','Spenden']:['Bibliothek']);
   }
   const mobileNavigation=window.matchMedia('(max-width:760px)');
@@ -246,12 +247,166 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
     donationStatusChecking=false;
     renderDonations();
   }
+  function subjectAppearance(item,fallback=colors[0]){const colour=safeColor(item.color,fallback);return `--dot:${colour};--subject-ink:${window.WortwerkPresentation.colourInk(colour)}`}
+  function subjectSymbol(item,fallback='📚'){
+    const icon=item.emoji||item.icon||fallback;
+    const flag=icon==='🇫🇷'?'<svg class="subject-flag" viewBox="0 0 36 26" aria-hidden="true"><path fill="#0055A4" d="M0 0h12v26H0z"/><path fill="#FFF" d="M12 0h12v26H12z"/><path fill="#EF4135" d="M24 0h12v26H24z"/></svg>':`<span class="subject-glyph">${esc(icon)}</span>`;
+    return `<span class="subject-icon" aria-hidden="true">${flag}</span>`;
+  }
+  function folderSymbol(){
+    return '<svg viewBox="0 0 64 52" fill="none" aria-hidden="true"><path d="M4 13a6 6 0 0 1 6-6h15l6 6h23a6 6 0 0 1 6 6v25a5 5 0 0 1-5 5H9a5 5 0 0 1-5-5V13Z" fill="currentColor"/><path d="M4 20a5 5 0 0 1 5-5h46a5 5 0 0 1 5 5v24a5 5 0 0 1-5 5H9a5 5 0 0 1-5-5V20Z" fill="currentColor" stroke="white" stroke-opacity=".22"/><path d="M10 18h44" stroke="white" stroke-opacity=".28" stroke-linecap="round"/></svg>';
+  }
+  function dropAttributes(subjectId,folderId){return `data-drop-subject="${esc(subjectId)}" data-drop-folder="${esc(folderId||'')}"`}
+  function sidebarFolders(subjectId,parentId=null,depth=0,seen=new Set()){
+    return subjectFolders(subjectId).filter(item=>(item.parentId||null)===parentId&&!seen.has(item.id)).map(item=>{
+      seen.add(item.id);
+      return `<button class="sidebar-folder" data-sidebar-folder="${esc(item.id)}" ${dropAttributes(subjectId,item.id)} style="--folder-depth:${Math.min(depth,6)};--dot:${safeColor(item.color,'#3378F6')}" ${activeFolder===item.id?'aria-current="page"':''}>${folderSymbol()}<span>${esc(item.name)}</span></button>${sidebarFolders(subjectId,item.id,depth+1,seen)}`;
+    }).join('');
+  }
+  function locationBar(subjectId,folderId){
+    const parent=subject(subjectId);
+    return `<nav class="location-bar" aria-label="Speicherort und Ablageziele"><button class="location-root" data-location-folder="" data-location-subject="${esc(subjectId)}" ${dropAttributes(subjectId,null)}><span aria-hidden="true">↟</span><span>${esc(parent?.name||'Fach')}<small>Fach-Ebene</small></span></button>${folderPath(folderId).map(item=>`<span class="location-separator" aria-hidden="true">/</span><button data-location-folder="${esc(item.id)}" data-location-subject="${esc(subjectId)}" ${dropAttributes(subjectId,item.id)} style="--dot:${safeColor(item.color,'#3378F6')}">${folderSymbol()}<span>${esc(item.name)}</span></button>`).join('')}<span class="location-help">Am Symbol ziehen · über „…“ verschieben</span></nav>`;
+  }
+  function itemActions(type,item){
+    return `<details class="item-menu"><summary aria-label="Aktionen für ${esc(item.name)}" title="Aktionen">•••</summary><div class="item-menu-panel"><button data-move-item="${type}" data-item-id="${esc(item.id)}">Verschieben …</button><button data-item-edit="${type}" data-item-id="${esc(item.id)}">${type==='folder'?'Name & Farbe ändern':'Bearbeiten & Design'}</button><button class="danger-action" data-item-delete="${type}" data-item-id="${esc(item.id)}">${type==='folder'?'Ordner':'Lernstapel'} löschen</button></div></details>`;
+  }
+  document.addEventListener('click',event=>{
+    const move=event.target.closest('[data-move-item]');
+    if(move){event.preventDefault();event.stopPropagation();move.closest('details')?.removeAttribute('open');openMoveDialog(move.dataset.moveItem,move.dataset.itemId);return}
+    const remove=event.target.closest('[data-item-delete]');
+    if(remove){event.preventDefault();remove.closest('details')?.removeAttribute('open');if(remove.dataset.itemDelete==='folder')deleteFolder(remove.dataset.itemId);else deleteSet(remove.dataset.itemId);return}
+    const edit=event.target.closest('[data-item-edit]');
+    if(edit){event.preventDefault();event.stopPropagation();edit.closest('details')?.removeAttribute('open');editEntity(edit.dataset.itemEdit,edit.dataset.itemId);return}
+    const location=event.target.closest('[data-location-folder]');
+    if(location){librarySorting=false;activeSubject=location.dataset.locationSubject;activeFolder=location.dataset.locationFolder||null;activeSet=null;view='library';render();return}
+    document.querySelectorAll('.item-menu[open]').forEach(menu=>{if(!menu.contains(event.target))menu.removeAttribute('open')});
+  });
+  $('#content').addEventListener('contextmenu',event=>{
+    const tile=event.target.closest('.set-card,.folder-card'),menu=tile?.querySelector('.item-menu');
+    if(menu&&!librarySortSaving){event.preventDefault();document.querySelectorAll('.item-menu[open]').forEach(item=>item.removeAttribute('open'));menu.open=true;menu.querySelector('button')?.focus()}
+  });
+
+  let moveContext=null;
+  const moveDialog=$('#move-dialog');
+  function openMoveDialog(type,itemId){
+    if(librarySortSaving)return;
+    const item=type==='set'?setById(itemId):folder(itemId);if(!item)return;
+    const currentId=(type==='set'?item.folderId:item.parentId)||null,parent=subject(item.subjectId);
+    moveContext={type,id:itemId,owner:data};
+    $('#move-item-name').textContent=item.name;
+    $('#move-origin').textContent=`Aktuell: ${parent?.name||'Fach'}${currentId?' / '+folderLabel(folder(currentId)):' · direkt im Fach'}`;
+    const destinations=[{id:null,name:`${parent?.name||'Fach'} — direkt auf Fach-Ebene`},...subjectFolders(item.subjectId).map(entry=>({id:entry.id,name:folderLabel(entry)}))];
+    $('#move-destination').innerHTML=destinations.filter(target=>target.id===currentId||window.WortwerkModel.canMoveLibraryItem(data,{type,id:itemId,folderId:target.id})).map(target=>`<option value="${esc(target.id||'')}" ${target.id===currentId?'selected':''}>${esc(target.name)}${target.id===currentId?' (aktueller Speicherort)':''}</option>`).join('');
+    updateMoveDestination();moveDialog.showModal();
+  }
+  function updateMoveDestination(){
+    $('#move-submit').disabled=!moveContext||!window.WortwerkModel.canMoveLibraryItem(data,{...moveContext,folderId:$('#move-destination').value||null});
+  }
+  $('#move-destination').addEventListener('change',updateMoveDestination);
+  moveDialog.querySelectorAll('[data-cancel-move]').forEach(button=>button.onclick=()=>moveDialog.close());
+  moveDialog.addEventListener('close',()=>{moveContext=null});
+  $('#move-form').addEventListener('submit',event=>{
+    event.preventDefault();if(!moveContext||moveContext.owner!==data||$('#move-submit').disabled)return;
+    const options={type:moveContext.type,id:moveContext.id,folderId:$('#move-destination').value||null};moveDialog.close();performLibraryMove(options);
+  });
+  function performLibraryMove(options){
+    const item=options.type==='set'?setById(options.id):folder(options.id);if(!item)return Promise.resolve(false);
+    const destination=options.folderId?folder(options.folderId)?.name:subject(item.subjectId)?.name;
+    return persistOrganisation(()=>{
+      const changed=window.WortwerkModel.moveLibraryItem(data,{...options,timestamp:new Date().toISOString()});
+      if(changed&&activeSet===options.id&&options.type==='set')activeFolder=options.folderId;
+      return changed;
+    },`„${item.name}“ nach „${destination}“ verschoben.`);
+  }
+
+  // Moving and sibling sorting use different grips and distinct drop feedback.
+  let organisationPointer=null,dragFrame=null;
+  function clearOrganisationPointer(){
+    const state=organisationPointer;organisationPointer=null;
+    if(dragFrame!==null)cancelAnimationFrame(dragFrame);dragFrame=null;
+    if(state?.handle.hasPointerCapture?.(state.pointerId))state.handle.releasePointerCapture(state.pointerId);
+    state?.ghost?.remove();state?.status?.remove();
+    document.body.classList.remove('is-organising');
+    document.querySelectorAll('.organisation-source,.drop-allowed,.drop-over,.drop-rejected').forEach(el=>el.classList.remove('organisation-source','drop-allowed','drop-over','drop-rejected'));
+  }
+  function dropAllowed(state,target){
+    return target?.dataset.dropSubject===state.subjectId&&window.WortwerkModel.canMoveLibraryItem(data,{type:state.type,id:state.id,folderId:target.dataset.dropFolder||null});
+  }
+  function updateOrganisationDrag(){
+    const state=organisationPointer;if(!state?.dragging)return;if(state.owner!==data){clearOrganisationPointer();return}
+    state.ghost.style.transform=`translate3d(${state.x+16}px,${state.y+16}px,0)`;
+    document.querySelectorAll('.drop-over,.drop-rejected').forEach(el=>el.classList.remove('drop-over','drop-rejected'));
+    const target=document.elementFromPoint(state.x,state.y)?.closest('[data-drop-folder]');
+    state.target=target&&dropAllowed(state,target)?target:null;
+    if(target)target.classList.add(state.target?'drop-over':'drop-rejected');
+    const destination=state.target?(state.target.dataset.dropFolder?folder(state.target.dataset.dropFolder)?.name:subject(state.subjectId)?.name):null;
+    const message=destination?`Nach „${destination}“ verschieben`:'Auf einen markierten Ordner oder die Fach-Ebene ziehen';
+    if(state.status.textContent!==message)state.status.textContent=message;
+  }
+  function organisationScroll(){
+    const state=organisationPointer;if(!state?.dragging)return;if(state.owner!==data){clearOrganisationPointer();return}
+    const sidebar=document.elementFromPoint(state.x,state.y)?.closest('.sidebar-subjects');
+    if(sidebar){const rect=sidebar.getBoundingClientRect();sidebar.scrollTop+=state.y<rect.top+36?-9:state.y>rect.bottom-36?9:0}
+    else if(state.y<70)window.scrollBy(0,-12);else if(state.y>window.innerHeight-65)window.scrollBy(0,12);
+    updateOrganisationDrag();dragFrame=requestAnimationFrame(organisationScroll);
+  }
+  document.addEventListener('pointerdown',event=>{
+    const handle=event.target.closest('[data-organise-handle]');if(!handle||librarySortSaving||librarySorting||event.button!==0)return;
+    const type=handle.dataset.itemType,item=type==='set'?setById(handle.dataset.itemId):folder(handle.dataset.itemId);if(!item)return;
+    event.preventDefault();handle.setPointerCapture(event.pointerId);
+    organisationPointer={owner:data,handle,pointerId:event.pointerId,type,id:item.id,subjectId:item.subjectId,name:item.name,startX:event.clientX,startY:event.clientY,x:event.clientX,y:event.clientY,target:null,dragging:false};
+  });
+  document.addEventListener('pointermove',event=>{
+    const state=organisationPointer;if(!state||state.pointerId!==event.pointerId)return;
+    state.x=event.clientX;state.y=event.clientY;
+    if(!state.dragging){
+      if(Math.hypot(state.x-state.startX,state.y-state.startY)<7)return;
+      state.dragging=true;document.body.classList.add('is-organising');state.handle.closest('[data-sort-id]')?.classList.add('organisation-source');
+      state.ghost=document.createElement('div');state.ghost.className='organisation-ghost';state.ghost.textContent=state.name;state.ghost.setAttribute('aria-hidden','true');document.body.append(state.ghost);
+      state.status=document.createElement('div');state.status.className='organisation-status';state.status.setAttribute('role','status');document.body.append(state.status);
+      document.querySelectorAll('[data-drop-folder]').forEach(target=>{if(dropAllowed(state,target))target.classList.add('drop-allowed')});
+      dragFrame=requestAnimationFrame(organisationScroll);
+    }
+    updateOrganisationDrag();
+  });
+  document.addEventListener('pointerup',event=>{
+    const state=organisationPointer;if(!state||state.pointerId!==event.pointerId)return;
+    updateOrganisationDrag();const target=state.target,options=target?{type:state.type,id:state.id,folderId:target.dataset.dropFolder||null}:null;
+    clearOrganisationPointer();if(options)performLibraryMove(options);
+  });
+  document.addEventListener('pointercancel',clearOrganisationPointer);
+  document.addEventListener('lostpointercapture',event=>{if(organisationPointer?.pointerId===event.pointerId)clearOrganisationPointer()});
+  document.addEventListener('keydown',event=>{if(event.key==='Escape'&&organisationPointer)clearOrganisationPointer()});
+  window.addEventListener('blur',clearOrganisationPointer);
+
+  function appearanceFields(value){
+    const color=safeColor(value,'#3378F6');
+    return `<fieldset class="appearance-field"><legend>Farbe</legend><input type="hidden" id="f-color" name="color" value="${color}"><div class="color-palette" role="group" aria-label="Abgestimmte Farben">${palette.map(([hex,name])=>`<button type="button" class="color-swatch${hex.toLowerCase()===color.toLowerCase()?' selected':''}" data-color="${hex}" aria-label="${name}" aria-pressed="${hex.toLowerCase()===color.toLowerCase()}" title="${name}" style="--swatch:${hex}"></button>`).join('')}</div><div class="custom-colour"><label for="colour-picker">Eigene Farbe</label><input type="color" id="colour-picker" value="${color}" aria-label="Eigene Farbe wählen"><label class="sr-only" for="colour-hex">Farbcode</label><input type="text" id="colour-hex" value="${color}" pattern="#[0-9a-fA-F]{6}" maxlength="7" required aria-label="Farbcode" spellcheck="false" autocomplete="off"></div></fieldset>`;
+  }
+  function bindColourPicker(){
+    const input=$('#f-color'),picker=$('#colour-picker'),hex=$('#colour-hex');
+    const choose=(color,fromHex=false)=>{
+      if(!/^#[0-9a-f]{6}$/i.test(color))return;
+      input.value=color;picker.value=color;if(!fromHex)hex.value=color.toUpperCase();
+      document.querySelectorAll('[data-color]').forEach(button=>{const selected=button.dataset.color.toLowerCase()===color.toLowerCase();button.classList.toggle('selected',selected);button.setAttribute('aria-pressed',String(selected))});
+    };
+    document.querySelectorAll('[data-color]').forEach(button=>button.onclick=()=>choose(button.dataset.color));
+    picker.addEventListener('input',()=>choose(picker.value));hex.addEventListener('input',()=>choose(hex.value,true));
+  }
+  function setDesignFields(themeId){
+    const selected=cardThemes.themes.some(theme=>theme.id===themeId)?themeId:'';
+    return `<section class="set-design-fields"><label class="field-label" for="f-card-theme">Kartendesign</label><select id="f-card-theme" name="cardThemeId"><option value="">Globale Einstellung verwenden</option>${cardThemes.themes.map(theme=>`<option value="${theme.id}" ${theme.id===selected?'selected':''}>${esc(theme.name)}</option>`).join('')}</select><div id="set-design-preview">${cardThemePreview(cardThemes.getTheme(selected||activeCardThemeId))}</div><p class="field-hint">Gilt für diesen Lernstapel. Das Design bleibt beim Verschieben erhalten und ist unabhängig von der Ordnerfarbe.</p></section>`;
+  }
+  function bindSetDesign(){
+    $('#f-card-theme').addEventListener('change',event=>{$('#set-design-preview').innerHTML=cardThemePreview(cardThemes.getTheme(event.target.value||activeCardThemeId))});
+  }
+
   function refreshLibraryOrder(){const normalized=window.WortwerkModel.normalizeLibrary(data);for(const key of ['subjects','folders','sets'])data[key]=normalized[key]}
   function folderPath(folderId){const path=[],seen=new Set();let current=folder(folderId);while(current&&!seen.has(current.id)){seen.add(current.id);path.unshift(current);current=folder(current.parentId)}return path}
-  function folderLabel(item){return folderPath(item.id).map(part=>part.name).join(' / ')}
+  function folderLabel(item){return folderPath(item?.id).map(part=>part.name).join(' / ')}
   function crumbs(parts){
     const entries=parts.map((part,index)=>typeof part==='string'?{label:part,...(index===0?{level:'library'}:index===1?{level:'subject',id:activeSubject}:{})}:part);
-    $('#breadcrumbs').innerHTML=entries.map((part,index)=>`<span>${index===entries.length-1?`<b aria-current="location">${esc(part.label)}</b>`:`<button class="breadcrumb-link" data-crumb="${index}">${esc(part.label)}</button>`}</span>`).join('');
+    $('#breadcrumbs').innerHTML=entries.map((part,index)=>`<span>${index===entries.length-1?`<b aria-current="location">${esc(part.label)}</b>`:`<button class="breadcrumb-link" data-crumb="${index}" ${part.level==='subject'?dropAttributes(part.id,null):part.level==='folder'?dropAttributes(folder(part.id)?.subjectId,part.id):''}>${esc(part.label)}</button>`}</span>`).join('');
     $('#breadcrumbs').querySelectorAll('[data-crumb]').forEach(button=>button.onclick=()=>{const part=entries[Number(button.dataset.crumb)];librarySorting=false;activeSet=null;view='library';if(part.level==='library'){activeSubject=null;activeFolder=null}else if(part.level==='subject'){activeSubject=part.id;activeFolder=null}else if(part.level==='folder'){activeFolder=part.id;activeSubject=folder(part.id)?.subjectId||activeSubject}render()});
   }
   function libraryCrumbs(item,tail){return [{label:'Bibliothek',level:'library'},{label:subject(item.subjectId)?.name||'Fach',level:'subject',id:item.subjectId},...folderPath(item.folderId||item.parentId).map(part=>({label:part.name,level:'folder',id:part.id})),{label:item.name,...(tail?{}:{level:'folder',id:item.id})}]}
@@ -259,13 +414,16 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
   function sortingButton(){return `<button class="quiet-button sort-toggle" data-toggle-sort aria-pressed="${librarySorting}" ${librarySortSaving?'disabled':''}>${librarySorting?'✓ Fertig':'⇅ Reihenfolge'}</button>`}
   function sortControls(type,item){if(!librarySorting)return '';const siblings=window.WortwerkModel.getLibrarySiblings(data,type,item.id),index=siblings.findIndex(record=>record.id===item.id);return `<div class="sort-controls"><button type="button" class="sort-handle" data-sort-handle aria-label="${esc(item.name)} ziehen zum Sortieren" title="Ziehen zum Sortieren" ${librarySortSaving?'disabled':''}>⠿</button><span class="sort-position">${index+1} / ${siblings.length}</span><button type="button" data-sort-step="-1" aria-label="${esc(item.name)} früher anordnen" title="Früher anordnen" ${index===0||librarySortSaving?'disabled':''}>←</button><button type="button" data-sort-step="1" aria-label="${esc(item.name)} später anordnen" title="Später anordnen" ${index===siblings.length-1||librarySortSaving?'disabled':''}>→</button></div>`}
   function sortAttributes(type,item){return `data-sort-type="${type}" data-sort-id="${esc(item.id)}"`}
-  async function reorderItem(type,itemId,targetId,placement){
-    if(librarySortSaving)return;
-    const owner=data,snapshot=JSON.stringify(data);
-    if(!window.WortwerkModel.reorderLibraryItems(data,{type,id:itemId,targetId,placement}))return;
+  async function persistOrganisation(change,message,focusId){
+    if(librarySortSaving)return false;
+    const owner=data,snapshot={subjects:structuredClone(data.subjects),folders:structuredClone(data.folders),sets:structuredClone(data.sets)};
+    if(!change())return false;
     librarySortSaving=true;render();
-    try{await save();toast('Reihenfolge gespeichert.')}catch{if(data===owner)data=window.WortwerkModel.normalizeLibrary(JSON.parse(snapshot));toast('Speichern fehlgeschlagen. Bitte prüfe die Verbindung und lade die Bibliothek erneut.')}finally{librarySortSaving=false;render();const tile=[...document.querySelectorAll('[data-sort-id]')].find(el=>el.dataset.sortId===itemId&&el.dataset.sortType===type);tile?.querySelector('[data-sort-handle]')?.focus()}
+    try{await save();toast(message);return true}
+    catch{if(data===owner)Object.assign(data,snapshot);toast('Speichern fehlgeschlagen. Bitte prüfe die Verbindung und lade die Bibliothek erneut.');return false}
+    finally{librarySortSaving=false;render();if(focusId){const tile=[...document.querySelectorAll('[data-sort-id]')].find(el=>el.dataset.sortId===focusId);(tile?.querySelector('[data-sort-handle]')||tile)?.focus()}}
   }
+  function reorderItem(type,itemId,targetId,placement){return persistOrganisation(()=>window.WortwerkModel.reorderLibraryItems(data,{type,id:itemId,targetId,placement}),'Reihenfolge gespeichert.',itemId)}
   $('#content').addEventListener('click',event=>{
     if(event.target.closest('[data-toggle-sort]')){librarySorting=!librarySorting;render();document.querySelector('[data-toggle-sort]')?.focus();return}
     const step=event.target.closest('[data-sort-step]');if(!step)return;
@@ -287,7 +445,7 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
     }
     const subjectCards=data.subjects.map((item,index)=>{
       const sets=subjectSets(item.id),cards=sets.reduce((sum,set)=>sum+setCards(set.id).length,0);
-      return `<article class="subject-card" ${sortAttributes('subject',item)} tabindex="0" data-open-subject="${esc(item.id)}" style="--dot:${safeColor(item.color,colors[index%colors.length])}"><div class="subject-card-top"><span class="subject-icon">${esc(item.emoji||icons[index%icons.length])}</span></div><h2>${esc(item.name)}</h2><p>${sets.length} ${sets.length===1?'Set':'Sets'} · ${cards} ${cards===1?'Karte':'Karten'}</p><span class="card-arrow" aria-hidden="true">→</span>${sortControls('subject',item)}</article>`;
+      return `<article class="subject-card" ${sortAttributes('subject',item)} tabindex="0" data-open-subject="${esc(item.id)}" style="${subjectAppearance(item,colors[index%colors.length])}"><div class="subject-card-top">${subjectSymbol(item,icons[index%icons.length])}</div><h2>${esc(item.name)}</h2><p>${sets.length} ${sets.length===1?'Set':'Sets'} · ${cards} ${cards===1?'Karte':'Karten'}</p><span class="card-arrow" aria-hidden="true">→</span>${sortControls('subject',item)}</article>`;
     }).join('');
     const recentSection=recentSets.length?`<section class="recent-section"><div class="section-head"><h2>Zuletzt gelernt</h2><button class="text-button" data-view="recent">Alle anzeigen</button></div><div class="recent-list">${recentSets.map(set=>`<button class="recent-item" data-open-set="${esc(set.id)}"><span>${esc(set.name)}</span><small>${esc(subject(set.subjectId)?.name||'Fach')}</small><span aria-hidden="true">→</span></button>`).join('')}</div></section>`:'';
     $('#content').innerHTML=`<div class="page-heading"><div><div class="eyebrow">DEIN PERSÖNLICHER LERNRAUM</div><h1 class="page-title">Bibliothek</h1><p class="page-subtitle">Alles, was du lernen möchtest. An einem Ort.</p></div><div class="page-primary-actions"><button class="quiet-button" id="home-add-subject">＋ Fach anlegen</button><button class="primary-button" id="home-create-set">＋ Lernstapel erstellen</button></div></div><section class="library-section"><div class="section-head"><h2>Fächer <span class="count-label">${data.subjects.length}</span></h2>${data.subjects.length>1?sortingButton():''}</div>${data.subjects.length?`<div class="subject-grid">${subjectCards}</div>`:empty('Dein Lernraum ist noch leer','Lege zuerst ein Fach an. Darin kannst du Lernstapel und Ordner sammeln.','＋')}</section>${librarySorting?'<p class="sort-instructions">Ziehe am Griff oder verwende die Pfeile. Die Reihenfolge wird automatisch gespeichert.</p>':''}${recentSection}`;
@@ -305,30 +463,30 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
   function bindSubjectCards(){
     document.querySelectorAll('[data-open-subject]').forEach(element=>{
       const open=()=>{activeSubject=element.dataset.openSubject;activeFolder=null;activeSet=null;view='library';render()};
-      element.onclick=event=>{if((event.target.closest('button')&&event.target.closest('button')!==element)||librarySorting)return;open()};element.onkeydown=event=>{if(event.target===element&&!librarySorting&&(event.key==='Enter'||event.key===' ')){event.preventDefault();open()}};
+      element.onclick=event=>{if((event.target.closest('button,details')&&event.target.closest('button,details')!==element)||librarySorting)return;open()};element.onkeydown=event=>{if(event.target===element&&!librarySorting&&(event.key==='Enter'||event.key===' ')){event.preventDefault();open()}};
     });
     document.querySelectorAll('[data-empty-action]').forEach(button=>button.onclick=openEmptyAction);
   }
   function setCard(set){
-    const parent=folder(set.folderId),sub=subject(set.subjectId),count=setCards(set.id).length;
-    return `<article class="set-card" ${sortAttributes('set',set)} tabindex="0" data-open-set="${esc(set.id)}" style="--dot:${safeColor(sub?.color,colors[0])}"><div class="set-card-meta">${esc(parent?.name||sub?.name||'Fach')}</div><h2>${esc(set.name)}</h2>${set.description?`<p>${esc(set.description)}</p>`:''}<div class="set-card-bottom"><span>${count} ${count===1?'Karte':'Karten'}</span><span class="set-actions"><button data-quick-study="${esc(set.id)}" ${count?'':'disabled'}>${studyActionLabel(set.id)}</button><button data-quick-edit="${esc(set.id)}">Öffnen</button></span></div>${sortControls('set',set)}</article>`;
+    const parent=folder(set.folderId),sub=subject(set.subjectId),count=setCards(set.id).length,theme=cardThemes.getTheme(cardThemes.resolveSetThemeId(set,activeCardThemeId));
+    return `<article class="set-card" ${sortAttributes('set',set)} tabindex="0" data-open-set="${esc(set.id)}" style="--set-front:${theme.front.surface};--set-back:${theme.back.surface}"><div class="set-card-top"><button class="set-cover" data-organise-handle data-item-type="set" data-item-id="${esc(set.id)}" aria-label="${esc(set.name)} ziehen zum Verschieben" title="Ziehen zum Verschieben"><span></span><span></span></button>${itemActions('set',set)}</div><div class="set-card-meta">${esc(parent?.name||sub?.name||'Fach')}</div><h2>${esc(set.name)}</h2>${set.description?`<p>${esc(set.description)}</p>`:''}<div class="set-card-bottom"><span>${count} ${count===1?'Karte':'Karten'}</span><span class="set-actions"><button data-quick-study="${esc(set.id)}" ${count?'':'disabled'}>${studyActionLabel(set.id)}</button><button data-quick-edit="${esc(set.id)}">Öffnen</button></span></div>${sortControls('set',set)}</article>`;
   }
   function bindSetCards(){
     document.querySelectorAll('[data-open-set]').forEach(element=>{
       const open=()=>{activeSet=element.dataset.openSet;const set=setById(activeSet);activeSubject=set?.subjectId||null;activeFolder=set?.folderId||null;render()};
-      element.onclick=event=>{if((event.target.closest('button')&&event.target.closest('button')!==element)||librarySorting)return;open()};element.onkeydown=event=>{if(event.target===element&&!librarySorting&&(event.key==='Enter'||event.key===' ')){event.preventDefault();open()}};
+      element.onclick=event=>{if((event.target.closest('button,details')&&event.target.closest('button,details')!==element)||librarySorting)return;open()};element.onkeydown=event=>{if(event.target===element&&!librarySorting&&(event.key==='Enter'||event.key===' ')){event.preventDefault();open()}};
     });
     document.querySelectorAll('[data-quick-study]').forEach(button=>button.onclick=event=>{event.stopPropagation();beginStudy(button.dataset.quickStudy)});
     document.querySelectorAll('[data-quick-edit]').forEach(button=>button.onclick=event=>{event.stopPropagation();(()=>{activeSet=button.dataset.quickEdit;const item=setById(activeSet);activeSubject=item?.subjectId;activeFolder=item?.folderId;render()})()});
   }
   function folderCard(item){
-    const count=subjectSets(item.subjectId).filter(set=>set.folderId===item.id).length;
-    return `<article class="folder-card" ${sortAttributes('folder',item)} tabindex="0" data-open-folder="${esc(item.id)}" style="--dot:${safeColor(subject(item.subjectId)?.color,colors[0])}"><span class="folder-icon" aria-hidden="true">▱</span><div class="folder-card-copy"><h3>${esc(item.name)}</h3><p>${count} ${count===1?'Set':'Sets'}</p></div><div class="folder-actions"><button class="icon-button" data-edit-folder="${esc(item.id)}" aria-label="${esc(item.name)} umbenennen" title="Umbenennen">✎</button><button class="icon-button" data-delete-folder="${esc(item.id)}" aria-label="${esc(item.name)} löschen" title="Löschen">×</button></div>${sortControls('folder',item)}</article>`;
+    const count=subjectSets(item.subjectId).filter(set=>set.folderId===item.id).length,children=subjectFolders(item.subjectId).filter(child=>child.parentId===item.id).length;
+    return `<article class="folder-card" ${sortAttributes('folder',item)} ${dropAttributes(item.subjectId,item.id)} tabindex="0" data-open-folder="${esc(item.id)}" style="--dot:${safeColor(item.color,'#3378F6')}"><button class="folder-icon" data-organise-handle data-item-type="folder" data-item-id="${esc(item.id)}" aria-label="${esc(item.name)} ziehen zum Verschieben" title="Ziehen zum Verschieben">${folderSymbol()}</button><div class="folder-card-copy"><h3>${esc(item.name)}</h3><p>${count} ${count===1?'Lernstapel':'Lernstapel'}${children?` · ${children} Unterordner`:''}</p></div>${itemActions('folder',item)}${sortControls('folder',item)}</article>`;
   }
   function bindFolderCards(){
     document.querySelectorAll('[data-open-folder]').forEach(element=>{
       const open=()=>{activeFolder=element.dataset.openFolder;activeSet=null;render()};
-      element.onclick=event=>{if((event.target.closest('button')&&event.target.closest('button')!==element)||librarySorting)return;open()};element.onkeydown=event=>{if(event.target===element&&!librarySorting&&(event.key==='Enter'||event.key===' ')){event.preventDefault();open()}};
+      element.onclick=event=>{if((event.target.closest('button,details')&&event.target.closest('button,details')!==element)||librarySorting)return;open()};element.onkeydown=event=>{if(event.target===element&&!librarySorting&&(event.key==='Enter'||event.key===' ')){event.preventDefault();open()}};
     });
     document.querySelectorAll('[data-edit-folder]').forEach(button=>button.onclick=()=>editEntity('folder',button.dataset.editFolder));
     document.querySelectorAll('[data-delete-folder]').forEach(button=>button.onclick=()=>deleteFolder(button.dataset.deleteFolder));
@@ -341,7 +499,7 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
     const cardCount=subjectSets(item.id).reduce((sum,set)=>sum+setCards(set.id).length,0);
     const folderSection=folders.length?`<div class="folder-grid">${folders.map(folderCard).join('')}</div>`:'';
     const looseSection=looseSets.length?`<div class="section-head"><h2>Lernstapel <span class="count-label">${looseSets.length}</span></h2></div><div class="set-grid">${looseSets.map(setCard).join('')}</div>`:'';
-    $('#content').innerHTML=`<div class="subpage-heading">${backButton('Bibliothek')}<div class="subject-heading" style="--dot:${safeColor(item.color,colors[0])}"><span class="subject-icon">${esc(item.emoji||'📚')}</span><div><h1 class="page-title">${esc(item.name)}</h1><p class="page-subtitle">${esc(item.description||`${subjectSets(item.id).length} Sets · ${cardCount} Karten`)}</p></div></div>${managementActions('<button id="edit-subject">Fach bearbeiten</button><button class="danger-action" id="delete-subject">Fach löschen</button>')}</div><section class="library-section"><div class="section-head"><h2>Ordner <span class="count-label">${folders.length}</span></h2><div class="section-actions">${sortingButton()}<button class="quiet-button" id="add-folder">＋ Ordner anlegen</button><button class="primary-button" id="subject-new-set">＋ Lernstapel erstellen</button></div></div>${folderSection||'<p class="section-note">Ordner sind optional. Lege sie an, wenn du deine Lernstapel weiter gliedern möchtest.</p>'}</section>${looseSection}`;
+    $('#content').innerHTML=`<div class="subpage-heading">${backButton('Bibliothek')}<div class="subject-heading" style="${subjectAppearance(item)}">${subjectSymbol(item)}<div><h1 class="page-title">${esc(item.name)}</h1><p class="page-subtitle">${esc(item.description||`${subjectSets(item.id).length} Sets · ${cardCount} Karten`)}</p></div></div>${managementActions('<button id="edit-subject">Fach bearbeiten</button><button class="danger-action" id="delete-subject">Fach löschen</button>')}</div><section class="library-section"><div class="section-head"><h2>Ordner <span class="count-label">${folders.length}</span></h2><div class="section-actions">${sortingButton()}<button class="quiet-button" id="add-folder">＋ Ordner anlegen</button><button class="primary-button" id="subject-new-set">＋ Lernstapel erstellen</button></div></div>${locationBar(item.id,null)}${folderSection||'<p class="section-note">Ordner sind optional. Lege sie an, wenn du deine Lernstapel weiter gliedern möchtest.</p>'}</section>${looseSection}`;
     $('#go-back').onclick=()=>{librarySorting=false;activeSubject=null;activeFolder=null;render()};$('#edit-subject').onclick=()=>editEntity('subject',item.id);$('#delete-subject').onclick=()=>deleteSubject(item.id);$('#add-folder').onclick=()=>openEntity('folder');$('#subject-new-set').onclick=()=>openEntity('set');
     bindFolderCards();bindSetCards();bindSubjectCards();
   }
@@ -349,7 +507,7 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
     const item=folder(activeFolder);if(!item){activeFolder=null;return renderSubject()}
     const parent=subject(item.subjectId);if(!parent){activeFolder=null;return renderLibrary()}
     const sets=subjectSets(parent.id).filter(set=>set.folderId===item.id),children=subjectFolders(parent.id).filter(child=>child.parentId===item.id);crumbs(libraryCrumbs(item));
-    $('#content').innerHTML=`<div class="subpage-heading">${backButton(folder(item.parentId)?.name||parent.name)}<div><div class="page-context">ORDNER · ${esc(parent.name)}</div><h1 class="page-title">${esc(item.name)}</h1><p class="page-subtitle">${children.length} Unterordner · ${sets.length} Lernstapel</p></div>${managementActions('<button id="edit-folder-current">Ordner umbenennen</button><button class="danger-action" id="delete-folder-current">Ordner löschen</button>')}</div><section class="library-section"><div class="section-head"><h2>In diesem Ordner</h2><div class="section-actions">${sortingButton()}<button class="quiet-button" id="add-subfolder">＋ Unterordner</button><button class="primary-button" id="folder-new-set">＋ Lernstapel erstellen</button></div></div>${children.length?`<div class="folder-grid">${children.map(folderCard).join('')}</div>`:''}${sets.length?`<div class="set-grid">${sets.map(setCard).join('')}</div>`:!children.length?empty('Platz für dein nächstes Lernziel','Erstelle einen Lernstapel oder gliedere deine Inhalte mit Unterordnern.','▤'):''}</section>`;
+    $('#content').innerHTML=`<div class="subpage-heading">${backButton(folder(item.parentId)?.name||parent.name)}<div><div class="page-context">ORDNER · ${esc(parent.name)}</div><h1 class="page-title">${esc(item.name)}</h1><p class="page-subtitle">${children.length} Unterordner · ${sets.length} Lernstapel</p></div>${managementActions(`<button id="edit-folder-current">Ordner bearbeiten</button><button data-move-item="folder" data-item-id="${esc(item.id)}">Ordner verschieben …</button><button class="danger-action" id="delete-folder-current">Ordner löschen</button>`)}</div><section class="library-section"><div class="section-head"><h2>In diesem Ordner</h2><div class="section-actions">${sortingButton()}<button class="quiet-button" id="add-subfolder">＋ Unterordner</button><button class="primary-button" id="folder-new-set">＋ Lernstapel erstellen</button></div></div>${locationBar(parent.id,item.id)}${children.length?`<div class="folder-grid">${children.map(folderCard).join('')}</div>`:''}${sets.length?`<div class="set-grid">${sets.map(setCard).join('')}</div>`:!children.length?empty('Platz für dein nächstes Lernziel','Erstelle einen Lernstapel oder gliedere deine Inhalte mit Unterordnern.','▤'):''}</section>`;
     $('#go-back').onclick=()=>{librarySorting=false;activeFolder=item.parentId||null;render()};$('#edit-folder-current').onclick=()=>editEntity('folder',item.id);$('#delete-folder-current').onclick=()=>deleteFolder(item.id);$('#folder-new-set').onclick=()=>openEntity('set');$('#add-subfolder').onclick=()=>openEntity('folder');bindFolderCards();bindSetCards();bindSubjectCards();
   }
   function renderSet(){
@@ -359,16 +517,19 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
     const previous=parentFolder?.name||parent?.name||'Zurück';
     const progress=window.WortwerkModel.getSetProgress(cards);
     const studyLabel=studyActionLabel(item.id);
-    $('#content').innerHTML=`<div class="subpage-heading">${backButton(previous)}<div><div class="page-context">${esc(parentFolder?.name||parent?.name||'Lernstapel')}</div><h1 class="page-title">${esc(item.name)}</h1><p class="page-subtitle">${esc(item.description||`${cards.length} Lernkarten`)}</p></div>${managementActions(`<button id="edit-set">Lernstapel bearbeiten</button><button id="swap-card-sides" ${cards.length?'':'disabled'}>Vorder- und Rückseiten tauschen</button><button class="danger-action" id="delete-set">Lernstapel löschen</button>`)}</div>${cards.length?`<section class="study-banner" aria-labelledby="learning-progress-title"><div class="learning-progress-copy"><h2 id="learning-progress-title">Lernfortschritt</h2><p>${cards.length} Karten · ${progress.secure} sicher · ${progress.practice} zu üben · ${progress.new} neu</p><div class="library-progress" role="progressbar" aria-label="Sicher beherrschte Karten" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${progress.percentage}"><span style="width:${progress.percentage}%"></span></div><small class="study-progress-caption">${progress.percentage}% sicher beherrscht · mindestens zwei richtige Antworten.</small></div><div class="study-banner-actions"><button class="primary-button" id="start-study">${studyLabel}</button><button class="quiet-button" id="reset-progress">Lernfortschritt zurücksetzen</button></div></section>`:''}<section class="library-section"><div class="section-head"><h2>Lernkarten <span class="count-label">${cards.length}</span></h2><div class="section-actions"><button class="quiet-button" id="import-this">Karten importieren</button><button class="quiet-button" id="add-card">＋ Karte erstellen</button></div></div>${cards.length?`<div class="card-list">${cards.map((card,index)=>{const progress=window.WortwerkModel.getCardProgress(card),label=progress.state==='secure'?'Sicher':progress.state==='practice'?'Zu üben':'Neu';return `<div class="flash-row"><div class="term">${cardSideMarkup(card,'front')}<small class="flash-progress">${label} · ${progress.attempts} ${progress.attempts===1?'Versuch':'Versuche'}</small></div><div class="definition">${cardSideMarkup(card,'back')}</div><div class="row-actions"><button data-move-card="${esc(card.id)}" data-direction="-1" aria-label="Karte nach oben verschieben" title="Karte nach oben verschieben" ${index===0?'disabled':''}>↑</button><button data-move-card="${esc(card.id)}" data-direction="1" aria-label="Karte nach unten verschieben" title="Karte nach unten verschieben" ${index===cards.length-1?'disabled':''}>↓</button><button data-edit-card="${esc(card.id)}" aria-label="Karte bearbeiten" title="Karte bearbeiten">✎</button><button data-delete-card="${esc(card.id)}" aria-label="Karte löschen" title="Karte löschen">×</button></div></div>`}).join('')}</div>`:empty('Noch keine Lernkarten','Erstelle deine erste Karte oder importiere mehrere Begriffe aus Text.','▤')}</section>`;
+    $('#content').innerHTML=`<div class="subpage-heading">${backButton(previous)}<div><div class="page-context">${esc(parentFolder?.name||parent?.name||'Lernstapel')}</div><h1 class="page-title">${esc(item.name)}</h1><p class="page-subtitle">${esc(item.description||`${cards.length} Lernkarten`)}</p></div>${managementActions(`<button id="edit-set">Lernstapel bearbeiten</button><button data-move-item="set" data-item-id="${esc(item.id)}">Lernstapel verschieben …</button><button id="swap-card-sides" ${cards.length?'':'disabled'}>Vorder- und Rückseiten tauschen</button><button class="danger-action" id="delete-set">Lernstapel löschen</button>`)}</div>${cards.length?`<section class="study-banner" aria-labelledby="learning-progress-title"><div class="learning-progress-copy"><h2 id="learning-progress-title">Lernfortschritt</h2><p>${cards.length} Karten · ${progress.secure} sicher · ${progress.practice} zu üben · ${progress.new} neu</p><div class="library-progress" role="progressbar" aria-label="Sicher beherrschte Karten" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${progress.percentage}"><span style="width:${progress.percentage}%"></span></div><small class="study-progress-caption">${progress.percentage}% sicher beherrscht · mindestens zwei richtige Antworten.</small></div><div class="study-banner-actions"><button class="primary-button" id="start-study">${studyLabel}</button><button class="quiet-button" id="reset-progress">Lernfortschritt zurücksetzen</button></div></section>`:''}<section class="library-section"><div class="section-head"><h2>Lernkarten <span class="count-label">${cards.length}</span></h2><div class="section-actions"><button class="quiet-button" id="import-this">Karten importieren</button><button class="quiet-button" id="add-card">＋ Karte erstellen</button></div></div>${cards.length?`<div class="card-list">${cards.map((card,index)=>{const progress=window.WortwerkModel.getCardProgress(card),label=progress.state==='secure'?'Sicher':progress.state==='practice'?'Zu üben':'Neu';return `<div class="flash-row"><div class="term">${cardSideMarkup(card,'front')}<small class="flash-progress">${label} · ${progress.attempts} ${progress.attempts===1?'Versuch':'Versuche'}</small></div><div class="definition">${cardSideMarkup(card,'back')}</div><div class="row-actions"><button data-move-card="${esc(card.id)}" data-direction="-1" aria-label="Karte nach oben verschieben" title="Karte nach oben verschieben" ${index===0?'disabled':''}>↑</button><button data-move-card="${esc(card.id)}" data-direction="1" aria-label="Karte nach unten verschieben" title="Karte nach unten verschieben" ${index===cards.length-1?'disabled':''}>↓</button><button data-edit-card="${esc(card.id)}" aria-label="Karte bearbeiten" title="Karte bearbeiten">✎</button><button data-delete-card="${esc(card.id)}" aria-label="Karte löschen" title="Karte löschen">×</button></div></div>`}).join('')}</div>`:empty('Noch keine Lernkarten','Erstelle deine erste Karte oder importiere mehrere Begriffe aus Text.','▤')}</section>`;
     $('#go-back').onclick=()=>{librarySorting=false;activeSet=null;activeFolder=item.folderId||null;render()};$('#edit-set').onclick=()=>editEntity('set',item.id);$('#delete-set').onclick=()=>deleteSet(item.id);$('#start-study')?.addEventListener('click',()=>beginStudy(item.id));$('#reset-progress')?.addEventListener('click',()=>openResetProgress(item.id));$('#swap-card-sides').onclick=()=>swapSetSides(item.id);$('#add-card').onclick=()=>openEntity('card');$('#import-this').onclick=()=>openImport(item.id);
     document.querySelectorAll('[data-move-card]').forEach(button=>button.onclick=()=>moveCard(button.dataset.moveCard,Number(button.dataset.direction)));
     document.querySelectorAll('[data-edit-card]').forEach(button=>button.onclick=()=>editCard(button.dataset.editCard));document.querySelectorAll('[data-delete-card]').forEach(button=>button.onclick=()=>deleteCard(button.dataset.deleteCard));bindSubjectCards();
   }
   function openEntity(type){formContext={type};fillForm(type);$('#form-dialog').showModal()}
   function editEntity(type,key){formContext={type,key};fillForm(type, type==='subject'?subject(key):type==='folder'?folder(key):setById(key));$('#form-dialog').showModal()}
-  function fillForm(type,entity){const title=entity?`Bearbeite ${{subject:'Fach',folder:'Ordner',set:'Lernstapel',card:'Lernkarte'}[type]}`:({subject:'Fach anlegen',folder:'Ordner anlegen',set:'Lernstapel erstellen',card:'Lernkarte erstellen'})[type];$('#form-title').textContent=title;$('#form-eyebrow').textContent=entity?'BEARBEITEN':'NEU IN DEINER BIBLIOTHEK';$('#form-submit').textContent=entity?'Speichern':'Erstellen';let fields='';const input=(name,label,value='',placeholder='',required=true)=>`<label class="field-label" for="f-${name}">${label}</label><input id="f-${name}" name="${name}" value="${esc(value)}" placeholder="${esc(placeholder)}" maxlength="100" ${required?'required':''}>`;
-    if(type==='subject'){const selectedColor=entity?.color||colors[data.subjects.length%colors.length],selectedEmoji=entity?.emoji||'📚';fields=input('name','Fachname',entity?.name,'z. B. Französisch')+`<label class="field-label" for="f-description">Beschreibung <span style="color:#71808b">(optional)</span></label><input id="f-description" name="description" value="${esc(entity?.description||'')}" maxlength="160" placeholder="Was möchtest du in diesem Fach lernen?"><span class="field-label" id="color-label">Akzentfarbe</span><input type="hidden" id="f-color" name="color" value="${esc(selectedColor)}"><div class="color-palette" role="group" aria-labelledby="color-label">${palette.map(([hex,name])=>`<button type="button" class="color-swatch ${hex===selectedColor?'selected':''}" data-color="${hex}" aria-label="${name}" aria-pressed="${hex===selectedColor}" title="${name}" style="--swatch:${hex}"></button>`).join('')}</div><span class="field-label" id="emoji-label">Emoji</span><input type="hidden" id="f-emoji" name="emoji" value="${esc(selectedEmoji)}"><label class="emoji-entry-wrap"><span class="emoji-current" id="emoji-current" aria-hidden="true">${esc(selectedEmoji)}</span><input id="emoji-entry" type="text" value="${esc(selectedEmoji)}" maxlength="20" aria-label="Eigenes Emoji eingeben" autocomplete="off"></label><div class="field-hint">Suche ein Emoji oder wähle eines aus. Auf dem Mac öffnet Ctrl + Cmd + Leertaste die vollständige Emoji- und Symbolübersicht.</div><label class="emoji-search-label"><span class="sr-only">Emoji suchen</span><input id="emoji-search" type="search" placeholder="Emoji suchen …" autocomplete="off"></label><div class="emoji-grid" role="group" aria-labelledby="emoji-label">${emojiChoices.map(([emoji,keywords,category])=>`<button type="button" class="emoji-option ${emoji===selectedEmoji?'selected':''}" data-emoji="${esc(emoji)}" data-search="${esc((keywords+' '+category).toLocaleLowerCase('de'))}" aria-label="${esc(keywords.split(' ')[0])}" aria-pressed="${emoji===selectedEmoji}">${emoji}</button>`).join('')}</div>`}
-    if(type==='folder')fields=input('name','Ordnername',entity?.name||'','z. B. Kapitel 1')+`<div class="field-hint">Ordner helfen dir, Sets innerhalb eines Fachs zu gruppieren.</div>`;
+  function fillForm(type,entity){$('#form-save-error').hidden=true;$('#form-save-error').textContent='';const title=entity?`Bearbeite ${{subject:'Fach',folder:'Ordner',set:'Lernstapel',card:'Lernkarte'}[type]}`:({subject:'Fach anlegen',folder:'Ordner anlegen',set:'Lernstapel erstellen',card:'Lernkarte erstellen'})[type];$('#form-title').textContent=title;$('#form-eyebrow').textContent=entity?'BEARBEITEN':'NEU IN DEINER BIBLIOTHEK';$('#form-submit').textContent=entity?'Speichern':'Erstellen';let fields='';const input=(name,label,value='',placeholder='',required=true)=>`<label class="field-label" for="f-${name}">${label}</label><input id="f-${name}" name="${name}" value="${esc(value)}" placeholder="${esc(placeholder)}" maxlength="100" ${required?'required':''}>`;
+    if(type==='subject'){
+      const selectedEmoji=entity?.emoji||'📚';
+      fields=input('name','Fachname',entity?.name,'z. B. Französisch')+`<label class="field-label" for="f-description">Beschreibung <span class="optional-label">(optional)</span></label><input id="f-description" name="description" value="${esc(entity?.description||'')}" maxlength="160" placeholder="Was möchtest du in diesem Fach lernen?">`+appearanceFields(entity?.color||colors[data.subjects.length%colors.length])+`<span class="field-label" id="emoji-label">Symbol</span><input type="hidden" id="f-emoji" name="emoji" value="${esc(selectedEmoji)}"><label class="emoji-entry-wrap"><span class="emoji-current" id="emoji-current" aria-hidden="true">${esc(selectedEmoji)}</span><input id="emoji-entry" type="text" value="${esc(selectedEmoji)}" maxlength="20" aria-label="Eigenes Emoji eingeben" autocomplete="off"></label><label class="emoji-search-label"><span class="sr-only">Emoji suchen</span><input id="emoji-search" type="search" placeholder="Emoji suchen …" autocomplete="off"></label><div class="emoji-grid" role="group" aria-labelledby="emoji-label">${emojiChoices.map(([emoji,keywords,category])=>`<button type="button" class="emoji-option ${emoji===selectedEmoji?'selected':''}" data-emoji="${esc(emoji)}" data-search="${esc((keywords+' '+category).toLocaleLowerCase('de'))}" aria-label="${esc(keywords.split(' ')[0])}" aria-pressed="${emoji===selectedEmoji}">${emoji}</button>`).join('')}</div>`;
+    }
+    if(type==='folder')fields=input('name','Ordnername',entity?.name||'','z. B. Kapitel 1')+appearanceFields(entity?.color||'#3378F6')+`<div class="field-hint">Die Ordnerfarbe ist unabhängig vom Fach und den Designs deiner Lernstapel.</div>`;
     if(type==='set'){
       const contextSubject=formContext?.defaultSubjectId||activeSubject||data.subjects[0]?.id||'';
       const subjectId=entity?.subjectId||contextSubject;
@@ -376,15 +537,16 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
       const folderId=entity?entity.folderId||'':(formContext?.defaultFolderId&&folder(formContext.defaultFolderId)?.subjectId===subjectId?formContext.defaultFolderId:activeFolder&&folder(activeFolder)?.subjectId===subjectId?activeFolder:'');
       fields=subjectChoice+input('name',`Name des Lernstapels <span style="color:#71808b">(optional)</span>`,entity?.name,window.WortwerkModel.nextSetName(data.sets,subjectId||'__default__',folderId||null),Boolean(entity))+`<div class="field-hint">Ohne Namen vergeben wir automatisch den nächsten freien „Lernstapel“-Namen.</div><label class="field-label" for="f-description">Beschreibung <span style="color:#71808b">(optional)</span></label><input id="f-description" name="description" value="${esc(entity?.description||'')}" maxlength="160" placeholder="Thema oder Lernziel"><label class="field-label" for="f-folder">Ordner <span style="color:#71808b">(optional)</span></label><select id="f-folder" name="folderId"><option value="">${subjectFolders(subjectId).length?'Kein Ordner':'Ohne Ordner'}</option>${subjectFolders(subjectId).map(f=>`<option value="${esc(f.id)}" ${folderId===f.id?'selected':''}>${esc(folderLabel(f))}</option>`).join('')}</select><div class="field-hint">Der Lernstapel wird im ausgewählten Fach gespeichert. Ein Ordner ist optional.</div>`
     }
+    if(type==='set')fields+=setDesignFields(entity?.cardThemeId||'');
     if(type==='card'){
       const c=entity,front=cardSideContent(c,'front'),back=cardSideContent(c,'back');
       fields=`<label class="field-label" for="f-front">Vorderseite</label><textarea id="f-front" name="front" rows="3" maxlength="2000" required placeholder="Begriff, Frage oder Wort">${esc(c?front.term:'')}</textarea><label class="field-label" for="f-front-example">Beispielsatz auf der Vorderseite <span style="color:#71808b">(optional)</span></label><textarea id="f-front-example" name="frontExampleSentence" rows="2" maxlength="3000" placeholder="Ein Beispielsatz zur Vorderseite">${esc(front.exampleSentence)}</textarea><label class="field-label" for="f-back">Rückseite</label><textarea id="f-back" name="back" rows="3" maxlength="3000" required placeholder="Übersetzung, Antwort oder Erklärung">${esc(c?back.term:'')}</textarea><label class="field-label" for="f-back-example">Beispielsatz auf der Rückseite <span style="color:#71808b">(optional)</span></label><textarea id="f-back-example" name="backExampleSentence" rows="2" maxlength="3000" placeholder="Ein Beispielsatz zur Rückseite">${esc(back.exampleSentence)}</textarea><div class="field-hint">Beispielsätze werden beim Lernen kleiner unter dem Begriff angezeigt.</div>`;
     }
-    $('#form-fields').innerHTML=fields;if(type==='subject')bindSubjectAppearance();if(type==='set')bindSetSubject();$('#form-submit').onclick=e=>{e.preventDefault();submitEntity()};$('#entity-form').onsubmit=e=>{e.preventDefault();submitEntity()}}
+    $('#form-fields').innerHTML=fields;if(type==='subject'||type==='folder')bindColourPicker();if(type==='subject')bindSubjectAppearance();if(type==='set'){bindSetSubject();bindSetDesign()}$('#form-submit').onclick=e=>{e.preventDefault();submitEntity()};$('#entity-form').onsubmit=e=>{e.preventDefault();submitEntity()}}
   function bindSetSubject(){const selector=$('#f-subject');if(!selector)return;selector.addEventListener('change',()=>{$('#f-folder').innerHTML=`<option value="">Ohne Ordner</option>${subjectFolders(selector.value).map(item=>`<option value="${esc(item.id)}">${esc(folderLabel(item))}</option>`).join('')}`})}
-  function bindSubjectAppearance(){const colorInput=$('#f-color'),emojiInput=$('#f-emoji'),emojiEntry=$('#emoji-entry'),current=$('#emoji-current'),palette=$('.color-palette'),grid=$('.emoji-grid');palette.querySelectorAll('[data-color]').forEach(button=>button.onclick=()=>{colorInput.value=button.dataset.color;palette.querySelectorAll('[data-color]').forEach(item=>{const selected=item===button;item.classList.toggle('selected',selected);item.setAttribute('aria-pressed',String(selected))})});const chooseEmoji=value=>{const emoji=value.trim()||'📚';emojiInput.value=emoji;current.textContent=emoji;grid.querySelectorAll('[data-emoji]').forEach(button=>{const selected=button.dataset.emoji===emoji;button.classList.toggle('selected',selected);button.setAttribute('aria-pressed',String(selected))})};emojiEntry.addEventListener('input',()=>chooseEmoji(emojiEntry.value));grid.querySelectorAll('[data-emoji]').forEach(button=>button.onclick=()=>{emojiEntry.value=button.dataset.emoji;chooseEmoji(button.dataset.emoji)});$('#emoji-search').addEventListener('input',e=>{const query=e.target.value.trim().toLocaleLowerCase('de');grid.querySelectorAll('[data-emoji]').forEach(button=>{button.hidden=!!query&&!button.dataset.search.includes(query)})})}
-  function submitEntity(){const type=formContext?.type;const form=$('#entity-form');if(!form.reportValidity())return;const fd=new FormData(form);let successNotice=null;if(type==='subject'){const v={name:fd.get('name').trim(),description:fd.get('description').trim(),color:fd.get('color'),emoji:fd.get('emoji')||'📚'};if(!v.name){toast('Der Fachname darf nicht leer sein.');return} if(formContext.key)Object.assign(subject(formContext.key),v,{updatedAt:new Date().toISOString()});else{const timestamp=new Date().toISOString();const s={id:id(),...v,icon:v.emoji,createdAt:timestamp,updatedAt:timestamp};s.position=window.WortwerkModel.nextLibraryPosition(data,'subject',s);data.subjects.push(s);activeSubject=s.id;activeFolder=null}}
-    if(type==='folder'){const name=fd.get('name').trim();if(!name){toast('Der Ordnername darf nicht leer sein.');return}if(!activeSubject||!subject(activeSubject)){toast('Wähle zuerst ein Fach für den Ordner.');return}if(formContext.key)Object.assign(folder(formContext.key),{name,updatedAt:new Date().toISOString()});else{const timestamp=new Date().toISOString();const created={id:id(),name,subjectId:activeSubject,parentId:activeFolder||null,createdAt:timestamp,updatedAt:timestamp};created.position=window.WortwerkModel.nextLibraryPosition(data,'folder',created);data.folders.push(created)}}
+  function bindSubjectAppearance(){const emojiInput=$('#f-emoji'),emojiEntry=$('#emoji-entry'),current=$('#emoji-current'),grid=$('.emoji-grid');const chooseEmoji=value=>{const emoji=value.trim()||'📚';emojiInput.value=emoji;current.textContent=emoji;grid.querySelectorAll('[data-emoji]').forEach(button=>{const selected=button.dataset.emoji===emoji;button.classList.toggle('selected',selected);button.setAttribute('aria-pressed',String(selected))})};emojiEntry.addEventListener('input',()=>chooseEmoji(emojiEntry.value));grid.querySelectorAll('[data-emoji]').forEach(button=>button.onclick=()=>{emojiEntry.value=button.dataset.emoji;chooseEmoji(button.dataset.emoji)});$('#emoji-search').addEventListener('input',e=>{const query=e.target.value.trim().toLocaleLowerCase('de');grid.querySelectorAll('[data-emoji]').forEach(button=>{button.hidden=!!query&&!button.dataset.search.includes(query)})})}
+  async function submitEntity(){if(entitySaving||librarySortSaving)return;const type=formContext?.type;const form=$('#entity-form');if(!form.reportValidity())return;const awaitSave=['subject','folder'].includes(type)||(type==='set'&&!formContext.copyCards?.length),owner=data,snapshot=awaitSave?{subjects:structuredClone(data.subjects),folders:structuredClone(data.folders),sets:structuredClone(data.sets)}:null,previousLocation={activeSubject,activeFolder,activeSet};$('#form-save-error').hidden=true;const fd=new FormData(form);let successNotice=null;if(type==='subject'){const v={name:fd.get('name').trim(),description:fd.get('description').trim(),color:fd.get('color'),emoji:fd.get('emoji')||'📚'};if(!v.name){toast('Der Fachname darf nicht leer sein.');return} if(formContext.key)Object.assign(subject(formContext.key),v,{updatedAt:new Date().toISOString()});else{const timestamp=new Date().toISOString();const s={id:id(),...v,icon:v.emoji,createdAt:timestamp,updatedAt:timestamp};s.position=window.WortwerkModel.nextLibraryPosition(data,'subject',s);data.subjects.push(s);activeSubject=s.id;activeFolder=null}}
+    if(type==='folder'){const name=fd.get('name').trim();if(!name){toast('Der Ordnername darf nicht leer sein.');return}if(!activeSubject||!subject(activeSubject)){toast('Wähle zuerst ein Fach für den Ordner.');return}if(formContext.key)Object.assign(folder(formContext.key),{name,color:fd.get('color'),updatedAt:new Date().toISOString()});else{const timestamp=new Date().toISOString();const created={id:id(),name,color:fd.get('color'),subjectId:activeSubject,parentId:activeFolder||null,createdAt:timestamp,updatedAt:timestamp};created.position=window.WortwerkModel.nextLibraryPosition(data,'folder',created);data.folders.push(created)}}
     if(type==='set'){
       const existing=formContext.key?setById(formContext.key):null;
       let subjectId=existing?.subjectId||fd.get('subjectId')||formContext.defaultSubjectId||activeSubject||data.subjects[0]?.id||null;
@@ -401,7 +563,7 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
       const name=rawName||(existing?.name||window.WortwerkModel.nextSetName(data.sets,subjectId,folderId));
       const duplicate=data.sets.some(set=>set.id!==existing?.id&&set.subjectId===subjectId&&(set.folderId||null)===(folderId||null)&&set.name.trim().toLocaleLowerCase('de')===name.trim().toLocaleLowerCase('de'));
       if(duplicate){toast('An diesem Speicherort gibt es bereits einen Lernstapel mit diesem Namen.');return}
-      const v={name,description:fd.get('description').trim(),folderId};
+      const selectedTheme=fd.get('cardThemeId')||null;const v={name,description:fd.get('description').trim(),folderId,cardThemeId:cardThemes.themes.some(theme=>theme.id===selectedTheme)?selectedTheme:null};
       if(existing){const moved=(existing.folderId||null)!==folderId;Object.assign(existing,v,{updatedAt:new Date().toISOString()});if(moved)existing.position=window.WortwerkModel.nextLibraryPosition(data,'set',existing)}
       else{
         const timestamp=new Date().toISOString(),created={id:id(),...v,subjectId,createdAt:timestamp,updatedAt:timestamp};
@@ -430,7 +592,15 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
       const s=setById(activeSet);if(s)s.updatedAt=timestamp;
     }
     if(type==='set'&&formContext?.copyCards?.length&&session?.id===formContext.sourceSessionId){session.missedSetPending=false;const record=data.studySessions?.[session.setId];if(record)record.missedCardIdsCopied=[...(session.missedCardIdsCopied||[])];updateMissedSetActions()}
-    refreshLibraryOrder();const keepStudyView=type==='set'&&Boolean(formContext?.copyCards?.length);save();$('#form-dialog').close();if(!keepStudyView)render();if(successNotice)toast(successNotice)}
+    refreshLibraryOrder();const keepStudyView=type==='set'&&Boolean(formContext?.copyCards?.length);
+    if(awaitSave){
+      entitySaving=true;form.inert=true;form.setAttribute('aria-busy','true');const submitLabel=$('#form-submit').textContent;$('#form-submit').textContent='Wird gespeichert …';
+      try{await save();$('#form-dialog').close();render();toast(successNotice||'Änderungen gespeichert.');}
+      catch{if(data===owner){Object.assign(data,snapshot);activeSubject=previousLocation.activeSubject;activeFolder=previousLocation.activeFolder;activeSet=previousLocation.activeSet;}toast('Speichern fehlgeschlagen. Deine Eingaben bleiben geöffnet. Bitte erneut versuchen.');}
+      finally{entitySaving=false;form.inert=false;form.removeAttribute('aria-busy');$('#form-submit').textContent=submitLabel;}
+    }else{save();$('#form-dialog').close();if(!keepStudyView)render();if(successNotice)toast(successNotice)}
+  }
+  $('#form-dialog').addEventListener('cancel',event=>{if(entitySaving)event.preventDefault()});
   function moveCard(key,direction){const cards=setCards(activeSet),index=cards.findIndex(card=>card.id===key),next=index+direction;if(index<0||next<0||next>=cards.length)return;[cards[index],cards[next]]=[cards[next],cards[index]];const timestamp=new Date().toISOString();cards.forEach((card,position)=>{card.position=position;card.updatedAt=timestamp});save();render()}
   function editCard(key){const c=data.cards.find(x=>x.id===key);if(!c)return;formContext={type:'card',key};fillForm('card',c);$('#form-dialog').showModal()}
   function deleteCard(key){const card=data.cards.find(c=>c.id===key);if(!card||!confirm('Diese Lernkarte dauerhaft löschen?'))return;data.cards=data.cards.filter(c=>c.id!==key);setCards(card.setId).forEach((remaining,position)=>{remaining.position=position});save();render()}
@@ -518,6 +688,7 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
   }
   function beginStudy(key){
     const cards=setCards(key);if(!cards.length){toast('Dieses Set enthält noch keine Karten.');return}
+    cardThemes.applyTheme(cardThemes.resolveSetThemeId(setById(key),activeCardThemeId));
     session=null;activeSlotIndex=0;
     const saved=sessionForSet(key);
     const sessionState=window.WortwerkModel.createStudySession(cards,saved);
@@ -712,13 +883,13 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
   $('#settings-done').onclick=()=>settingsDialog.close();
   function syncFullscreenButton(){const active=document.fullscreenElement===studyDialog||studyDialog.classList.contains('is-fullscreen'),button=$('#study-expand');button.setAttribute('aria-pressed',String(active));button.setAttribute('aria-label',active?'Vollbild verlassen':'Lernmodus im Vollbild öffnen');button.title=active?'Vollbild verlassen':'Vollbild';$('#study-expand-label').textContent=active?'Fenster':'Vollbild'}
   async function toggleStudyFullscreen(){if(document.fullscreenElement===studyDialog||studyDialog.classList.contains('is-fullscreen')){studyDialog.classList.remove('is-fullscreen');if(document.fullscreenElement===studyDialog){try{await document.exitFullscreen()}catch(error){console.warn('Vollbildmodus konnte nicht beendet werden.',error)}}syncFullscreenButton();return}try{if(studyDialog.requestFullscreen)await studyDialog.requestFullscreen();else studyDialog.classList.add('is-fullscreen')}catch(error){studyDialog.classList.add('is-fullscreen')}syncFullscreenButton()}
-  function endStudy(){const setId=session?.setId;clearActiveStudyTransition();if(document.fullscreenElement===studyDialog)document.exitFullscreen().catch(()=>{});studyDialog.classList.remove('is-fullscreen');studyDialog.close();session=null;syncFullscreenButton();if(setId){const label=studyActionLabel(setId);if(activeSet===setId){const button=$('#start-study');if(button)button.textContent=label}document.querySelectorAll('[data-quick-study]').forEach(button=>{if(button.dataset.quickStudy===setId)button.textContent=label})}}
+  function endStudy(){const setId=session?.setId;clearActiveStudyTransition();if(document.fullscreenElement===studyDialog)document.exitFullscreen().catch(()=>{});studyDialog.classList.remove('is-fullscreen');studyDialog.close();session=null;cardThemes.applyTheme(activeCardThemeId);syncFullscreenButton();if(setId){const label=studyActionLabel(setId);if(activeSet===setId){const button=$('#start-study');if(button)button.textContent=label}document.querySelectorAll('[data-quick-study]').forEach(button=>{if(button.dataset.quickStudy===setId)button.textContent=label})}}
   studyDialog.addEventListener('fullscreenchange',syncFullscreenButton);
   $('#study-expand').onclick=toggleStudyFullscreen;
   $('#study-card-0').onclick=flip;$('#study-card-1').onclick=flip;$('#answer-no').onclick=()=>scoreCard(false);$('#answer-yes').onclick=()=>scoreCard(true);$('#study-prev').onclick=()=>moveStudy(-1);$('#study-next').onclick=nextStudyCard;$('#study-close').onclick=endStudy;$('#finish-study').onclick=()=>{endStudy();render()};$('#retry-missed').onclick=retryMissed;$('#create-missed-set').onclick=openMissedSetCreation;$('#create-missed-set-complete').onclick=openMissedSetCreation;$('#study-manage').onclick=()=>{endStudy();render()};$('#shuffle-toggle').onclick=()=>{if(!session||session.transitioning||!$('#study-complete').hidden)return;const shuffled=window.WortwerkModel.shuffleUnvisitedStudyCards(session);if(!shuffled){toast('Es gibt nicht genügend noch offene Karten zum Mischen.');return}$('#shuffle-toggle').setAttribute('aria-pressed','true');saveSessionProgress();renderStudyCard()};
   document.addEventListener('keydown',e=>{if(!$('#study-dialog').open)return;if(e.key==='Escape'){endStudy();return}if(e.target.matches('input,textarea,select,[contenteditable="true"]')||session?.transitioning)return;const focusedButton=e.target.closest('button');if(focusedButton&&!focusedButton.classList.contains('study-card'))return;if(e.key===' '){if(focusedButton?.classList.contains('study-card'))return;e.preventDefault();flip()}if(e.key==='ArrowLeft'){e.preventDefault();moveStudy(-1)}if(e.key==='ArrowRight'){e.preventDefault();nextStudyCard()}});
   $('#import-form').onsubmit=e=>e.preventDefault();
-  window.addEventListener('library-save-error',()=>toast('Mit Supabase konnte nicht gespeichert werden. Bitte Verbindung prüfen und erneut versuchen.'));
-  window.WortwerkReloadLibrary=async()=>{try{data=await window.WortwerkRepository.loadLibrary(window.WortwerkModel.normalizeLibrary);render()}catch(error){console.error('Lernbibliothek konnte nicht geladen werden.',error);$('#content').innerHTML='<section class="empty-state"><h2>Deine Bibliothek konnte nicht geladen werden.</h2><p>Bitte prüfe deine Verbindung und lade die Seite erneut.</p><button class="quiet-button" onclick="location.reload()">Erneut laden</button></section>'}};
+  window.addEventListener('library-save-error',()=>{if(!librarySortSaving&&!entitySaving)toast('Mit Supabase konnte nicht gespeichert werden. Bitte Verbindung prüfen und erneut versuchen.')});
+  window.WortwerkReloadLibrary=async()=>{clearOrganisationPointer();moveDialog.close();try{data=await window.WortwerkRepository.loadLibrary(window.WortwerkModel.normalizeLibrary);render()}catch(error){console.error('Lernbibliothek konnte nicht geladen werden.',error);$('#content').innerHTML='<section class="empty-state"><h2>Deine Bibliothek konnte nicht geladen werden.</h2><p>Bitte prüfe deine Verbindung und lade die Seite erneut.</p><button class="quiet-button" onclick="location.reload()">Erneut laden</button></section>'}};
   window.WortwerkReloadLibrary();
 })();

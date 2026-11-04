@@ -1,7 +1,7 @@
 'use strict';
 
 const assert = require('node:assert/strict');
-const { normalizeLibrary, getLibrarySiblings, reorderLibraryItems, nextLibraryPosition, getFolderDescendantIds, createImportedCards, createCopiedCards, nextSetName, swapSetCardSides, recordCardAnswer, updateCardAnswer, createStudySession, getStudyResults, getStudyResult, getStudyCurrentIndex, getStudyCard, getNextStudyCardId, navigateStudySession, shuffleUnvisitedStudyCards, setStudyAnswer, getSetProgress, resetSetProgress, summarizeResults, summarizeSession, nextUnratedIndex } = require('./model.js');
+const { normalizeLibrary, getLibrarySiblings, reorderLibraryItems, canMoveLibraryItem, moveLibraryItem, nextLibraryPosition, getFolderDescendantIds, createImportedCards, createCopiedCards, nextSetName, swapSetCardSides, recordCardAnswer, updateCardAnswer, createStudySession, getStudyResults, getStudyResult, getStudyCurrentIndex, getStudyCard, getNextStudyCardId, navigateStudySession, shuffleUnvisitedStudyCards, setStudyAnswer, getSetProgress, resetSetProgress, summarizeResults, summarizeSession, nextUnratedIndex } = require('./model.js');
 
 assert.deepEqual(normalizeLibrary(null), { subjects: [], folders: [], sets: [], cards: [], recent: [], studySessions: {}, studyHistory: [] });
 const malformedCollections = normalizeLibrary({
@@ -359,4 +359,88 @@ assert.equal(malformedParents.folders.filter(item => item.id.startsWith('cycle-'
 assert.deepEqual(malformedParents.folders.slice(2).map(item => item.parentId), [null, null, null]);
 assert.ok(getFolderDescendantIds(malformedParents, 'cycle-a').length <= 1);
 
-console.log('Data checks passed: storage and session restore, learning progress, auto-naming, independent missed-card copies, side swapping, and 50,000-card import batches.');
+const moveLibrary = normalizeLibrary({
+  subjects: [{ id: 'french' }, { id: 'history' }],
+  folders: [
+    { id: 'unit-a', subjectId: 'french', color: '#2563eb' },
+    { id: 'unit-b', subjectId: 'french', color: '#16a34a' },
+    { id: 'atelier', subjectId: 'french', parentId: 'unit-a' },
+    { id: 'atelier-child', subjectId: 'french', parentId: 'atelier' },
+    { id: 'other-fach', subjectId: 'history' }
+  ],
+  sets: [
+    { id: 'loose', subjectId: 'french', folderId: null, cardThemeId: 'original' },
+    { id: 'first-a', subjectId: 'french', folderId: 'unit-a' },
+    { id: 'second-a', subjectId: 'french', folderId: 'unit-a' },
+    { id: 'first-b', subjectId: 'french', folderId: 'unit-b' },
+    { id: 'nested', subjectId: 'french', folderId: 'atelier-child' },
+    { id: 'foreign', subjectId: 'history', folderId: null }
+  ],
+  cards: [{ id: 'move-card', setId: 'loose', front: 'une maison', back: 'ein Haus', correctCount: 2, attemptCount: 3 }],
+  studySessions: { loose: { id: 'move-session', setId: 'loose', cardIds: ['move-card'], results: [true], index: 0 } },
+  recent: [{ setId: 'loose' }],
+  studyHistory: [{ id: 'past-session', setId: 'loose', known: 1 }]
+});
+const beforeDropFeedback = JSON.stringify(moveLibrary);
+assert.equal(canMoveLibraryItem(moveLibrary, { type: 'set', id: 'loose', folderId: 'unit-a' }), true);
+assert.equal(canMoveLibraryItem(moveLibrary, { type: 'folder', id: 'unit-a', folderId: 'atelier-child' }), false);
+assert.equal(canMoveLibraryItem(moveLibrary, { type: 'set', id: 'loose', folderId: 'other-fach' }), false);
+assert.equal(JSON.stringify(moveLibrary), beforeDropFeedback, 'checking possible drop targets is pure');
+const originalMoveCards = moveLibrary.cards, originalMoveCard = moveLibrary.cards[0];
+const originalMoveSessions = moveLibrary.studySessions, originalMoveRecent = moveLibrary.recent, originalMoveHistory = moveLibrary.studyHistory;
+const liveMoveSession = createStudySession(moveLibrary.cards);
+assert.equal(moveLibraryItem(moveLibrary, { type: 'set', id: 'loose', folderId: 'unit-a', timestamp: '2026-11-03T22:00:00.000Z' }), true);
+assert.deepEqual(getLibrarySiblings(moveLibrary, 'set', 'loose').map(item => item.id), ['first-a', 'second-a', 'loose'], 'moving into a folder appends without disturbing its custom order');
+assert.deepEqual(getLibrarySiblings(moveLibrary, 'set', 'loose').map(item => item.position), [0, 1, 2]);
+assert.equal(moveLibrary.sets.find(item => item.id === 'loose').updatedAt, '2026-11-03T22:00:00.000Z');
+assert.equal(moveLibrary.sets.find(item => item.id === 'loose').cardThemeId, 'original', 'moving never adopts the target folder design');
+assert.equal(moveLibraryItem(moveLibrary, { type: 'set', id: 'second-a', folderId: 'unit-b' }), true);
+assert.deepEqual(getLibrarySiblings(moveLibrary, 'set', 'first-a').map(item => [item.id, item.position]), [['first-a', 0], ['loose', 1]], 'the old folder order closes the removed gap');
+assert.deepEqual(getLibrarySiblings(moveLibrary, 'set', 'first-b').map(item => [item.id, item.position]), [['first-b', 0], ['second-a', 1]], 'moving between folders preserves destination order');
+assert.equal(moveLibraryItem(moveLibrary, { type: 'set', id: 'loose', folderId: null }), true);
+assert.equal(moveLibrary.sets.find(item => item.id === 'loose').folderId, null, 'a set may live directly in its subject');
+assert.equal(moveLibraryItem(moveLibrary, { type: 'folder', id: 'atelier', folderId: 'unit-b' }), true);
+assert.equal(moveLibrary.folders.find(item => item.id === 'atelier').parentId, 'unit-b');
+assert.equal(moveLibrary.folders.find(item => item.id === 'atelier-child').parentId, 'atelier', 'moving a folder preserves its subtree');
+assert.equal(moveLibrary.sets.find(item => item.id === 'nested').folderId, 'atelier-child', 'nested sets remain in the same folder when their ancestor moves');
+assert.equal(moveLibraryItem(moveLibrary, { type: 'folder', id: 'atelier', folderId: null }), true);
+assert.deepEqual(getLibrarySiblings(moveLibrary, 'folder', 'atelier').map(item => item.id), ['unit-a', 'unit-b', 'atelier']);
+
+const beforeInvalidOrganization = JSON.stringify(moveLibrary);
+for (const move of [
+  { type: 'folder', id: 'atelier', folderId: 'atelier' },
+  { type: 'folder', id: 'atelier', folderId: 'atelier-child' },
+  { type: 'folder', id: 'unit-a', folderId: 'other-fach' },
+  { type: 'set', id: 'loose', folderId: 'other-fach' },
+  { type: 'set', id: 'loose', folderId: 'missing' },
+  { type: 'set', id: 'missing', folderId: null },
+  { type: 'set', id: 'loose', folderId: null },
+  { type: 'folder', id: 'unit-a', folderId: null },
+  { type: 'subject', id: 'french', folderId: 'unit-a' },
+  { type: 'set', id: 'loose' },
+  { type: 'set', id: 'loose', folderId: '' },
+  { type: 'set', id: 'loose', folderId: 3 }
+]) assert.equal(moveLibraryItem(moveLibrary, move), false, 'invalid membership changes fail without mutation');
+assert.equal(JSON.stringify(moveLibrary), beforeInvalidOrganization);
+assert.equal(moveLibraryItem({}, { type: 'set', id: 'loose', folderId: null }), false);
+assert.equal(moveLibraryItem(null, { type: 'folder', id: 'atelier', folderId: null }), false);
+assert.equal(moveLibrary.cards, originalMoveCards);
+assert.equal(moveLibrary.cards[0], originalMoveCard, 'card objects shared with a live session are never replaced');
+assert.equal(liveMoveSession.cards[0], originalMoveCard);
+assert.equal(moveLibrary.studySessions, originalMoveSessions);
+assert.equal(moveLibrary.recent, originalMoveRecent);
+assert.equal(moveLibrary.studyHistory, originalMoveHistory);
+assert.equal(moveLibrary.cards[0].attemptCount, 3, 'organization never changes learning progress');
+
+const repeatedMoveIds = moveLibrary.sets.map(item => item.id).sort();
+for (let iteration = 0; iteration < 100; iteration++) {
+  assert.equal(moveLibraryItem(moveLibrary, { type: 'set', id: 'loose', folderId: iteration % 2 ? null : 'unit-b' }), true);
+  assert.deepEqual(moveLibrary.sets.map(item => item.id).sort(), repeatedMoveIds, 'repeated moves never duplicate or remove a set');
+}
+const corruptMoveTarget = structuredClone(moveLibrary);
+corruptMoveTarget.folders.push({ id: 'cyclic-target', subjectId: 'french', parentId: 'cyclic-target' });
+assert.equal(moveLibraryItem(corruptMoveTarget, { type: 'set', id: 'loose', folderId: 'cyclic-target' }), false);
+corruptMoveTarget.folders.push({ id: 'broken-target', subjectId: 'french', parentId: 'not-present' });
+assert.equal(moveLibraryItem(corruptMoveTarget, { type: 'set', id: 'loose', folderId: 'broken-target' }), false);
+
+console.log('Data checks passed: storage and session restore, learning progress, library organization, auto-naming, independent missed-card copies, side swapping, and 50,000-card import batches.');

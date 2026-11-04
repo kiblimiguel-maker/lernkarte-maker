@@ -115,6 +115,69 @@
     return true;
   }
 
+  // Shared by drop feedback and the committed move, so a highlighted target
+  // always follows exactly the same ownership and ancestry checks as a move.
+  function canMoveLibraryItem(library, { type, id, folderId } = {}) {
+    if (!['set', 'folder'].includes(type) || typeof id !== 'string' || !id ||
+      !(folderId === null || (typeof folderId === 'string' && folderId))) return false;
+    const key = libraryCollectionKey(type);
+    if (!isRecord(library) || !Array.isArray(library[key])) return false;
+    const collection = records(library[key]);
+    if (new Set(collection.map(record => record.id)).size !== collection.length) return false;
+    const source = collection.find(record => record.id === id);
+    if (!source || !source.subjectId || !records(library.subjects).some(subject => subject.id === source.subjectId)) return false;
+    const parentField = type === 'folder' ? 'parentId' : 'folderId';
+    if ((source[parentField] || null) === folderId) return false;
+
+    const folders = records(library.folders);
+    if (new Set(folders.map(folder => folder.id)).size !== folders.length) return false;
+    const folderById = new Map(folders.map(folder => [folder.id, folder]));
+    if (folderId !== null && !folderById.has(folderId)) return false;
+    const ancestry = new Set();
+    let ancestor = folderById.get(folderId);
+    while (ancestor) {
+      if (ancestor.subjectId !== source.subjectId || ancestry.has(ancestor.id) ||
+        (type === 'folder' && ancestor.id === source.id)) return false;
+      ancestry.add(ancestor.id);
+      if (!ancestor.parentId) break;
+      ancestor = folderById.get(ancestor.parentId);
+      if (!ancestor) return false;
+    }
+    return true;
+  }
+
+  // Moving changes membership; reordering only changes sibling order. Both
+  // operations retain stable IDs and never rebuild cards or learning sessions.
+  function moveLibraryItem(library, { type, id, folderId, timestamp } = {}) {
+    if (!canMoveLibraryItem(library, { type, id, folderId })) return false;
+    const key = libraryCollectionKey(type);
+    const collection = records(library[key]);
+    const source = collection.find(record => record.id === id);
+    const parentField = type === 'folder' ? 'parentId' : 'folderId';
+    const previousScope = libraryScope(source, type);
+    const destinationScope = libraryScope({ ...source, [parentField]: folderId }, type);
+    const previousSiblings = orderedLibraryRecords(collection.filter(record => record.id !== id && libraryScope(record, type) === previousScope));
+    const destinationSiblings = orderedLibraryRecords(collection.filter(record => record.id !== id && libraryScope(record, type) === destinationScope));
+    source[parentField] = folderId;
+    if (typeof timestamp === 'string') source.updatedAt = timestamp;
+    previousSiblings.forEach((record, position) => { record.position = position; });
+    destinationSiblings.push(source);
+    destinationSiblings.forEach((record, position) => { record.position = position; });
+
+    // Restore display order inside both affected scopes while leaving unrelated
+    // records, cards and their live session references untouched.
+    const groups = new Map([
+      [previousScope, { items: previousSiblings, index: 0 }],
+      [destinationScope, { items: destinationSiblings, index: 0 }]
+    ]);
+    library[key] = library[key].map(record => {
+      if (!isRecord(record)) return record;
+      const group = groups.get(libraryScope(record, type));
+      return group ? group.items[group.index++] : record;
+    });
+    return true;
+  }
+
   function normalizeLibrary(value) {
     if (!isRecord(value)) return emptyLibrary();
 
@@ -422,7 +485,7 @@
     return -1;
   }
 
-  const api = { normalizeLibrary, getLibrarySiblings, reorderLibraryItems, nextLibraryPosition, getFolderDescendantIds, createImportedCards, createCopiedCards, nextSetName, swapSetCardSides, recordCardAnswer, updateCardAnswer, createStudySession, getStudyResults, getStudyResult, getStudyCurrentIndex, getStudyCard, getNextStudyCardId, visitStudyCard, navigateStudySession, shuffleUnvisitedStudyCards, setStudyAnswer, getCardProgress, getSetProgress, resetSetProgress, summarizeResults, summarizeSession, nextUnratedIndex };
+  const api = { normalizeLibrary, getLibrarySiblings, reorderLibraryItems, canMoveLibraryItem, moveLibraryItem, nextLibraryPosition, getFolderDescendantIds, createImportedCards, createCopiedCards, nextSetName, swapSetCardSides, recordCardAnswer, updateCardAnswer, createStudySession, getStudyResults, getStudyResult, getStudyCurrentIndex, getStudyCard, getNextStudyCardId, visitStudyCard, navigateStudySession, shuffleUnvisitedStudyCards, setStudyAnswer, getCardProgress, getSetProgress, resetSetProgress, summarizeResults, summarizeSession, nextUnratedIndex };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (typeof globalThis !== 'undefined') globalThis.WortwerkModel = api;
 })();

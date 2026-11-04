@@ -1,7 +1,7 @@
 'use strict';
 
 const assert = require('node:assert/strict');
-const { genderSegments } = require('./presentation.js');
+const { genderSegments, colourInk } = require('./presentation.js');
 
 function colored(value) {
   return genderSegments(value).filter(segment => segment.gender).map(segment => [segment.text, segment.gender]);
@@ -23,4 +23,16 @@ for (const value of ['LE livre', 'la maison (f)', 'un chien et une voiture', 'le
   assert.equal(genderSegments(value).map(part => part.text).join(''), value, `all source text is preserved: ${value}`);
 }
 
+assert.equal(colourInk('#FFFFFF'), '#000000');
+assert.equal(colourInk('#000000'), '#FFFFFF');
+assert.equal(colourInk('#fefefe'), '#000000');
+assert.equal(colourInk('invalid'), colourInk('#3378F6'));
+for (const colour of ['#3378F6','#00A88F','#26A65B','#E7A623','#DC4D5A','#9359DB','#000001','#FFFEEE']) {
+  const luminance = hex => {
+    const channels = [1,3,5].map(i => parseInt(hex.slice(i,i+2),16)/255).map(v => v<=.04045?v/12.92:((v+.055)/1.055)**2.4);
+    return channels[0]*.2126+channels[1]*.7152+channels[2]*.0722;
+  };
+  const background=luminance(colour), ink=luminance(colourInk(colour));
+  assert.ok((Math.max(background,ink)+.05)/(Math.min(background,ink)+.05)>=4.5, `readable ink on ${colour}`);
+}
 console.log('Presentation tests passed');

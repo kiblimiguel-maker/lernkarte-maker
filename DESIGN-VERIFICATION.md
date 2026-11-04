@@ -52,3 +52,25 @@ The deployed database's `subjects`, `folders` and `sets` tables have RLS enabled
 Full Google OAuth login/logout, two real user accounts performing remote writes, real-device touch hardware, and Stripe Checkout/webhook end-to-end payments were not exercised. The donation backend was already unavailable in production; this redesign does not configure payment credentials. The existing library repository saves a snapshot across several table requests, not a single database transaction. Failed saves show an error; no atomic database rollback is claimed.
 
 Reference reviewed: https://www.apple.com — restrained navigation, clear hierarchy, focused actions and controlled spacing, translated to a learning workspace rather than a storefront.
+
+## Library organisation and colour update — 2026-11-04
+
+Subject tiles now use the saved colour at full strength, with black or white text selected by relative luminance. The French subject icon uses a crisp rounded tricolour, while custom emoji selections remain available. Folder symbols are scalable vector silhouettes, coloured independently from subjects. Twelve saturated presets and a native colour picker plus validated hex field are shared between subject and folder forms.
+
+Sets optionally store `cardThemeId` in their existing JSON record. Missing or invalid overrides use the global setting. Covers preview the set palette; starting study applies that set's palette, and ending restores the global palette. Moving never changes the palette or gender highlighting.
+
+`canMoveLibraryItem` and `moveLibraryItem` separate membership changes from sibling reordering. Shared validation rejects missing targets, cross-subject moves, self moves and folder cycles. Drop feedback and committed moves use the same guard. Moves append to the target's saved ordering and retain card/session references. No database migration, authentication change, dependency or permission expansion was required.
+
+The UI supports dedicated drag symbols, destination outlines, a drag label, Escape/pointer-cancel cleanup, edge scrolling and drop targets in folder tiles, the sidebar tree and the location path. The same operations are available through each item's actions menu and an accessible native destination selector. Existing sibling ordering still has its own grips and arrow controls.
+
+Browser checks on disposable local data passed:
+
+- Set dragged from subject root into a folder; order and location preserved after reload.
+- Set moved between folders through its menu, then dragged back to the subject-level path.
+- Folder moved into another folder through the mobile dialog; child counts updated.
+- Native colour input and custom hex synchronized; folder colour survived save/reload.
+- Set-specific Sky Mint design applied in study; global Original restored on exit.
+- Deliberately failed move restored membership; deliberately failed colour save kept entered values open with an inline error and retained the original record colour.
+- Desktop and 390px mobile layouts visually inspected; independent model/repository/theme/contrast tests cover ID, content, progress and user-namespace preservation.
+
+No real payment, learner content deletion or production reorganisation was used for these tests. Physical iPhone touch hardware and two simultaneous authenticated accounts were not tested. The repository's existing multi-request snapshot save is retained; failures do not claim an atomic database rollback.

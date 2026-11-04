@@ -141,6 +141,13 @@
 
   const getTheme = id => themes.find(theme => theme.id === id) || themes.find(theme => theme.id === DEFAULT_THEME_ID);
 
+  // A set may override the card design without changing the user's global
+  // preference. Old sets and unknown future values inherit the global design.
+  function resolveSetThemeId(set, globalThemeId) {
+    const override = themes.find(theme => theme.id === set?.cardThemeId);
+    return (override || getTheme(globalThemeId)).id;
+  }
+
   function storageOrDefault(storage) {
     if (storage) return storage;
     try { return globalThis.localStorage; } catch { return null; }
@@ -180,7 +187,7 @@
     return { theme, persisted };
   }
 
-  const api = { STORAGE_KEY, DEFAULT_THEME_ID, themes, getTheme, readThemeId, applyTheme, saveTheme };
+  const api = { STORAGE_KEY, DEFAULT_THEME_ID, themes, getTheme, resolveSetThemeId, readThemeId, applyTheme, saveTheme };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (typeof globalThis !== 'undefined') globalThis.WortwerkCardThemes = api;
 })();

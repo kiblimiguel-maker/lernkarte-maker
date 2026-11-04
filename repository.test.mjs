@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-const { normalizeLibrary, reorderLibraryItems, getLibrarySiblings } = createRequire(import.meta.url)('./model.js');
+const { normalizeLibrary, reorderLibraryItems, moveLibraryItem, getLibrarySiblings } = createRequire(import.meta.url)('./model.js');
 import { toLibraryRows, claimLegacyCache, deleteStaleRows, LIBRARY_STORAGE_KEY, LEGACY_MIGRATION_KEY, readAllRows, userLibraryCacheKey } from './repository-core.mjs';
 
 const rows = Array.from({ length: 50_251 }, (_, index) => ({ id: `card-${index}` }));
@@ -147,5 +147,34 @@ assert.deepEqual(restoredOrder.cards, sortable.cards, 'saving display order neve
 const otherOwnerRows = toLibraryRows('subjects', { subjects: [{ id: 'a-subject', name: 'Other account', position: 0 }] }, 'owner-b');
 assert.equal(otherOwnerRows[0].user_id, 'owner-b');
 assert.equal(persisted.subjects.find(row => row.id === 'a-subject').data.name, 'French', 'same record IDs remain namespaced by account');
+
+const organized = normalizeLibrary({
+  subjects: [{ id: 'organization-subject', color: '#c2410c' }],
+  folders: [
+    { id: 'organization-from', subjectId: 'organization-subject', color: '#2563eb' },
+    { id: 'organization-to', subjectId: 'organization-subject', color: '#16a34a' },
+    { id: 'organization-nested', subjectId: 'organization-subject', parentId: 'organization-from', color: '#9333ea' }
+  ],
+  sets: [
+    { id: 'organization-first', subjectId: 'organization-subject', folderId: 'organization-to', cardThemeId: 'original' },
+    { id: 'organization-moved', subjectId: 'organization-subject', folderId: 'organization-from', cardThemeId: 'sky-mint' }
+  ],
+  cards: [{ id: 'organization-card', setId: 'organization-moved', front: 'une maison', back: 'ein Haus', attemptCount: 5, correctCount: 3, incorrectCount: 2 }]
+});
+assert.equal(moveLibraryItem(organized, { type: 'set', id: 'organization-moved', folderId: 'organization-to' }), true);
+assert.equal(moveLibraryItem(organized, { type: 'folder', id: 'organization-nested', folderId: 'organization-to' }), true);
+const organizationRows = Object.fromEntries(['subjects', 'folders', 'sets', 'cards'].map(table => [table,
+  JSON.parse(JSON.stringify(toLibraryRows(table, organized, 'organization-owner'))).sort((a, b) => a.id.localeCompare(b.id))
+]));
+assert.ok(Object.values(organizationRows).flat().every(row => row.user_id === 'organization-owner'));
+assert.equal(organizationRows.sets.find(row => row.id === 'organization-moved').folder_id, 'organization-to', 'the real relational column follows the moved set');
+assert.equal(organizationRows.folders.find(row => row.id === 'organization-nested').data.parentId, 'organization-to');
+const organizationReload = normalizeLibrary(Object.fromEntries(Object.entries(organizationRows).map(([table, rows]) => [table, rows.map(row => row.data)])));
+assert.deepEqual(getLibrarySiblings(organizationReload, 'set', 'organization-moved').map(item => item.id), ['organization-first', 'organization-moved']);
+assert.equal(organizationReload.sets.find(item => item.id === 'organization-moved').cardThemeId, 'sky-mint', 'a per-set design remains independent from destination folder color');
+assert.equal(organizationReload.folders.find(item => item.id === 'organization-nested').color, '#9333ea', 'moving a folder preserves its own color');
+assert.deepEqual(organizationReload.cards, organized.cards, 'organization persistence preserves every learning counter');
+assert.equal(moveLibraryItem(organizationReload, { type: 'set', id: 'organization-moved', folderId: null }), true);
+assert.equal(toLibraryRows('sets', organizationReload, 'organization-owner').find(row => row.id === 'organization-moved').folder_id, null, 'moving back to subject level persists a null folder relation');
 
 console.log('repository.test.mjs passed');

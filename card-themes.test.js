@@ -1,7 +1,7 @@
 'use strict';
 
 const assert = require('node:assert/strict');
-const { themes, DEFAULT_THEME_ID, readThemeId, saveTheme, applyTheme } = require('./card-themes.js');
+const { themes, DEFAULT_THEME_ID, resolveSetThemeId, readThemeId, saveTheme, applyTheme } = require('./card-themes.js');
 
 function luminance(hex) {
   const channels = hex.slice(1).match(/.{2}/g).map(channel => parseInt(channel, 16) / 255)
@@ -78,5 +78,35 @@ assert.equal(applyTheme(themes[1].id, root), themes[1].id);
 assert.equal(root.dataset.cardTheme, themes[1].id);
 assert.equal(applied.get('--study-front-surface'), '#6A00F4');
 assert.equal(applied.get('--study-back-gender-feminine'), '#B00020');
+
+const inheritedSet = Object.freeze({ id: 'legacy-set', subjectId: 'french' });
+const violetSet = Object.freeze({ id: 'violet-set', cardThemeId: themes[1].id, folderId: 'red-folder' });
+const mintSet = Object.freeze({ id: 'mint-set', cardThemeId: themes[2].id, folderId: 'red-folder' });
+assert.equal(resolveSetThemeId(inheritedSet, themes[3].id), themes[3].id, 'legacy sets inherit the current global selection');
+assert.equal(resolveSetThemeId(null, themes[3].id), themes[3].id, 'missing sets safely inherit the global selection');
+assert.equal(resolveSetThemeId({ cardThemeId: '' }, themes[3].id), themes[3].id, 'empty overrides use the global design');
+assert.equal(resolveSetThemeId({ cardThemeId: 'unknown-theme' }, themes[3].id), themes[3].id, 'invalid overrides do not override a valid global design');
+assert.equal(resolveSetThemeId(inheritedSet, 'unknown-theme'), DEFAULT_THEME_ID, 'invalid global values use the original design');
+assert.equal(resolveSetThemeId(inheritedSet), DEFAULT_THEME_ID, 'missing preferences keep the established default');
+assert.equal(resolveSetThemeId(violetSet, 'unknown-theme'), themes[1].id, 'a valid set override takes priority over an invalid global selection');
+assert.equal(resolveSetThemeId(violetSet, themes[3].id), themes[1].id);
+assert.equal(resolveSetThemeId(mintSet, themes[3].id), themes[2].id, 'sets in the same folder retain independent designs');
+assert.deepEqual(violetSet, { id: 'violet-set', cardThemeId: themes[1].id, folderId: 'red-folder' }, 'resolving a design never changes the set or its location');
+
+const storageDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+let preferenceAccesses = 0;
+try {
+  Object.defineProperty(globalThis, 'localStorage', { configurable: true, get() { preferenceAccesses++; return storage; } });
+  saveTheme(themes[3].id, storage);
+  applyTheme(resolveSetThemeId(violetSet, themes[3].id), root);
+  assert.equal(root.dataset.cardTheme, themes[1].id, 'applying a set override changes the displayed card');
+  assert.equal(readThemeId(storage), themes[3].id, 'the global preference is retained after displaying a set override');
+  assert.equal(preferenceAccesses, 0, 'resolving and applying a set design never reads or writes global storage');
+  applyTheme(resolveSetThemeId(inheritedSet, themes[3].id), root);
+  assert.equal(root.dataset.cardTheme, themes[3].id, 'another set returns to the global design');
+} finally {
+  if (storageDescriptor) Object.defineProperty(globalThis, 'localStorage', storageDescriptor);
+  else delete globalThis.localStorage;
+}
 
 console.log('Card theme tests passed');

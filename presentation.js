@@ -41,7 +41,15 @@
     return segments;
   }
 
-  const api = { genderSegments };
+  function colourInk(value) {
+    const hex = /^#[0-9a-f]{6}$/i.test(value) ? value : '#3378F6';
+    const rgb = [1, 3, 5].map(offset => parseInt(hex.slice(offset, offset + 2), 16) / 255);
+    const linear = rgb.map(channel => channel <= .04045 ? channel / 12.92 : ((channel + .055) / 1.055) ** 2.4);
+    const luminance = linear[0] * .2126 + linear[1] * .7152 + linear[2] * .0722;
+    return (luminance + .05) / .05 >= 1.05 / (luminance + .05) ? '#000000' : '#FFFFFF';
+  }
+
+  const api = { genderSegments, colourInk };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (typeof globalThis !== 'undefined') globalThis.WortwerkPresentation = api;
 })();
