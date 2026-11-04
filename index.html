@@ -4,18 +4,20 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#020202">
-  <title>wortwerk · Dein Lernraum</title>
+  <title>Lernkarten Maker · Dein Lernraum</title>
+  <meta name="application-name" content="Lernkarten Maker">
+  <meta name="apple-mobile-web-app-title" content="Lernkarten Maker">
   <link rel="icon" type="image/png" sizes="1024x1024" href="assets/app-icon.png">
   <link rel="apple-touch-icon" sizes="1024x1024" href="assets/app-icon.png">
   <link rel="stylesheet" href="app.css">
 </head>
 <body>
   <main class="auth-screen" id="boot-screen" aria-live="polite">
-    <section class="auth-panel boot-panel"><div class="wordmark auth-wordmark"><img src="assets/app-icon.png" alt="" width="40" height="40"><span>wortwerk<small>DEIN LERNRAUM</small></span></div><div class="auth-loading" role="status"><span class="loading-mark"></span><span>Dein Lernraum wird geöffnet …</span></div></section>
+    <section class="auth-panel boot-panel"><div class="wordmark auth-wordmark"><img src="assets/app-icon.png" alt="" width="40" height="40"><span class="brand-copy"><span class="brand-name">Lernkarten<br>Maker</span><small>DEIN LERNRAUM</small></span></div><div class="auth-loading" role="status"><span class="loading-mark"></span><span>Dein Lernraum wird geöffnet …</span></div></section>
   </main>
   <main class="auth-screen" id="auth-screen" aria-labelledby="auth-title" hidden>
     <section class="auth-panel">
-      <div class="wordmark auth-wordmark"><img src="assets/app-icon.png" alt="" width="40" height="40"><span>wortwerk<small>DEIN LERNRAUM</small></span></div>
+      <div class="wordmark auth-wordmark"><img src="assets/app-icon.png" alt="" width="40" height="40"><span class="brand-copy"><span class="brand-name">Lernkarten<br>Maker</span><small>DEIN LERNRAUM</small></span></div>
       <div class="auth-copy">
         <h1 id="auth-title">Lernen, das<br>bei dir bleibt.</h1>
         <p class="auth-description">Melde dich an, um deine Lernbibliothek zu öffnen.</p>
@@ -28,13 +30,13 @@
       <p class="auth-footnote">Sicher anmelden mit deinem Google-Konto.</p>
       <div class="auth-loading" id="auth-loading" role="status" aria-live="polite"><span class="loading-mark"></span><span id="auth-loading-label">Verbindung wird geprüft …</span></div>
     </section>
-    <footer class="auth-footer">wortwerk <span>·</span> Dein persönlicher Lernraum</footer>
+    <footer class="auth-footer">Lernkarten Maker <span>·</span> Dein persönlicher Lernraum</footer>
   </main>
   <div class="app-shell" id="app-shell" hidden>
     <a class="skip-link" href="#content">Zum Inhalt</a>
     <button class="navigation-scrim" id="navigation-scrim" aria-label="Navigation schliessen" hidden></button>
     <aside class="app-sidebar" id="app-navigation" aria-label="Hauptnavigation"><button class="icon-button navigation-close" id="navigation-close" aria-label="Navigation schliessen">×</button>
-      <a class="wordmark" href="#" data-view="library" aria-label="wortwerk – Bibliothek"><img src="assets/app-icon.png" alt="" width="40" height="40"><span>wortwerk<small>DEIN LERNRAUM</small></span></a>
+      <a class="wordmark" href="#" data-view="library" aria-label="Lernkarten Maker – Bibliothek"><img src="assets/app-icon.png" alt="" width="40" height="40"><span class="brand-copy"><span class="brand-name">Lernkarten<br>Maker</span><small>DEIN LERNRAUM</small></span></a>
       <nav class="main-navigation" aria-label="Lernraum"><button data-view="library"><span aria-hidden="true">▤</span>Bibliothek</button><button data-view="recent"><span aria-hidden="true">◷</span>Zuletzt gelernt</button></nav>
       <div class="sidebar-section-label">DEINE FÄCHER</div><nav class="sidebar-subjects" id="sidebar-subjects" aria-label="Fächer"></nav>
       <nav class="sidebar-footer" aria-label="Weitere Bereiche"><button data-view="donations"><span aria-hidden="true">♡</span>Spenden</button><button id="card-theme-open" type="button" aria-haspopup="dialog"><span aria-hidden="true">⚙</span>Einstellungen</button><p>Dein Wissen. Dein Tempo.</p></nav>

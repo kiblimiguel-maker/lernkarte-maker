@@ -1,6 +1,6 @@
 # Spenden mit Stripe aktivieren
 
-wortwerk bleibt für alle kostenlos. Checkout erzeugt ausschliesslich einzelne Zahlungen in CHF; es gibt keine Abos oder zahlungspflichtigen Funktionen.
+Lernkarten Maker bleibt für alle kostenlos. Checkout erzeugt ausschliesslich einzelne Zahlungen in CHF; es gibt keine Abos oder zahlungspflichtigen Funktionen.
 
 ## Vercel
 

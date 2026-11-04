@@ -91,3 +91,12 @@ Local browser checks used disposable data and the real app modules/styles:
 - Desktop, 834px tablet and 390px smartphone screenshots inspected; no browser console errors observed. Subject navigation arrows are confirmed hidden in sorting mode, with controls inside the tiles. The 320px layout also has no document overflow.
 
 Automated tests, Production build, `git diff --check`, and production dependency audit passed (zero vulnerabilities). No database schema, authentication, payments, study timing or card data changes were required. Real-device touch hardware was not tested.
+
+## Lernkarten Maker branding and card-design selection — 2026-11-04
+
+- The public product name is now **Lernkarten Maker** in the browser title, navigation, sign-in view, donation copy and Stripe Checkout product text. Technical theme IDs, storage keys, Stripe metadata and database table names remain stable for existing data and payment events.
+- The redundant location and drop-target bar is removed from subject and folder pages. Folder tiles, the sidebar tree, breadcrumbs and the existing Move menu/dialog still provide navigation and valid drop targets.
+- Subject tiles retain the saved colour and accessible computed ink, with more restrained proportions, a plain icon treatment and a quieter arrow. No subject colour or card data is rewritten.
+- Set creation and editing use a native radio grid with the global-inheritance option and all ten existing card designs. Each option previews both card faces using the existing theme tokens and French gender highlighting. Selection is a draft until Save; Cancel discards it. The chosen set override survives reload, and selecting inheritance clears the override.
+- Desktop and local browser checks at 390px and 320px confirmed no dialog or document horizontal overflow, accessible keyboard radio selection, visible Save/Cancel controls, and correct persistence after Save and reload. A signed-out browser view confirmed the new name on the real login screen. Dragging a set to a sidebar folder and back to its subject root still worked with the removed bar.
+- `npm test`, `npm run build`, `git diff --check` and `npm audit --omit=dev` passed; the production dependency audit reported zero vulnerabilities. The browser checks used disposable local data. Stripe payments, Google sign-in and physical touch hardware were not exercised for this design change.

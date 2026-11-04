@@ -9,7 +9,7 @@
   const themes = [
     {
       id: 'wortwerk-original',
-      name: 'Wortwerk Original',
+      name: 'Original',
       description: 'Das ursprüngliche helle Kartendesign',
       front: {
         surface: '#DDE3EA', text: '#0B0D10', muted: '#0B0D10', border: '#C6D0D6',

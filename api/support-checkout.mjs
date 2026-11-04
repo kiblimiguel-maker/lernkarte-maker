@@ -45,7 +45,7 @@ export function createDonationCheckoutHandler({ authenticate = getAuthenticatedU
     try {
       stripe = stripeClient();
     } catch {
-      return json({ error: 'Stripe ist noch nicht eingerichtet. Du kannst wortwerk weiterhin kostenlos nutzen.' }, 503);
+      return json({ error: 'Stripe ist noch nicht eingerichtet. Du kannst Lernkarten Maker weiterhin kostenlos nutzen.' }, 503);
     }
 
     try {
@@ -56,8 +56,8 @@ export function createDonationCheckoutHandler({ authenticate = getAuthenticatedU
             currency: 'chf',
             unit_amount: amountCents,
             product_data: {
-              name: 'Freiwillige Spende für wortwerk',
-              description: 'Einmalige Spende ohne Gegenleistung. wortwerk bleibt vollständig kostenlos.'
+              name: 'Freiwillige Spende für Lernkarten Maker',
+              description: 'Einmalige Spende ohne Gegenleistung. Lernkarten Maker bleibt vollständig kostenlos.'
             }
           },
           quantity: 1
