@@ -74,3 +74,20 @@ Browser checks on disposable local data passed:
 - Desktop and 390px mobile layouts visually inspected; independent model/repository/theme/contrast tests cover ID, content, progress and user-namespace preservation.
 
 No real payment, learner content deletion or production reorganisation was used for these tests. Physical iPhone touch hardware and two simultaneous authenticated accounts were not tested. The repository's existing multi-request snapshot save is retained; failures do not claim an atomic database rollback.
+
+## Library polish and subject disclosure — 2026-11-04
+
+Large subject surfaces now use a restrained 80% blend of the saved colour with a dark neutral. This keeps the full-colour identity without the previous luminous green. The stored colour and small sidebar markers stay unchanged. Black or white ink is calculated against the actual rendered surface; contrast checks cover all presets and custom light/dark values.
+
+The sorting footer's `flex-basis: 100%` was incorrectly reserving a whole card height in the vertical set layout. It now has intrinsic, non-growing height, while full-width wrapping is scoped to folder rows. Handles and arrow targets are 44px, decorative move handles leave the tab/accessibility order during sorting, and the subject navigation arrow remains hidden in sorting mode.
+
+Sidebar subjects now have independent disclosure state. Initially only subjects appear. Opening a subject reveals its folder hierarchy; clicking the selected subject again collapses it. A labelled chevron can expand/collapse any subject without navigating. Hidden folder lists leave the keyboard and accessibility tree. Mobile chevron actions keep the navigation drawer open; selecting a folder closes it.
+
+Local browser checks used disposable data and the real app modules/styles:
+- Opening, collapsing and independently expanding another subject via keyboard, without changing the current page.
+- Nested-folder navigation and mobile drawer behaviour.
+- Sorting a set, reloading, and confirming the saved order and unchanged card counts.
+- Folder, subject and set sorting footer containment; 44px targets; no horizontal overflow at 390px and 320px.
+- Desktop, 834px tablet and 390px smartphone screenshots inspected; no browser console errors observed. Subject navigation arrows are confirmed hidden in sorting mode, with controls inside the tiles. The 320px layout also has no document overflow.
+
+Automated tests, Production build, `git diff --check`, and production dependency audit passed (zero vulnerabilities). No database schema, authentication, payments, study timing or card data changes were required. Real-device touch hardware was not tested.

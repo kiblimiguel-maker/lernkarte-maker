@@ -1,7 +1,7 @@
 'use strict';
 
 const assert = require('node:assert/strict');
-const { genderSegments, colourInk } = require('./presentation.js');
+const { genderSegments, colourInk, subjectSurface } = require('./presentation.js');
 
 function colored(value) {
   return genderSegments(value).filter(segment => segment.gender).map(segment => [segment.text, segment.gender]);
@@ -27,6 +27,9 @@ assert.equal(colourInk('#FFFFFF'), '#000000');
 assert.equal(colourInk('#000000'), '#FFFFFF');
 assert.equal(colourInk('#fefefe'), '#000000');
 assert.equal(colourInk('invalid'), colourInk('#3378F6'));
+assert.equal(subjectSurface('invalid'), subjectSurface('#3378F6'));
+assert.equal(subjectSurface('#16A34A'), '#158640');
+assert.equal(subjectSurface('#16a34a'), subjectSurface('#16A34A'));
 for (const colour of ['#3378F6','#00A88F','#26A65B','#E7A623','#DC4D5A','#9359DB','#000001','#FFFEEE']) {
   const luminance = hex => {
     const channels = [1,3,5].map(i => parseInt(hex.slice(i,i+2),16)/255).map(v => v<=.04045?v/12.92:((v+.055)/1.055)**2.4);
@@ -34,5 +37,8 @@ for (const colour of ['#3378F6','#00A88F','#26A65B','#E7A623','#DC4D5A','#9359DB
   };
   const background=luminance(colour), ink=luminance(colourInk(colour));
   assert.ok((Math.max(background,ink)+.05)/(Math.min(background,ink)+.05)>=4.5, `readable ink on ${colour}`);
+  const surface = subjectSurface(colour), surfaceLuminance = luminance(surface), surfaceInk = luminance(colourInk(surface));
+  assert.ok((Math.max(surfaceLuminance,surfaceInk)+.05)/(Math.min(surfaceLuminance,surfaceInk)+.05)>=4.5, `readable ink on toned subject surface ${colour}`);
+  assert.ok(surfaceLuminance <= background + .005, `surface does not brighten the selected colour ${colour}`);
 }
 console.log('Presentation tests passed');

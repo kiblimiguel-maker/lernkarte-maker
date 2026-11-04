@@ -51,6 +51,8 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
   let donationGreetingDismissed = false;
   let data = initial(), activeSubject = null, activeFolder = null, activeSet = null, view = donationReturn ? 'donations' : 'library';
   let librarySorting = false, librarySortSaving = false, entitySaving = false;
+  // Sidebar disclosure is independent from the current library location.
+  const expandedSidebarSubjects = new Set();
   let formContext = null, importRows = [], importChecked = false, importHasErrors = false, session = null;
   function save(){const pending=window.WortwerkRepository.saveLibrary(data);pending.catch(()=>{});return pending}
   const subject = key => data.subjects.find(x=>x.id===key);
@@ -118,8 +120,21 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
       const current=button.dataset.view==='recent'?view==='recent':button.dataset.view==='donations'?view==='donations':button.dataset.view==='library'&&view==='library'&&atLibraryRoot;
       if(current)button.setAttribute('aria-current','page');else button.removeAttribute('aria-current');
     });
-    $('#sidebar-subjects').innerHTML=data.subjects.map(item=>`<button data-sidebar-subject="${esc(item.id)}" data-drop-folder="" data-drop-subject="${esc(item.id)}" ${view==='library'&&activeSubject===item.id&&!activeFolder?'aria-current="page"':''}><span class="sidebar-dot" style="--dot:${safeColor(item.color)}"></span><span>${esc(item.name)}</span></button>${view==='library'&&activeSubject===item.id?sidebarFolders(item.id):''}`).join('')||'<p class="sidebar-empty">Deine Fächer erscheinen hier.</p>';
-    document.querySelectorAll('[data-sidebar-subject]').forEach(button=>button.onclick=()=>{closeNavigation();librarySorting=false;view='library';activeSubject=button.dataset.sidebarSubject;activeFolder=null;activeSet=null;render()});
+    $('#sidebar-subjects').innerHTML=data.subjects.map((item,index)=>{
+      const hasFolders=subjectFolders(item.id).length>0,expanded=hasFolders&&expandedSidebarSubjects.has(item.id),listId=`sidebar-folders-${index}`;
+      return `<div class="sidebar-subject-group"><div class="sidebar-subject-row${expanded?' is-expanded':''}"><button class="sidebar-subject-open" data-sidebar-subject="${esc(item.id)}" data-drop-folder="" data-drop-subject="${esc(item.id)}" ${view==='library'&&activeSubject===item.id&&!activeFolder?'aria-current="page"':''}${hasFolders?` aria-expanded="${expanded}" aria-controls="${listId}"`:''}><span class="sidebar-dot" style="--dot:${safeColor(item.color)}"></span><span>${esc(item.name)}</span></button>${hasFolders?`<button class="sidebar-subject-toggle" type="button" data-sidebar-toggle="${esc(item.id)}" aria-expanded="${expanded}" aria-controls="${listId}" aria-label="Ordner in ${esc(item.name)} ${expanded?'einklappen':'anzeigen'}" title="Ordner ${expanded?'einklappen':'anzeigen'}"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m6 3 5 5-5 5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button>`:''}</div>${hasFolders?`<div class="sidebar-folder-list" id="${listId}"${expanded?'':' hidden'}>${sidebarFolders(item.id)}</div>`:''}</div>`;
+    }).join('')||'<p class="sidebar-empty">Deine Fächer erscheinen hier.</p>';
+    document.querySelectorAll('[data-sidebar-subject]').forEach(button=>button.onclick=()=>{
+      const subjectId=button.dataset.sidebarSubject,alreadyHere=view==='library'&&activeSubject===subjectId&&!activeFolder&&!activeSet;
+      if(alreadyHere&&expandedSidebarSubjects.has(subjectId))expandedSidebarSubjects.delete(subjectId);else expandedSidebarSubjects.add(subjectId);
+      closeNavigation();librarySorting=false;view='library';activeSubject=subjectId;activeFolder=null;activeSet=null;render();
+    });
+    document.querySelectorAll('[data-sidebar-toggle]').forEach(button=>button.onclick=()=>{
+      const subjectId=button.dataset.sidebarToggle;
+      if(expandedSidebarSubjects.has(subjectId))expandedSidebarSubjects.delete(subjectId);else expandedSidebarSubjects.add(subjectId);
+      render();
+      document.querySelector(`[data-sidebar-toggle="${CSS.escape(subjectId)}"]`)?.focus();
+    });
     document.querySelectorAll('[data-sidebar-folder]').forEach(button=>button.onclick=()=>{closeNavigation();librarySorting=false;view='library';activeFolder=button.dataset.sidebarFolder;activeSubject=folder(activeFolder)?.subjectId;activeSet=null;render()});
     crumbs(view==='recent'?['Zuletzt gelernt']:view==='donations'?['Bibliothek','Spenden']:['Bibliothek']);
   }
@@ -247,7 +262,7 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
     donationStatusChecking=false;
     renderDonations();
   }
-  function subjectAppearance(item,fallback=colors[0]){const colour=safeColor(item.color,fallback);return `--dot:${colour};--subject-ink:${window.WortwerkPresentation.colourInk(colour)}`}
+  function subjectAppearance(item,fallback=colors[0]){const colour=safeColor(item.color,fallback),surface=window.WortwerkPresentation.subjectSurface(colour);return `--dot:${colour};--subject-surface:${surface};--subject-ink:${window.WortwerkPresentation.colourInk(surface)}`}
   function subjectSymbol(item,fallback='📚'){
     const icon=item.emoji||item.icon||fallback;
     const flag=icon==='🇫🇷'?'<svg class="subject-flag" viewBox="0 0 36 26" aria-hidden="true"><path fill="#0055A4" d="M0 0h12v26H0z"/><path fill="#FFF" d="M12 0h12v26H12z"/><path fill="#EF4135" d="M24 0h12v26H24z"/></svg>':`<span class="subject-glyph">${esc(icon)}</span>`;
@@ -462,14 +477,14 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
   function openEmptyAction(){if(view==='recent'){view='library';render();return}if(activeSet)openEntity('card');else if(activeFolder)openEntity('set');else if(activeSubject)openEntity('folder');else openEntity('subject')}
   function bindSubjectCards(){
     document.querySelectorAll('[data-open-subject]').forEach(element=>{
-      const open=()=>{activeSubject=element.dataset.openSubject;activeFolder=null;activeSet=null;view='library';render()};
+      const open=()=>{activeSubject=element.dataset.openSubject;expandedSidebarSubjects.add(activeSubject);activeFolder=null;activeSet=null;view='library';render()};
       element.onclick=event=>{if((event.target.closest('button,details')&&event.target.closest('button,details')!==element)||librarySorting)return;open()};element.onkeydown=event=>{if(event.target===element&&!librarySorting&&(event.key==='Enter'||event.key===' ')){event.preventDefault();open()}};
     });
     document.querySelectorAll('[data-empty-action]').forEach(button=>button.onclick=openEmptyAction);
   }
   function setCard(set){
     const parent=folder(set.folderId),sub=subject(set.subjectId),count=setCards(set.id).length,theme=cardThemes.getTheme(cardThemes.resolveSetThemeId(set,activeCardThemeId));
-    return `<article class="set-card" ${sortAttributes('set',set)} tabindex="0" data-open-set="${esc(set.id)}" style="--set-front:${theme.front.surface};--set-back:${theme.back.surface}"><div class="set-card-top"><button class="set-cover" data-organise-handle data-item-type="set" data-item-id="${esc(set.id)}" aria-label="${esc(set.name)} ziehen zum Verschieben" title="Ziehen zum Verschieben"><span></span><span></span></button>${itemActions('set',set)}</div><div class="set-card-meta">${esc(parent?.name||sub?.name||'Fach')}</div><h2>${esc(set.name)}</h2>${set.description?`<p>${esc(set.description)}</p>`:''}<div class="set-card-bottom"><span>${count} ${count===1?'Karte':'Karten'}</span><span class="set-actions"><button data-quick-study="${esc(set.id)}" ${count?'':'disabled'}>${studyActionLabel(set.id)}</button><button data-quick-edit="${esc(set.id)}">Öffnen</button></span></div>${sortControls('set',set)}</article>`;
+    return `<article class="set-card" ${sortAttributes('set',set)} tabindex="0" data-open-set="${esc(set.id)}" style="--set-front:${theme.front.surface};--set-back:${theme.back.surface}"><div class="set-card-top"><button class="set-cover" data-organise-handle ${librarySorting?'tabindex="-1" aria-hidden="true"':''} data-item-type="set" data-item-id="${esc(set.id)}" aria-label="${esc(set.name)} ziehen zum Verschieben" title="Ziehen zum Verschieben"><span></span><span></span></button>${itemActions('set',set)}</div><div class="set-card-meta">${esc(parent?.name||sub?.name||'Fach')}</div><h2>${esc(set.name)}</h2>${set.description?`<p>${esc(set.description)}</p>`:''}<div class="set-card-bottom"><span>${count} ${count===1?'Karte':'Karten'}</span><span class="set-actions"><button data-quick-study="${esc(set.id)}" ${count?'':'disabled'}>${studyActionLabel(set.id)}</button><button data-quick-edit="${esc(set.id)}">Öffnen</button></span></div>${sortControls('set',set)}</article>`;
   }
   function bindSetCards(){
     document.querySelectorAll('[data-open-set]').forEach(element=>{
@@ -481,7 +496,7 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
   }
   function folderCard(item){
     const count=subjectSets(item.subjectId).filter(set=>set.folderId===item.id).length,children=subjectFolders(item.subjectId).filter(child=>child.parentId===item.id).length;
-    return `<article class="folder-card" ${sortAttributes('folder',item)} ${dropAttributes(item.subjectId,item.id)} tabindex="0" data-open-folder="${esc(item.id)}" style="--dot:${safeColor(item.color,'#3378F6')}"><button class="folder-icon" data-organise-handle data-item-type="folder" data-item-id="${esc(item.id)}" aria-label="${esc(item.name)} ziehen zum Verschieben" title="Ziehen zum Verschieben">${folderSymbol()}</button><div class="folder-card-copy"><h3>${esc(item.name)}</h3><p>${count} ${count===1?'Lernstapel':'Lernstapel'}${children?` · ${children} Unterordner`:''}</p></div>${itemActions('folder',item)}${sortControls('folder',item)}</article>`;
+    return `<article class="folder-card" ${sortAttributes('folder',item)} ${dropAttributes(item.subjectId,item.id)} tabindex="0" data-open-folder="${esc(item.id)}" style="--dot:${safeColor(item.color,'#3378F6')}"><button class="folder-icon" data-organise-handle ${librarySorting?'tabindex="-1" aria-hidden="true"':''} data-item-type="folder" data-item-id="${esc(item.id)}" aria-label="${esc(item.name)} ziehen zum Verschieben" title="Ziehen zum Verschieben">${folderSymbol()}</button><div class="folder-card-copy"><h3>${esc(item.name)}</h3><p>${count} ${count===1?'Lernstapel':'Lernstapel'}${children?` · ${children} Unterordner`:''}</p></div>${itemActions('folder',item)}${sortControls('folder',item)}</article>`;
   }
   function bindFolderCards(){
     document.querySelectorAll('[data-open-folder]').forEach(element=>{
