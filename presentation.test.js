@@ -13,13 +13,22 @@ assert.deepEqual(colored(' UNE   chaîne de télévision '), [['UNE', 'f']]);
 assert.deepEqual(colored('La    maison'), [['La', 'f']]);
 assert.deepEqual(colored('le château ( M )'), [['le', 'm'], ['( M )', 'm']]);
 assert.deepEqual(colored('la cathédrale\t(f)'), [['la', 'f'], ['(f)', 'f']]);
+assert.deepEqual(colored('les bâtiments (m pl)'), [['(m pl)', 'm']]);
+assert.deepEqual(colored('les maisons (f pl)'), [['(f pl)', 'f']]);
+assert.deepEqual(colored('( M   PL ) employés / (f\u00a0pl) employées'), [
+  ['( M   PL )', 'm'], ['(f\u00a0pl)', 'f']
+]);
+assert.deepEqual(colored('(m\tpl) livres / ( F PL ) voitures'), [
+  ['(m\tpl)', 'm'], ['( F PL )', 'f']
+]);
+assert.deepEqual(colored('(m plan) (f plein) (mplus) (fpl) (pl) exemples'), []);
 assert.deepEqual(colored('brun, commune, dunes, les livres, laque, leçon'), []);
 assert.deepEqual(colored('unité, lundi, uneville, label'), []);
 assert.deepEqual(colored('Le livre (m) et une maison ( F )'), [
   ['Le', 'm'], ['(m)', 'm'], ['une', 'f'], ['( F )', 'f']
 ]);
 assert.equal(genderSegments('brun').map(part => part.text).join(''), 'brun');
-for (const value of ['LE livre', 'la maison (f)', 'un chien et une voiture', 'les livres']) {
+for (const value of ['LE livre', 'la maison (f)', 'un chien et une voiture', 'les livres', 'les bâtiments (m pl)', '( F\u00a0 PL ) maisons / (m\tpl) bâtiments']) {
   assert.equal(genderSegments(value).map(part => part.text).join(''), value, `all source text is preserved: ${value}`);
 }
 

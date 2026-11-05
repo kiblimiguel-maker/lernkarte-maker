@@ -19,7 +19,7 @@
   function genderSegments(value) {
     const text = String(value ?? '');
     const segments = [];
-    const marker = /\(\s*([mf])\s*\)|une|un|le|la/giu;
+    const marker = /\(\s*([mf])(?:\s+pl)?\s*\)|une|un|le|la/giu;
     let cursor = 0;
     let match;
 
