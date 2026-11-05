@@ -1,0 +1,13 @@
+import assert from 'node:assert/strict';
+import { cardListPage, libraryCardCounts } from './library-view.mjs';
+const cards = Array.from({ length: 50000 }, (_, index) => ({ id: String(index), setId: index % 2 ? 'a' : 'b', front: `Begriff ${index}`, back: 'un château', backExampleSentence: 'À côté du musée.' }));
+const snapshot = JSON.stringify(cards.slice(0, 5));
+assert.equal(libraryCardCounts(cards).get('a'), 25000);
+assert.equal(cardListPage(cards).cards.length, 100);
+assert.equal(cardListPage(cards, 'CHATEAU musee').total, 50000);
+assert.equal(cardListPage(cards, 'Begriff 49999').cards[0].id, '49999');
+assert.equal(cardListPage(cards, 'absent').total, 0);
+assert.deepEqual(cardListPage([], 'test'), { cards: [], total: 0 });
+assert.equal(cardListPage(cards, '', 200).cards[199].id, '199');
+assert.equal(JSON.stringify(cards.slice(0, 5)), snapshot);
+console.log('Library view checks passed: bounded rendering, accent-insensitive search, exact counts and unchanged card order.');

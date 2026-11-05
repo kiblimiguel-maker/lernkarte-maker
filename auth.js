@@ -1,5 +1,6 @@
 import { inject } from '@vercel/analytics';
 import { isSupabaseConfigured, supabase } from './supabaseClient.js';
+import { createAuthLifecycle } from './auth-lifecycle.mjs';
 
 inject({
   mode: import.meta.env.PROD ? 'production' : 'development',
@@ -22,10 +23,9 @@ const authLoading = document.querySelector('#auth-loading');
 const accountEmail = document.querySelector('#account-email');
 const signOutButton = document.querySelector('#sign-out');
 
-let appLoaded = false;
-let authReady = false;
 let authEventObserved = false;
 let signingIn = false;
+let signingOut = false;
 
 function setError(message = '') {
   authError.textContent = message;
@@ -70,46 +70,47 @@ function showSignedOut(message = '') {
 }
 
 async function loadExistingApp() {
-  authScreen.hidden = true;
-  authLoading.hidden = true;
-
-  if (appLoaded) {
-    if (window.WortwerkReloadLibrary) await window.WortwerkReloadLibrary();
-    bootScreen.hidden = true;
-    appShell.hidden = false;
-    return;
-  }
-
-  bootScreen.hidden = false;
-  appShell.hidden = true;
-  appLoaded = true;
-  import('./parser.js').then(() => import('./presentation.js')).then(() => import('./card-themes.js')).then(() => import('./model.js')).then(() => import('./repository.js')).then(module => {
-    window.WortwerkRepository = module;
-    return import('./app.js');
-  }).then(() => {
-    bootScreen.hidden = true;
-    appShell.hidden = false;
-  }).catch(error => {
-    appLoaded = false;
-    bootScreen.hidden = true;
-    appShell.hidden = true;
-    authScreen.hidden = false;
-    setError('Die Lernkarten-App konnte nicht geladen werden. Bitte lade die Seite erneut.');
-    console.error(error);
-  });
+  await import('./parser.js');
+  await import('./presentation.js');
+  await import('./card-themes.js');
+  await import('./model.js');
+  window.WortwerkRepository = await import('./repository.js');
+  await import('./app.js');
+  await window.WortwerkAppReady;
 }
 
-function applySession(session, message = '') {
-  authReady = true;
-  signingIn = false;
-  bootScreen.hidden = true;
-  if (session?.user) {
+const lifecycle = createAuthLifecycle({
+  loadApp: loadExistingApp,
+  reloadApp: () => window.WortwerkReloadLibrary?.(),
+  updateAccount(user) {
     setError('');
-    accountEmail.textContent = session.user.email || 'Angemeldet';
-    loadExistingApp();
-  } else {
-    showSignedOut(message);
+    accountEmail.textContent = user.email || 'Angemeldet';
+    signOutButton.disabled = signingOut;
+  },
+  showLoading() {
+    authScreen.hidden = true;
+    authLoading.hidden = true;
+    bootScreen.hidden = false;
+    appShell.hidden = true;
+  },
+  showSignedIn() {
+    bootScreen.hidden = true;
+    appShell.hidden = false;
+    authScreen.hidden = true;
+  },
+  showSignedOut,
+  resetWorkspace: () => window.WortwerkResetWorkspace?.(),
+  onError(error) {
+    bootScreen.hidden = true;
+    appShell.hidden = true;
+    showSignedOut('Die Lernkarten-App konnte nicht geladen werden. Bitte lade die Seite erneut.');
+    console.error(error);
   }
+});
+
+function applySession(session, message = '') {
+  signingIn = false;
+  return lifecycle.apply(session, message);
 }
 
 googleButton.addEventListener('click', async () => {
@@ -135,20 +136,22 @@ googleButton.addEventListener('click', async () => {
 });
 
 signOutButton.addEventListener('click', async () => {
-  if (!supabase) return;
+  if (!supabase || signingOut) return;
+  signingOut = true;
   signOutButton.disabled = true;
   try {
     const { error } = await supabase.auth.signOut();
     if (error) throw error;
   } catch (error) {
-    signOutButton.disabled = false;
     console.error('Abmeldung fehlgeschlagen.', error);
     window.alert('Die Abmeldung ist fehlgeschlagen. Bitte versuche es erneut.');
+  } finally {
+    signingOut = false;
+    signOutButton.disabled = false;
   }
 });
 
 if (!isSupabaseConfigured) {
-  authReady = true;
   showSignedOut();
 } else {
   supabase.auth.onAuthStateChange((event, session) => {
@@ -156,9 +159,11 @@ if (!isSupabaseConfigured) {
     // URL processing is part of client initialization, so this avoids racing
     // the startup check against Supabase's initial event.
     if (event === 'INITIAL_SESSION') return;
-    authEventObserved = true;
     if (event === 'SIGNED_IN' || event === 'SIGNED_OUT' || event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED') {
-      applySession(session);
+      authEventObserved = true;
+      // Supabase emits under its auth lock. Queue workspace loads separately:
+      // repository requests may themselves ask Supabase for the current user.
+      setTimeout(() => { void applySession(session); }, 0);
     }
   });
 

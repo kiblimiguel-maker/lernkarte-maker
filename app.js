@@ -1,4 +1,6 @@
 import { supabase } from './supabaseClient.js';
+import { cardListPage, libraryCardCounts } from './library-view.mjs';
+import { studyKeyboardAction } from './study-keyboard.mjs';
 import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown, parseDonationAmountCents, shouldShowDonationWelcome, setDonationReminderEnabled, isDonationReminderEnabled } from './donation-values.mjs';
 
 (() => {
@@ -51,9 +53,10 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
   let donationGreetingDismissed = false;
   let data = initial(), activeSubject = null, activeFolder = null, activeSet = null, view = donationReturn ? 'donations' : 'library';
   let librarySorting = false, librarySortSaving = false, entitySaving = false;
+  let cardCounts=new Map(),cardListSetId=null,cardListQuery='',cardListLimit=100,recoveryAwaitingChoice=false;
   // Sidebar disclosure is independent from the current library location.
   const expandedSidebarSubjects = new Set();
-  let formContext = null, importRows = [], importChecked = false, importHasErrors = false, session = null;
+  let formContext = null, importRows = [], importChecked = false, importHasErrors = false, importErrors=[],importPreviewLimit=100, session = null;
   function save(){const pending=window.WortwerkRepository.saveLibrary(data);pending.catch(()=>{});return pending}
   const subject = key => data.subjects.find(x=>x.id===key);
   const folder = key => data.folders.find(x=>x.id===key);
@@ -99,9 +102,10 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
     if(!result.persisted)toast('Farbschema übernommen. Die dauerhafte Speicherung ist in diesem Browser nicht verfügbar.');render();
   }
   function render(){
+    cardCounts=libraryCardCounts(data.cards);
     if(view!=='library'||activeSet)librarySorting=false;
     renderNav();
-    $('#content').classList.toggle('is-sorting',librarySorting);$('#content').inert=librarySortSaving;$('#content').setAttribute('aria-busy',String(librarySortSaving));
+    $('#content').classList.toggle('is-sorting',librarySorting);$('#content').inert=librarySortSaving||recoveryAwaitingChoice;$('#content').setAttribute('aria-busy',String(librarySortSaving));
     if(view==='donations'){
       activeSubject=null;activeFolder=null;activeSet=null;renderDonations();return;
     }
@@ -139,12 +143,14 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
     crumbs(view==='recent'?['Zuletzt gelernt']:view==='donations'?['Bibliothek','Spenden']:['Bibliothek']);
   }
   const mobileNavigation=window.matchMedia('(max-width:760px)');
-  function syncNavigation(){const open=$('#app-shell').classList.contains('navigation-open')&&mobileNavigation.matches;$('#app-navigation').inert=mobileNavigation.matches&&!open;$('.main-area').inert=open;$('#navigation-scrim').hidden=!open;$('#navigation-toggle').setAttribute('aria-expanded',String(open));if(open){$('#app-navigation').setAttribute('role','dialog');$('#app-navigation').setAttribute('aria-modal','true')}else{$('#app-navigation').removeAttribute('role');$('#app-navigation').removeAttribute('aria-modal')}}
+  let sidebarCollapsed=false;try{sidebarCollapsed=localStorage.getItem('lernkarten-sidebar-collapsed')==='true'}catch{}
+  $('#app-shell').classList.toggle('sidebar-collapsed',sidebarCollapsed);
+  function syncNavigation(){const open=$('#app-shell').classList.contains('navigation-open')&&mobileNavigation.matches;$('#app-navigation').inert=mobileNavigation.matches?!open:sidebarCollapsed;$('.main-area').inert=open;$('#navigation-scrim').hidden=!open;$('#navigation-toggle').setAttribute('aria-expanded',String(mobileNavigation.matches?open:!sidebarCollapsed));$('#navigation-toggle').setAttribute('aria-label',mobileNavigation.matches?'Navigation öffnen':sidebarCollapsed?'Seitenleiste einblenden':'Seitenleiste ausblenden');if(open){$('#app-navigation').setAttribute('role','dialog');$('#app-navigation').setAttribute('aria-modal','true')}else{$('#app-navigation').removeAttribute('role');$('#app-navigation').removeAttribute('aria-modal')}}
   function closeNavigation(){const wasOpen=$('#app-shell').classList.contains('navigation-open');$('#app-shell').classList.remove('navigation-open');syncNavigation();if(wasOpen)$('#navigation-toggle').focus()}
-  $('#navigation-toggle').onclick=()=>{$('#app-shell').classList.add('navigation-open');syncNavigation();$('#navigation-close').focus()};
+  $('#navigation-toggle').onclick=()=>{if(!mobileNavigation.matches){sidebarCollapsed=!sidebarCollapsed;$('#app-shell').classList.toggle('sidebar-collapsed',sidebarCollapsed);try{localStorage.setItem('lernkarten-sidebar-collapsed',String(sidebarCollapsed))}catch{}syncNavigation();return}$('#app-shell').classList.add('navigation-open');syncNavigation();$('#navigation-close').focus()};
   $('#navigation-scrim').onclick=closeNavigation;$('#navigation-close').onclick=closeNavigation;
   mobileNavigation.addEventListener('change',()=>{if(!mobileNavigation.matches)$('#app-shell').classList.remove('navigation-open');syncNavigation()});syncNavigation();
-  document.addEventListener('keydown',event=>{if(event.key==='Escape'){closeNavigation();document.querySelector('.account-menu')?.removeAttribute('open')}if(event.key==='Tab'&&$('#app-shell').classList.contains('navigation-open')&&mobileNavigation.matches){const controls=[...$('#app-navigation').querySelectorAll('a,button')].filter(element=>!element.disabled),first=controls[0],last=controls[controls.length-1];if(event.shiftKey&&document.activeElement===first){event.preventDefault();last.focus()}else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus()}}});
+  document.addEventListener('keydown',event=>{if(event.key==='Escape'){closeNavigation();document.querySelector('.account-menu')?.removeAttribute('open')}if(event.key==='Tab'&&$('#app-shell').classList.contains('navigation-open')&&mobileNavigation.matches){const controls=[...$('#app-navigation').querySelectorAll('a,button')].filter(element=>!element.disabled&&element.getClientRects().length),first=controls[0],last=controls[controls.length-1];if(event.shiftKey&&document.activeElement===first){event.preventDefault();last.focus()}else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus()}}});
   function renderDonations(){
     const resultMarkup=donationReturn?.type==='cancelled'
       ? '<div class="donation-result is-neutral" role="status">Der Checkout wurde abgebrochen. Du kannst jederzeit ohne Spende zur App zurückkehren.</div>'
@@ -432,9 +438,9 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
     const owner=data,snapshot={subjects:structuredClone(data.subjects),folders:structuredClone(data.folders),sets:structuredClone(data.sets)};
     if(!change())return false;
     librarySortSaving=true;render();
-    try{await save();toast(message);return true}
-    catch{if(data===owner)Object.assign(data,snapshot);toast('Speichern fehlgeschlagen. Bitte prüfe die Verbindung und lade die Bibliothek erneut.');return false}
-    finally{librarySortSaving=false;render();if(focusId){const tile=[...document.querySelectorAll('[data-sort-id]')].find(el=>el.dataset.sortId===focusId);(tile?.querySelector('[data-sort-handle]')||tile)?.focus()}}
+    try{await save();if(data!==owner)return false;toast(message);return true}
+    catch{if(data!==owner)return false;Object.assign(data,snapshot);window.WortwerkRepository.stagePendingRecovery?.(data);toast('Speichern fehlgeschlagen. Bitte prüfe die Verbindung und speichere erneut.');return false}
+    finally{if(data===owner){librarySortSaving=false;render();}if(data===owner&&focusId){const tile=[...document.querySelectorAll('[data-sort-id]')].find(el=>el.dataset.sortId===focusId);(tile?.querySelector('[data-sort-handle]')||tile)?.focus()}}
   }
   function reorderItem(type,itemId,targetId,placement){return persistOrganisation(()=>window.WortwerkModel.reorderLibraryItems(data,{type,id:itemId,targetId,placement}),'Reihenfolge gespeichert.',itemId)}
   $('#content').addEventListener('click',event=>{
@@ -451,13 +457,13 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
   $('#content').addEventListener('pointercancel',clearSortPointer);
   function renderLibrary(){
     activeSubject=null;activeFolder=null;activeSet=null;
-    const recentSets=(data.recent||[]).map(item=>setById(item.setId)).filter(Boolean).filter((set,index,list)=>list.findIndex(candidate=>candidate.id===set.id)===index).slice(0,4);
+    const recentSets=(data.recent||[]).map(item=>setById(item.setId)).filter(Boolean).filter((set,index,list)=>list.findIndex(candidate=>candidate.id===set.id)===index).slice(0,view==='recent'?30:4);
     if(view==='recent'){
       $('#content').innerHTML=`<div class="page-heading"><div><h1 class="page-title">Zuletzt gelernt</h1><p class="page-subtitle">Hier findest du deine zuletzt geöffneten Lernstapel und kannst direkt weiterlernen.</p></div></div>${recentSets.length?`<div class="set-grid">${recentSets.map(setCard).join('')}</div>`:empty('Noch keine Lernrunde','Öffne einen Lernstapel und starte deine erste Runde. Deine letzten Stapel erscheinen danach hier.','◷')}`;
       bindSetCards();return;
     }
     const subjectCards=data.subjects.map((item,index)=>{
-      const sets=subjectSets(item.id),cards=sets.reduce((sum,set)=>sum+setCards(set.id).length,0);
+      const sets=subjectSets(item.id),cards=sets.reduce((sum,set)=>sum+(cardCounts.get(set.id)||0),0);
       return `<article class="subject-card" ${sortAttributes('subject',item)} tabindex="0" data-open-subject="${esc(item.id)}" style="${subjectAppearance(item,colors[index%colors.length])}"><div class="subject-card-top">${subjectSymbol(item,icons[index%icons.length])}</div><h2>${esc(item.name)}</h2><p>${sets.length} ${sets.length===1?'Set':'Sets'} · ${cards} ${cards===1?'Karte':'Karten'}</p><span class="card-arrow" aria-hidden="true">→</span>${sortControls('subject',item)}</article>`;
     }).join('');
     const recentSection=recentSets.length?`<section class="recent-section"><div class="section-head"><h2>Zuletzt gelernt</h2><button class="text-button" data-view="recent">Alle anzeigen</button></div><div class="recent-list">${recentSets.map(set=>`<button class="recent-item" data-open-set="${esc(set.id)}"><span>${esc(set.name)}</span><small>${esc(subject(set.subjectId)?.name||'Fach')}</small><span aria-hidden="true">→</span></button>`).join('')}</div></section>`:'';
@@ -481,7 +487,7 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
     document.querySelectorAll('[data-empty-action]').forEach(button=>button.onclick=openEmptyAction);
   }
   function setCard(set){
-    const parent=folder(set.folderId),sub=subject(set.subjectId),count=setCards(set.id).length,theme=cardThemes.getTheme(cardThemes.resolveSetThemeId(set,activeCardThemeId));
+    const parent=folder(set.folderId),sub=subject(set.subjectId),count=cardCounts.get(set.id)||0,theme=cardThemes.getTheme(cardThemes.resolveSetThemeId(set,activeCardThemeId));
     return `<article class="set-card" ${sortAttributes('set',set)} tabindex="0" data-open-set="${esc(set.id)}" style="--set-front:${theme.front.surface};--set-back:${theme.back.surface}"><div class="set-card-top"><button class="set-cover" data-organise-handle ${librarySorting?'tabindex="-1" aria-hidden="true"':''} data-item-type="set" data-item-id="${esc(set.id)}" aria-label="${esc(set.name)} ziehen zum Verschieben" title="Ziehen zum Verschieben"><span></span><span></span></button>${itemActions('set',set)}</div><div class="set-card-meta">${esc(parent?.name||sub?.name||'Fach')}</div><h2>${esc(set.name)}</h2>${set.description?`<p>${esc(set.description)}</p>`:''}<div class="set-card-bottom"><span>${count} ${count===1?'Karte':'Karten'}</span><span class="set-actions"><button data-quick-study="${esc(set.id)}" ${count?'':'disabled'}>${studyActionLabel(set.id)}</button><button data-quick-edit="${esc(set.id)}">Öffnen</button></span></div>${sortControls('set',set)}</article>`;
   }
   function bindSetCards(){
@@ -509,7 +515,7 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
     const item=subject(activeSubject);if(!item){activeSubject=null;return renderLibrary()}
     crumbs(['Bibliothek',item.name]);
     const folders=subjectFolders(item.id).filter(child=>!child.parentId),looseSets=subjectSets(item.id).filter(set=>!set.folderId);
-    const cardCount=subjectSets(item.id).reduce((sum,set)=>sum+setCards(set.id).length,0);
+    const cardCount=subjectSets(item.id).reduce((sum,set)=>sum+(cardCounts.get(set.id)||0),0);
     const folderSection=folders.length?`<div class="folder-grid">${folders.map(folderCard).join('')}</div>`:'';
     const looseSection=looseSets.length?`<div class="section-head"><h2>Lernstapel <span class="count-label">${looseSets.length}</span></h2></div><div class="set-grid">${looseSets.map(setCard).join('')}</div>`:'';
     $('#content').innerHTML=`<div class="subpage-heading">${backButton('Bibliothek')}<div class="subject-heading" style="${subjectAppearance(item)}">${subjectSymbol(item)}<div><h1 class="page-title">${esc(item.name)}</h1><p class="page-subtitle">${esc(item.description||`${subjectSets(item.id).length} Sets · ${cardCount} Karten`)}</p></div></div>${managementActions('<button id="edit-subject">Fach bearbeiten</button><button class="danger-action" id="delete-subject">Fach löschen</button>')}</div><section class="library-section"><div class="section-head"><h2>Ordner <span class="count-label">${folders.length}</span></h2><div class="section-actions">${sortingButton()}<button class="quiet-button" id="add-folder">＋ Ordner anlegen</button><button class="primary-button" id="subject-new-set">＋ Lernstapel erstellen</button></div></div>${folderSection||'<p class="section-note">Ordner sind optional. Lege sie an, wenn du deine Lernstapel weiter gliedern möchtest.</p>'}</section>${looseSection}`;
@@ -526,15 +532,29 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
   function renderSet(){
     const item=setById(activeSet);if(!item){activeSet=null;return render()}
     const parent=subject(item.subjectId),parentFolder=folder(item.folderId),cards=setCards(item.id);
+    if(cardListSetId!==item.id){cardListSetId=item.id;cardListQuery='';cardListLimit=100}
     crumbs(libraryCrumbs(item,true));
     const previous=parentFolder?.name||parent?.name||'Zurück';
     const progress=window.WortwerkModel.getSetProgress(cards);
     const studyLabel=studyActionLabel(item.id);
-    $('#content').innerHTML=`<div class="subpage-heading">${backButton(previous)}<div><div class="page-context">${esc(parentFolder?.name||parent?.name||'Lernstapel')}</div><h1 class="page-title">${esc(item.name)}</h1><p class="page-subtitle">${esc(item.description||`${cards.length} Lernkarten`)}</p></div>${managementActions(`<button id="edit-set">Lernstapel bearbeiten</button><button data-move-item="set" data-item-id="${esc(item.id)}">Lernstapel verschieben …</button><button id="swap-card-sides" ${cards.length?'':'disabled'}>Vorder- und Rückseiten tauschen</button><button class="danger-action" id="delete-set">Lernstapel löschen</button>`)}</div>${cards.length?`<section class="study-banner" aria-labelledby="learning-progress-title"><div class="learning-progress-copy"><h2 id="learning-progress-title">Lernfortschritt</h2><p>${cards.length} Karten · ${progress.secure} sicher · ${progress.practice} zu üben · ${progress.new} neu</p><div class="library-progress" role="progressbar" aria-label="Sicher beherrschte Karten" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${progress.percentage}"><span style="width:${progress.percentage}%"></span></div><small class="study-progress-caption">${progress.percentage}% sicher beherrscht · mindestens zwei richtige Antworten.</small></div><div class="study-banner-actions"><button class="primary-button" id="start-study">${studyLabel}</button><button class="quiet-button" id="reset-progress">Lernfortschritt zurücksetzen</button></div></section>`:''}<section class="library-section"><div class="section-head"><h2>Lernkarten <span class="count-label">${cards.length}</span></h2><div class="section-actions"><button class="quiet-button" id="import-this">Karten importieren</button><button class="quiet-button" id="add-card">＋ Karte erstellen</button></div></div>${cards.length?`<div class="card-list">${cards.map((card,index)=>{const progress=window.WortwerkModel.getCardProgress(card),label=progress.state==='secure'?'Sicher':progress.state==='practice'?'Zu üben':'Neu';return `<div class="flash-row"><div class="term">${cardSideMarkup(card,'front')}<small class="flash-progress">${label} · ${progress.attempts} ${progress.attempts===1?'Versuch':'Versuche'}</small></div><div class="definition">${cardSideMarkup(card,'back')}</div><div class="row-actions"><button data-move-card="${esc(card.id)}" data-direction="-1" aria-label="Karte nach oben verschieben" title="Karte nach oben verschieben" ${index===0?'disabled':''}>↑</button><button data-move-card="${esc(card.id)}" data-direction="1" aria-label="Karte nach unten verschieben" title="Karte nach unten verschieben" ${index===cards.length-1?'disabled':''}>↓</button><button data-edit-card="${esc(card.id)}" aria-label="Karte bearbeiten" title="Karte bearbeiten">✎</button><button data-delete-card="${esc(card.id)}" aria-label="Karte löschen" title="Karte löschen">×</button></div></div>`}).join('')}</div>`:empty('Noch keine Lernkarten','Erstelle deine erste Karte oder importiere mehrere Begriffe aus Text.','▤')}</section>`;
+    $('#content').innerHTML=`<div class="subpage-heading">${backButton(previous)}<div><div class="page-context">${esc(parentFolder?.name||parent?.name||'Lernstapel')}</div><h1 class="page-title">${esc(item.name)}</h1><p class="page-subtitle">${esc(item.description||`${cards.length} Lernkarten`)}</p></div>${managementActions(`<button id="edit-set">Lernstapel bearbeiten</button><button data-move-item="set" data-item-id="${esc(item.id)}">Lernstapel verschieben …</button><button id="swap-card-sides" ${cards.length?'':'disabled'}>Vorder- und Rückseiten tauschen</button><button class="danger-action" id="delete-set">Lernstapel löschen</button>`)}</div>${cards.length?`<section class="study-banner" aria-labelledby="learning-progress-title"><div class="learning-progress-copy"><h2 id="learning-progress-title">Lernfortschritt</h2><p>${cards.length} Karten · ${progress.secure} sicher · ${progress.practice} zu üben · ${progress.new} neu</p><div class="library-progress" role="progressbar" aria-label="Sicher beherrschte Karten" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${progress.percentage}"><span style="width:${progress.percentage}%"></span></div><small class="study-progress-caption">${progress.percentage}% sicher beherrscht · mindestens zwei richtige Antworten.</small></div><div class="study-banner-actions"><button class="primary-button" id="start-study">${studyLabel}</button><button class="quiet-button" id="reset-progress">Lernfortschritt zurücksetzen</button></div></section>`:''}<section class="library-section"><div class="section-head"><h2>Lernkarten <span class="count-label">${cards.length}</span></h2><div class="section-actions"><button class="quiet-button" id="import-this">Karten importieren</button><button class="quiet-button" id="add-card">＋ Karte erstellen</button></div></div>${cards.length?renderCardList(cards):empty('Noch keine Lernkarten','Erstelle deine erste Karte oder importiere mehrere Begriffe aus Text.','▤')}</section>`;
     $('#go-back').onclick=()=>{librarySorting=false;activeSet=null;activeFolder=item.folderId||null;render()};$('#edit-set').onclick=()=>editEntity('set',item.id);$('#delete-set').onclick=()=>deleteSet(item.id);$('#start-study')?.addEventListener('click',()=>beginStudy(item.id));$('#reset-progress')?.addEventListener('click',()=>openResetProgress(item.id));$('#swap-card-sides').onclick=()=>swapSetSides(item.id);$('#add-card').onclick=()=>openEntity('card');$('#import-this').onclick=()=>openImport(item.id);
-    document.querySelectorAll('[data-move-card]').forEach(button=>button.onclick=()=>moveCard(button.dataset.moveCard,Number(button.dataset.direction)));
-    document.querySelectorAll('[data-edit-card]').forEach(button=>button.onclick=()=>editCard(button.dataset.editCard));document.querySelectorAll('[data-delete-card]').forEach(button=>button.onclick=()=>deleteCard(button.dataset.deleteCard));bindSubjectCards();
+    bindCardList();bindSubjectCards();
   }
+  function renderCardList(cards){
+    const page=cardListPage(cards,cardListQuery,cardListLimit),positions=new Map(cards.map((card,index)=>[card.id,index]));
+    return `<div class="card-list-toolbar"><label class="card-search"><span class="sr-only">Lernkarten durchsuchen</span><input type="search" id="card-search" placeholder="Begriffe oder Beispielsätze suchen" value="${esc(cardListQuery)}"></label><span class="card-list-count" role="status">${page.cards.length} von ${page.total} ${cardListQuery?'Treffern':'Karten'}</span></div><div id="card-list-results">${cardRows(page,positions,cards.length)}</div>`;
+  }
+  function cardRows(page,positions,total){
+    return `<div class="card-list">${page.cards.map(card=>{const index=positions.get(card.id),progress=window.WortwerkModel.getCardProgress(card),label=progress.state==='secure'?'Sicher':progress.state==='practice'?'Zu üben':'Neu';return `<div class="flash-row"><div class="term">${cardSideMarkup(card,'front')}<small class="flash-progress">${label} · ${progress.attempts} ${progress.attempts===1?'Versuch':'Versuche'}</small></div><div class="definition">${cardSideMarkup(card,'back')}</div><div class="row-actions"><button data-move-card="${esc(card.id)}" data-direction="-1" aria-label="Karte nach oben verschieben" title="Karte nach oben verschieben" ${index===0?'disabled':''}>↑</button><button data-move-card="${esc(card.id)}" data-direction="1" aria-label="Karte nach unten verschieben" title="Karte nach unten verschieben" ${index===total-1?'disabled':''}>↓</button><button data-edit-card="${esc(card.id)}" aria-label="Karte bearbeiten" title="Karte bearbeiten">✎</button><button data-delete-card="${esc(card.id)}" aria-label="Karte löschen" title="Karte löschen">×</button></div></div>`}).join('')}</div>${!page.total?'<p class="section-note">Keine passenden Karten. Versuche einen anderen Suchbegriff.</p>':''}${page.cards.length<page.total?'<button type="button" class="quiet-button card-list-more" id="card-list-more">Weitere 100 Karten anzeigen</button>':''}`;
+  }
+  function bindCardList(){
+    const search=$('#card-search');if(search)search.oninput=()=>{cardListQuery=search.value;cardListLimit=100;refreshCardRows()};
+    document.querySelectorAll('[data-move-card]').forEach(button=>button.onclick=()=>moveCard(button.dataset.moveCard,Number(button.dataset.direction)));
+    document.querySelectorAll('[data-edit-card]').forEach(button=>button.onclick=()=>editCard(button.dataset.editCard));document.querySelectorAll('[data-delete-card]').forEach(button=>button.onclick=()=>deleteCard(button.dataset.deleteCard));
+    $('#card-list-more')?.addEventListener('click',()=>{cardListLimit+=100;refreshCardRows()});
+  }
+  function refreshCardRows(){const cards=setCards(activeSet),page=cardListPage(cards,cardListQuery,cardListLimit);$('#card-list-results').innerHTML=cardRows(page,new Map(cards.map((card,index)=>[card.id,index])),cards.length);$('.card-list-count').textContent=`${page.cards.length} von ${page.total} ${cardListQuery?'Treffern':'Karten'}`;bindCardList()}
   function openEntity(type){formContext={type};fillForm(type);$('#form-dialog').showModal()}
   function editEntity(type,key){formContext={type,key};fillForm(type, type==='subject'?subject(key):type==='folder'?folder(key):setById(key));$('#form-dialog').showModal()}
   function fillForm(type,entity){$('#form-dialog').classList.toggle('has-set-design',type==='set');$('#form-save-error').hidden=true;$('#form-save-error').textContent='';const title=entity?`Bearbeite ${{subject:'Fach',folder:'Ordner',set:'Lernstapel',card:'Lernkarte'}[type]}`:({subject:'Fach anlegen',folder:'Ordner anlegen',set:'Lernstapel erstellen',card:'Lernkarte erstellen'})[type];$('#form-title').textContent=title;$('#form-eyebrow').textContent=entity?'BEARBEITEN':'NEU IN DEINER BIBLIOTHEK';$('#form-submit').textContent=entity?'Speichern':'Erstellen';let fields='';const input=(name,label,value='',placeholder='',required=true)=>`<label class="field-label" for="f-${name}">${label}</label><input id="f-${name}" name="${name}" value="${esc(value)}" placeholder="${esc(placeholder)}" maxlength="100" ${required?'required':''}>`;
@@ -608,8 +628,8 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
     refreshLibraryOrder();const keepStudyView=type==='set'&&Boolean(formContext?.copyCards?.length);
     if(awaitSave){
       entitySaving=true;form.inert=true;form.setAttribute('aria-busy','true');const submitLabel=$('#form-submit').textContent;$('#form-submit').textContent='Wird gespeichert …';
-      try{await save();$('#form-dialog').close();render();toast(successNotice||'Änderungen gespeichert.');}
-      catch{if(data===owner){Object.assign(data,snapshot);activeSubject=previousLocation.activeSubject;activeFolder=previousLocation.activeFolder;activeSet=previousLocation.activeSet;}toast('Speichern fehlgeschlagen. Deine Eingaben bleiben geöffnet. Bitte erneut versuchen.');}
+      try{await save();if(data!==owner)return;$('#form-dialog').close();render();toast(successNotice||'Änderungen gespeichert.');}
+      catch{if(data!==owner)return;Object.assign(data,snapshot);window.WortwerkRepository.stagePendingRecovery?.(data);activeSubject=previousLocation.activeSubject;activeFolder=previousLocation.activeFolder;activeSet=previousLocation.activeSet;toast('Speichern fehlgeschlagen. Deine Eingaben bleiben geöffnet. Bitte erneut versuchen.');}
       finally{entitySaving=false;form.inert=false;form.removeAttribute('aria-busy');$('#form-submit').textContent=submitLabel;}
     }else{save();$('#form-dialog').close();if(!keepStudyView)render();if(successNotice)toast(successNotice)}
   }
@@ -625,7 +645,7 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
   function updateImportActionState(){
     const button=$('#import-submit'),hint=$('#import-action-hint');
     const previewCount=$('#import-preview .preview-head span:last-child');
-    if(previewCount)previewCount.textContent=`${importRows.length} ${importRows.length===1?'Karte':'Karten'} · ${document.querySelectorAll('#import-preview .preview-line.bad').length} Fehler`;
+    if(previewCount)previewCount.textContent=`${importRows.length} ${importRows.length===1?'Karte':'Karten'} · ${importErrors.length} Fehler`;
     if(!importChecked){button.textContent='Import prüfen';button.disabled=!$('#import-text').value.trim();hint.textContent=$('#import-text').value.trim()?'Prüfe zuerst die Vorschau. Danach kannst du die Karten erstellen.':'Füge Lernmaterial ein oder wähle eine Textdatei.';return}
     if(importHasErrors){button.textContent='Eingaben korrigieren';button.disabled=true;hint.textContent='Einige Zeilen sind ungültig. Korrigiere den Text oben und prüfe ihn erneut.';return}
     if(!importRows.length){button.textContent='Keine Karten zum Erstellen';button.disabled=true;hint.textContent='Es sind keine gültigen Karten in der Vorschau.';return}
@@ -633,11 +653,12 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
     button.textContent='Lernkarten erstellen';button.disabled=false;hint.textContent=`Vorschau geprüft · ${importRows.length} ${importRows.length===1?'Karte':'Karten'} bereit.`;
   }
   function openImport(targetSet){if(!data.sets.length){toast('Erstelle zuerst ein Set für den Import.');return}$('#import-text').value='';$('#import-file').value='';$('#import-file-name').textContent='TXT · UTF-8';const select=$('#import-set');select.innerHTML=data.sets.map(s=>`<option value="${esc(s.id)}" ${targetSet===s.id?'selected':''}>${esc(subject(s.subjectId)?.name||'Fach')} · ${esc(s.name)}</option>`).join('');importRows=[];importChecked=false;importHasErrors=false;$('#import-preview').innerHTML='';updateImportActionState();$('#import-dialog').showModal()}
-  function updateImportPreview(){const result=parseImport($('#import-text').value);importRows=result.rows.map(row=>({...row}));importChecked=true;importHasErrors=result.errors.length>0;const preview=$('#import-preview');const rows=importRows.map((r,i)=>`<div class="preview-line editable-preview"><span class="preview-index">${r.line}</span><input aria-label="Vorderseite Zeile ${r.line}" data-import-front="${i}" value="${esc(r.front)}"><input aria-label="Rückseite Zeile ${r.line}" data-import-back="${i}" value="${esc(r.back)}"><button type="button" class="row-remove" data-import-remove="${i}" aria-label="Karte aus Vorschau entfernen">×</button><input class="preview-example" aria-label="Beispielsatz auf der Rückseite Zeile ${r.line} (optional)" placeholder="Beispielsatz (optional)" data-import-example="${i}" value="${esc(r.backExampleSentence||'')}"></div>`).join('');const errors=result.errors.map(e=>`<div class="preview-line bad"><span class="preview-index">Zeile ${e.line}</span><span style="grid-column:span 3"><strong>${esc(e.reason)}</strong><br><code>${esc(e.text)}</code></span></div>`).join('');preview.innerHTML=(result.rows.length||result.errors.length)?`<div class="preview-head"><span>IMPORT-VORSCHAU</span><span>${result.rows.length} Karten · ${result.errors.length} Fehler</span></div>${rows}${errors}`:'';updateImportActionState()}
+  function updateImportPreview(){const result=parseImport($('#import-text').value);importRows=result.rows.map(row=>({...row}));importErrors=result.errors;importChecked=true;importHasErrors=result.errors.length>0;importPreviewLimit=100;renderImportPreview()}
+  function renderImportPreview(){const preview=$('#import-preview');const rows=importRows.slice(0,importPreviewLimit).map((r,i)=>`<div class="preview-line editable-preview"><span class="preview-index">${r.line}</span><input aria-label="Vorderseite Zeile ${r.line}" data-import-front="${i}" value="${esc(r.front)}"><input aria-label="Rückseite Zeile ${r.line}" data-import-back="${i}" value="${esc(r.back)}"><button type="button" class="row-remove" data-import-remove="${i}" aria-label="Karte aus Vorschau entfernen">×</button><input class="preview-example" aria-label="Beispielsatz auf der Rückseite Zeile ${r.line} (optional)" placeholder="Beispielsatz (optional)" data-import-example="${i}" value="${esc(r.backExampleSentence||'')}"></div>`).join('');const errors=importErrors.slice(0,100).map(e=>`<div class="preview-line bad"><span class="preview-index">Zeile ${e.line}</span><span style="grid-column:span 3"><strong>${esc(e.reason)}</strong><br><code>${esc(e.text)}</code></span></div>`).join('');preview.innerHTML=(importRows.length||importErrors.length)?`<div class="preview-head"><span>IMPORT-VORSCHAU</span><span>${importRows.length} Karten · ${importErrors.length} Fehler</span></div>${errors}${importErrors.length>100?'<p class="field-hint">Die ersten 100 Fehler werden angezeigt. Korrigiere die Eingaben oben und prüfe erneut.</p>':''}${rows}${importRows.length>importPreviewLimit?`<p class="field-hint">${importPreviewLimit} von ${importRows.length} Karten angezeigt. Alle gültigen Karten werden übernommen.</p><button type="button" class="quiet-button" id="import-preview-more">Weitere 100 anzeigen</button>`:''}`:'';$('#import-preview-more')?.addEventListener('click',()=>{importPreviewLimit+=100;renderImportPreview()});updateImportActionState()}
   $('#import-text').addEventListener('input',()=>{importRows=[];importChecked=false;importHasErrors=false;$('#import-preview').innerHTML=$('#import-text').value.trim()?'<p class="field-hint">Text geändert. Prüfe den Import erneut, um die Vorschau zu aktualisieren.</p>':'';updateImportActionState()});
   $('#import-preview').addEventListener('input',e=>{const f=e.target.dataset.importFront,b=e.target.dataset.importBack,example=e.target.dataset.importExample;if(f!==undefined)importRows[Number(f)].front=e.target.value;if(b!==undefined)importRows[Number(b)].back=e.target.value;if(example!==undefined)importRows[Number(example)].backExampleSentence=e.target.value;updateImportActionState()});
-  $('#import-preview').addEventListener('click',e=>{const i=e.target.dataset.importRemove;if(i===undefined)return;importRows.splice(Number(i),1);e.target.closest('.preview-line').remove();$('#import-preview').querySelectorAll('.editable-preview').forEach((row,index)=>{row.querySelector('[data-import-front]').dataset.importFront=index;row.querySelector('[data-import-back]').dataset.importBack=index;row.querySelector('[data-import-example]').dataset.importExample=index;row.querySelector('[data-import-remove]').dataset.importRemove=index});updateImportActionState()});
-  $('#import-file').addEventListener('change',async e=>{const file=e.target.files?.[0];if(!file)return;$('#import-file-name').textContent=file.name;try{$('#import-text').value=await file.text();updateImportPreview()}catch(error){console.error('Textdatei konnte nicht gelesen werden.',error);toast('Die Textdatei konnte nicht gelesen werden.')} });
+  $('#import-preview').addEventListener('click',e=>{const i=e.target.dataset.importRemove;if(i===undefined)return;importRows.splice(Number(i),1);renderImportPreview()});
+  $('#import-file').addEventListener('change',async e=>{const file=e.target.files?.[0];if(!file)return;$('#import-file-name').textContent=file.name;const draft=$('#import-text').value;try{const text=await file.text();if(!$('#import-dialog').open||$('#import-file').files?.[0]!==file||$('#import-text').value!==draft)return;$('#import-text').value=text;updateImportPreview()}catch(error){console.error('Textdatei konnte nicht gelesen werden.',error);toast('Die Textdatei konnte nicht gelesen werden.')} });
   function cancelEntityForm(){if(formContext?.copyCards?.length&&session?.id===formContext.sourceSessionId){session.missedSetPending=false;updateMissedSetActions()}formContext=null;$('#form-dialog').close()}
   document.querySelectorAll('#entity-form [value="cancel"]').forEach(button=>button.addEventListener('click',cancelEntityForm));
   $('#form-dialog').addEventListener('close',()=>{if(formContext?.copyCards?.length&&session?.id===formContext.sourceSessionId){session.missedSetPending=false;updateMissedSetActions()}formContext=null});
@@ -706,7 +727,7 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
     const saved=sessionForSet(key);
     const sessionState=window.WortwerkModel.createStudySession(cards,saved);
     session={...sessionState,id:saved?.id||id(),setId:key,startedAt:saved?.startedAt||new Date().toISOString(),flipped:false,missedCardIdsCopied:new Set(Array.isArray(saved?.missedCardIdsCopied)?saved.missedCardIdsCopied:[]),missedSetPending:false};
-    data.recent.unshift({setId:key,at:new Date().toISOString()});data.recent=data.recent.slice(0,30);saveSessionProgress();
+    const lastStudiedAt=new Date().toISOString();setById(key).lastStudiedAt=lastStudiedAt;data.recent=data.recent.filter(entry=>entry.setId!==key);data.recent.unshift({setId:key,at:lastStudiedAt});data.recent=data.recent.slice(0,30);saveSessionProgress();
     $('#study-title').textContent=setById(key)?.name||'Lernsession';$('#study-complete').hidden=true;$('#shuffle-toggle').setAttribute('aria-pressed','false');$('#study-dialog').classList.remove('is-fullscreen');$('#study-dialog').showModal();renderStudyCard();
   }
   function updateStudyScoreCounts(){if(!session)return;const results=window.WortwerkModel.getStudyResults(session),known=results.filter(result=>result===true).length,missed=results.filter(result=>result===false).length;$('#known-count').textContent=String(known);$('#missed-count').textContent=String(missed);$('#study-known').textContent=`${known} ✓ · ${missed} ✕`;$('#answer-yes').setAttribute('aria-label',`Gewusst, bisher ${known}`);$('#answer-no').setAttribute('aria-label',`Nicht gewusst, bisher ${missed}`);$('#shuffle-toggle').disabled=Boolean(session.transitioning);updateMissedSetActions()}
@@ -898,11 +919,47 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
   async function toggleStudyFullscreen(){if(document.fullscreenElement===studyDialog||studyDialog.classList.contains('is-fullscreen')){studyDialog.classList.remove('is-fullscreen');if(document.fullscreenElement===studyDialog){try{await document.exitFullscreen()}catch(error){console.warn('Vollbildmodus konnte nicht beendet werden.',error)}}syncFullscreenButton();return}try{if(studyDialog.requestFullscreen)await studyDialog.requestFullscreen();else studyDialog.classList.add('is-fullscreen')}catch(error){studyDialog.classList.add('is-fullscreen')}syncFullscreenButton()}
   function endStudy(){const setId=session?.setId;clearActiveStudyTransition();if(document.fullscreenElement===studyDialog)document.exitFullscreen().catch(()=>{});studyDialog.classList.remove('is-fullscreen');studyDialog.close();session=null;cardThemes.applyTheme(activeCardThemeId);syncFullscreenButton();if(setId){const label=studyActionLabel(setId);if(activeSet===setId){const button=$('#start-study');if(button)button.textContent=label}document.querySelectorAll('[data-quick-study]').forEach(button=>{if(button.dataset.quickStudy===setId)button.textContent=label})}}
   studyDialog.addEventListener('fullscreenchange',syncFullscreenButton);
+  studyDialog.addEventListener('cancel',event=>{event.preventDefault();endStudy()});
   $('#study-expand').onclick=toggleStudyFullscreen;
   $('#study-card-0').onclick=flip;$('#study-card-1').onclick=flip;$('#answer-no').onclick=()=>scoreCard(false);$('#answer-yes').onclick=()=>scoreCard(true);$('#study-prev').onclick=()=>moveStudy(-1);$('#study-next').onclick=nextStudyCard;$('#study-close').onclick=endStudy;$('#finish-study').onclick=()=>{endStudy();render()};$('#retry-missed').onclick=retryMissed;$('#create-missed-set').onclick=openMissedSetCreation;$('#create-missed-set-complete').onclick=openMissedSetCreation;$('#study-manage').onclick=()=>{endStudy();render()};$('#shuffle-toggle').onclick=()=>{if(!session||session.transitioning||!$('#study-complete').hidden)return;const shuffled=window.WortwerkModel.shuffleUnvisitedStudyCards(session);if(!shuffled){toast('Es gibt nicht genügend noch offene Karten zum Mischen.');return}$('#shuffle-toggle').setAttribute('aria-pressed','true');saveSessionProgress();renderStudyCard()};
-  document.addEventListener('keydown',e=>{if(!$('#study-dialog').open)return;if(e.key==='Escape'){endStudy();return}if(e.target.matches('input,textarea,select,[contenteditable="true"]')||session?.transitioning)return;const focusedButton=e.target.closest('button');if(focusedButton&&!focusedButton.classList.contains('study-card'))return;if(e.key===' '){if(focusedButton?.classList.contains('study-card'))return;e.preventDefault();flip()}if(e.key==='ArrowLeft'){e.preventDefault();moveStudy(-1)}if(e.key==='ArrowRight'){e.preventDefault();nextStudyCard()}});
+  document.addEventListener('keydown',event=>{
+    const action=studyKeyboardAction(event,{
+      open:studyDialog.open,
+      blocked:Boolean(document.querySelector('dialog[open]:not(#study-dialog)')),
+      canInteract:Boolean(session&&!session.transitioning&&$('#study-complete').hidden&&window.WortwerkModel.getStudyCard(session))
+    });
+    if(!action)return;
+    event.preventDefault();
+    if(action==='missed')scoreCard(false);
+    else if(action==='known')scoreCard(true);
+    else if(action==='flip')flip();
+    else if(action==='previous')moveStudy(-1);
+    else if(action==='next')nextStudyCard();
+    else if(action==='close')endStudy();
+  });
   $('#import-form').onsubmit=e=>e.preventDefault();
-  window.addEventListener('library-save-error',()=>{if(!librarySortSaving&&!entitySaving)toast('Mit Supabase konnte nicht gespeichert werden. Bitte Verbindung prüfen und erneut versuchen.')});
-  window.WortwerkReloadLibrary=async()=>{clearOrganisationPointer();moveDialog.close();try{data=await window.WortwerkRepository.loadLibrary(window.WortwerkModel.normalizeLibrary);render()}catch(error){console.error('Lernbibliothek konnte nicht geladen werden.',error);$('#content').innerHTML='<section class="empty-state"><h2>Deine Bibliothek konnte nicht geladen werden.</h2><p>Bitte prüfe deine Verbindung und lade die Seite erneut.</p><button class="quiet-button" onclick="location.reload()">Erneut laden</button></section>'}};
-  window.WortwerkReloadLibrary();
+  let unsavedChanges=false,saveFailed=false;
+  const saveStatus=$('#save-status'),saveRetry=$('#save-retry');
+  function showSaveStatus(text,failed=false){saveStatus.textContent=text;saveStatus.parentElement.classList.toggle('is-error',failed);saveRetry.hidden=!failed}
+  window.addEventListener('library-save-start',()=>{unsavedChanges=true;showSaveStatus('Wird gespeichert …',saveFailed)});
+  window.addEventListener('library-save-success',event=>{if(event.detail?.pending)return;unsavedChanges=false;saveFailed=false;showSaveStatus('Gespeichert')});
+  window.addEventListener('library-save-error',()=>{unsavedChanges=true;saveFailed=true;showSaveStatus('Nicht synchronisiert',true)});
+  saveRetry.onclick=()=>{if(recoveryAwaitingChoice){$('#recovery-notice [data-recover]')?.focus();return}if(entitySaving||librarySortSaving)return;save().catch(()=>{})};
+  window.addEventListener('online',()=>{if(saveFailed&&!entitySaving&&!librarySortSaving&&!recoveryAwaitingChoice)save().catch(()=>{})});
+  window.addEventListener('beforeunload',event=>{if(unsavedChanges){event.preventDefault();event.returnValue=''}});
+  let libraryLoadVersion=0;
+  window.WortwerkResetWorkspace=()=>{libraryLoadVersion++;window.WortwerkRepository.resetLibraryOwner?.();if(session)endStudy();clearOrganisationPointer();clearSortPointer();document.querySelectorAll('dialog[open]').forEach(dialog=>dialog.close());data=initial();activeSubject=null;activeFolder=null;activeSet=null;view='library';expandedSidebarSubjects.clear();cardListSetId=null;formContext=null;librarySortSaving=false;entitySaving=false;$('#entity-form').inert=false;recoveryAwaitingChoice=false;$('#recovery-notice')?.remove();unsavedChanges=false;saveFailed=false;showSaveStatus('');closeNavigation();$('#content').innerHTML=''};
+
+  function offerPendingRecovery(){
+    $('#recovery-notice')?.remove();
+    const recovery=window.WortwerkRepository.getPendingRecovery?.();if(!recovery)return;
+    recoveryAwaitingChoice=true;$('#content').inert=true;unsavedChanges=true;saveFailed=true;showSaveStatus('Lokaler Stand nicht synchronisiert',true);
+    const notice=document.createElement('aside');notice.id='recovery-notice';notice.className='recovery-notice';notice.setAttribute('aria-label','Nicht synchronisierte Änderungen');
+    notice.innerHTML='<h2>Ein lokaler Lernstand wartet auf dich.</h2><p>Ein früherer Speichervorgang wurde nicht abgeschlossen. Beim Wiederherstellen werden lokale Änderungen übernommen; zusätzlich auf dem Server vorhandene Inhalte bleiben erhalten. Lokale Löschungen werden nicht nachgeholt.</p><button type="button" class="primary-button" data-recover>Lokalen Stand wiederherstellen</button><button type="button" class="quiet-button" data-keep-server>Serverstand behalten</button>';
+    $('#content').before(notice);
+    notice.querySelector('[data-recover]').onclick=async()=>{data=window.WortwerkModel.normalizeLibrary(window.WortwerkRepository.mergePendingLibrary(data,recovery.library));recoveryAwaitingChoice=false;notice.remove();render();try{await save();toast('Lokaler Lernstand wiederhergestellt.')}catch{toast('Der lokale Stand ist wieder geöffnet. Prüfe die Verbindung und speichere erneut.')}};
+    notice.querySelector('[data-keep-server]').onclick=()=>{window.WortwerkRepository.discardPendingRecovery();recoveryAwaitingChoice=false;unsavedChanges=false;saveFailed=false;showSaveStatus('Serverstand geladen');notice.remove();render()};
+  }
+  window.WortwerkReloadLibrary=async()=>{const version=++libraryLoadVersion;clearOrganisationPointer();moveDialog.close();try{const loaded=await window.WortwerkRepository.loadLibrary(window.WortwerkModel.normalizeLibrary);if(version!==libraryLoadVersion)return;data=loaded;render();offerPendingRecovery()}catch(error){if(version!==libraryLoadVersion)return;console.error('Lernbibliothek konnte nicht geladen werden.',error);$('#content').innerHTML='<section class="empty-state"><h2>Deine Bibliothek konnte nicht geladen werden.</h2><p>Bitte prüfe deine Verbindung und lade die Seite erneut.</p><button class="quiet-button" onclick="location.reload()">Erneut laden</button></section>'}};
+  window.WortwerkAppReady=window.WortwerkReloadLibrary();
 })();

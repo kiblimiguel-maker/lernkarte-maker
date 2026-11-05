@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 const { normalizeLibrary, reorderLibraryItems, moveLibraryItem, getLibrarySiblings } = createRequire(import.meta.url)('./model.js');
-import { toLibraryRows, claimLegacyCache, deleteStaleRows, LIBRARY_STORAGE_KEY, LEGACY_MIGRATION_KEY, readAllRows, userLibraryCacheKey } from './repository-core.mjs';
+import { toLibraryRows, claimLegacyCache, createLibraryLoadGuard, createLibraryWriter, createPendingRecovery, deriveRecentStudySets, mergePendingLibrary, deleteStaleRows, LIBRARY_STORAGE_KEY, LEGACY_MIGRATION_KEY, readAllRows, userLibraryCacheKey, userLibraryPendingKey } from './repository-core.mjs';
 
 const rows = Array.from({ length: 50_251 }, (_, index) => ({ id: `card-${index}` }));
 const ranges = [];
@@ -176,5 +176,182 @@ assert.equal(organizationReload.folders.find(item => item.id === 'organization-n
 assert.deepEqual(organizationReload.cards, organized.cards, 'organization persistence preserves every learning counter');
 assert.equal(moveLibraryItem(organizationReload, { type: 'set', id: 'organization-moved', folderId: null }), true);
 assert.equal(toLibraryRows('sets', organizationReload, 'organization-owner').find(row => row.id === 'organization-moved').folder_id, null, 'moving back to subject level persists a null folder relation');
+
+// Exercise real write behavior with a remote store rather than inspecting
+// implementation details: unchanged rows and unseen remote additions survive.
+const remoteTables = new Map();
+const writes = [];
+let currentUser = 'writer-owner';
+let failNextWrite = false;
+let failTable = null;
+const writerErrors = [];
+const writerClient = {
+  auth: { async getUser() { return { data: { user: { id: currentUser } }, error: null }; } },
+  from(table) {
+    if (!remoteTables.has(table)) remoteTables.set(table, new Map());
+    return {
+      async upsert(records) {
+        writes.push({ table, action: 'upsert', count: records.length });
+        if (failTable === table) { failTable = null; return { error: new Error('partial failure') }; }
+        if (failNextWrite) { failNextWrite = false; return { error: new Error('offline') }; }
+        for (const row of records) remoteTables.get(table).set(`${row.user_id}:${row.id}`, structuredClone(row));
+        return { error: null };
+      },
+      delete() { return this; },
+      eq(column, userId) { assert.equal(column, 'user_id'); this.userId = userId; return this; },
+      async in(column, ids) {
+        assert.equal(column, 'id');
+        writes.push({ table, action: 'delete', count: ids.length });
+        for (const id of ids) remoteTables.get(table).delete(`${this.userId}:${id}`);
+        return { error: null };
+      }
+    };
+  }
+};
+const writer = createLibraryWriter({ client: writerClient, onError: error => writerErrors.push(error) });
+const writeLibrary = normalizeLibrary({
+  subjects: [{ id: 'writer-subject', name: 'French' }],
+  sets: [{ id: 'writer-set', subjectId: 'writer-subject' }],
+  cards: Array.from({ length: 1201 }, (_, index) => ({ id: `writer-card-${index}`, setId: 'writer-set', front: `mot ${index}`, back: `Wort ${index}` }))
+});
+await writer.save(writeLibrary, currentUser);
+assert.deepEqual(writes.filter(write => write.table === 'cards').map(write => write.count), [500, 500, 201], 'large saves are batched');
+writes.length = 0;
+await writer.save(writeLibrary, currentUser);
+assert.equal(writes.length, 0, 'unchanged snapshots perform no database writes');
+writeLibrary.cards[0].correctCount = 1;
+await writer.save(writeLibrary, currentUser);
+assert.deepEqual(writes, [{ table: 'cards', action: 'upsert', count: 1 }], 'one answer updates only its changed card');
+
+remoteTables.get('cards').set('writer-owner:from-another-tab', { user_id: 'writer-owner', id: 'from-another-tab', data: { front: 'unseen' } });
+remoteTables.get('cards').set('another-owner:writer-card-1', { user_id: 'another-owner', id: 'writer-card-1', data: { front: 'private' } });
+writeLibrary.cards = writeLibrary.cards.filter(card => card.id !== 'writer-card-1');
+await writer.save(writeLibrary, currentUser);
+assert.equal(remoteTables.get('cards').has('writer-owner:writer-card-1'), false);
+assert.equal(remoteTables.get('cards').has('writer-owner:from-another-tab'), true, 'a stale tab cannot delete a remote addition it never loaded');
+assert.equal(remoteTables.get('cards').has('another-owner:writer-card-1'), true, 'deletion is scoped to the original owner');
+
+writeLibrary.cards[0].back = 'first queued answer';
+const queuedFirst = writer.save(writeLibrary, currentUser);
+writeLibrary.cards[0].back = 'second queued answer';
+const queuedSecond = writer.save(writeLibrary, currentUser);
+await Promise.all([queuedFirst, queuedSecond]);
+assert.equal(remoteTables.get('cards').get('writer-owner:writer-card-0').data.back, 'second queued answer', 'queued snapshots retain their chronological order');
+
+writeLibrary.cards[0].back = 'recover after failure';
+failNextWrite = true;
+await assert.rejects(writer.save(writeLibrary, currentUser), /offline/);
+await writer.save(writeLibrary, currentUser);
+assert.equal(remoteTables.get('cards').get('writer-owner:writer-card-0').data.back, 'recover after failure');
+assert.equal(writerErrors.length, 1, 'a failed save is surfaced and does not poison later saves');
+
+const beforePartialSave = structuredClone(writeLibrary);
+writeLibrary.subjects[0].name = 'partially written subject';
+writeLibrary.cards[0].back = 'pending card';
+failTable = 'cards';
+await assert.rejects(writer.save(writeLibrary, currentUser), /partial failure/);
+assert.equal(remoteTables.get('subjects').get('writer-owner:writer-subject').data.name, 'partially written subject');
+await writer.save(beforePartialSave, currentUser);
+assert.equal(remoteTables.get('subjects').get('writer-owner:writer-subject').data.name, beforePartialSave.subjects[0].name, 'retrying a rolled-back library repairs a batch that succeeded before a later failure');
+
+const writeCount = writes.length;
+currentUser = 'another-owner';
+await assert.rejects(writer.save(writeLibrary, 'writer-owner'), /aktive Sitzung hat sich geändert/);
+assert.equal(writes.length, writeCount, 'an account switch rejects a pending save before touching remote records');
+
+const lifecycle = [];
+const lifecycleWriter = createLibraryWriter({ client: writerClient, onStart: state => lifecycle.push(['start', state.pending]), onSuccess: state => lifecycle.push(['success', state.pending]), onError: (_error, state) => lifecycle.push(['error', state.pending]) });
+await Promise.all([lifecycleWriter.save({ cards: [] }, currentUser), lifecycleWriter.save({ cards: [] }, currentUser)]);
+assert.deepEqual(lifecycle, [['start', 1], ['start', 2], ['success', 1], ['success', 0]], 'save status stays pending until the whole queue settles');
+
+const recovery = createPendingRecovery({ storage, now: () => '2026-11-04T18:00:00.000Z' });
+const recoveryLibrary = { cards: [{ id: 'offline-card', front: 'un château', back: 'eine Burg' }] };
+const firstPending = recovery.stage('offline-owner', recoveryLibrary);
+recoveryLibrary.cards[0].back = 'updated while another request runs';
+const latestPending = recovery.stage('offline-owner', recoveryLibrary);
+recovery.acknowledge('offline-owner', firstPending);
+assert.equal(recovery.get('offline-owner').library.cards[0].back, 'updated while another request runs', 'an older successful save must not clear newer pending work');
+assert.equal(recovery.get('another-owner'), null, 'pending recovery is namespaced by account');
+const recoveryAfterReload = createPendingRecovery({ storage });
+assert.equal(recoveryAfterReload.get('offline-owner').savedAt, '2026-11-04T18:00:00.000Z');
+assert.deepEqual(recoveryAfterReload.get('offline-owner').library, recoveryLibrary, 'unsynced work survives a fresh repository instance');
+recoveryAfterReload.acknowledge('offline-owner', latestPending);
+assert.equal(recoveryAfterReload.get('offline-owner'), null, 'only successful persistence of the newest snapshot clears its pending marker');
+recovery.stage('offline-owner', recoveryLibrary);
+recovery.discard('another-owner');
+assert.notEqual(recovery.get('offline-owner'), null);
+recovery.discard('offline-owner');
+assert.equal(recovery.get('offline-owner'), null, 'explicit discard affects only the browser recovery copy');
+values.set(userLibraryPendingKey('broken-owner'), '{invalid');
+assert.equal(recovery.get('broken-owner'), null, 'a corrupt recovery copy cannot crash loading');
+
+const remoteRecoveryLibrary = {
+  subjects: [{ id: 'shared-subject', name: 'French' }],
+  folders: [{ id: 'new-remote-folder', subjectId: 'shared-subject' }],
+  sets: [{ id: 'shared-set', name: 'Remote name', lastStudiedAt: '2026-11-01T10:00:00Z' }, { id: 'remote-set', name: 'New remote set' }],
+  cards: [{ id: 'shared-card', setId: 'shared-set', front: 'un livre', attemptCount: 2 }, { id: 'remote-card', setId: 'remote-set', front: 'une maison' }],
+  studySessions: { 'shared-set': { id: 'remote-session', setId: 'shared-set', startedAt: '2026-11-02T10:00:00Z' }, 'remote-set': { id: 'other-session', setId: 'remote-set', startedAt: '2026-11-01T10:00:00Z' } },
+  studyHistory: [{ id: 'remote-completion', setId: 'remote-set', completedAt: '2026-11-03T10:00:00Z' }]
+};
+const localRecoveryLibrary = {
+  subjects: [{ id: 'shared-subject', name: 'Français' }], folders: [],
+  sets: [{ id: 'shared-set', name: 'Local edit', lastStudiedAt: '2026-11-04T10:00:00Z' }],
+  cards: [{ id: 'shared-card', setId: 'shared-set', front: 'un livre', attemptCount: 3 }, { id: 'local-card', setId: 'shared-set', front: 'un château' }],
+  studySessions: { 'shared-set': { id: 'local-session', setId: 'shared-set', startedAt: '2026-11-04T10:00:00Z' } },
+  studyHistory: []
+};
+const mergedRecovery = mergePendingLibrary(remoteRecoveryLibrary, localRecoveryLibrary);
+assert.deepEqual(mergedRecovery.sets.map(set => set.id), ['shared-set', 'remote-set']);
+assert.equal(mergedRecovery.sets[0].name, 'Local edit');
+assert.deepEqual(mergedRecovery.cards.map(card => card.id), ['shared-card', 'remote-card', 'local-card']);
+assert.equal(mergedRecovery.cards[0].attemptCount, 3);
+assert.equal(mergedRecovery.folders[0].id, 'new-remote-folder', 'recovery preserves folders that were absent from the local snapshot');
+assert.equal(mergedRecovery.studySessions['shared-set'].id, 'local-session');
+assert.equal(mergedRecovery.studySessions['remote-set'].id, 'other-session');
+assert.equal(mergedRecovery.studyHistory[0].id, 'remote-completion', 'recovery never replays deletion of server-only data');
+assert.equal(remoteRecoveryLibrary.sets[0].name, 'Remote name');
+assert.deepEqual(mergedRecovery.recent.map(entry => entry.setId), ['shared-set', 'remote-set']);
+const recentLibrary = { sets: [{ id: 'from-set', lastStudiedAt: '2026-11-04T10:00:00Z' }, { id: 'from-session' }, { id: 'from-history' }, { id: 'invalid', lastStudiedAt: 'invalid date' }],
+  studySessions: { 'from-session': { setId: 'from-session', startedAt: '2026-11-03T10:00:00Z' } },
+  studyHistory: [{ setId: 'from-history', completedAt: '2026-11-02T10:00:00Z' }, { setId: 'deleted-set', completedAt: '2026-11-05T10:00:00Z' }],
+  recent: [{ setId: 'from-history', at: '2026-11-01T10:00:00Z' }] };
+assert.deepEqual(deriveRecentStudySets(recentLibrary), [{ setId: 'from-set', at: '2026-11-04T10:00:00Z' }, { setId: 'from-session', at: '2026-11-03T10:00:00Z' }, { setId: 'from-history', at: '2026-11-02T10:00:00Z' }], 'recent learning survives reload using persisted set timestamps and legacy session/history fallbacks');
+
+const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };
+const loadGuard = createLibraryLoadGuard();
+const authA = deferred();
+const ticketA = loadGuard.begin();
+const ownerA = loadGuard.verifyOwner(ticketA, { auth: { getUser: () => authA.promise } });
+const ticketB = loadGuard.begin();
+const clientB = { auth: { getUser: async () => ({ data: { user: { id: 'account-b' } }, error: null }) } };
+assert.equal((await loadGuard.verifyOwner(ticketB, clientB)).id, 'account-b');
+await loadGuard.verifyOwner(ticketB, clientB, 'account-b');
+loadGuard.commit(ticketB, 'account-b');
+authA.resolve({ data: { user: { id: 'account-a' } }, error: null });
+await assert.rejects(ownerA, error => error.code === 'STALE_LIBRARY_LOAD');
+assert.throws(() => loadGuard.commit(ticketA, 'account-a'), error => error.code === 'STALE_LIBRARY_LOAD');
+assert.equal(loadGuard.activeUserId, 'account-b', 'an older getUser response cannot replace the newly loaded owner');
+
+const fetchTicket = loadGuard.begin();
+assert.equal(loadGuard.activeUserId, null, 'an in-progress load cannot own new writes before data and authentication are verified');
+await assert.rejects(loadGuard.verifyOwner(fetchTicket, clientB, 'account-a'), error => error.code === 'STALE_LIBRARY_LOAD');
+const logoutAuth = deferred();
+const pendingAfterLogout = loadGuard.verifyOwner(fetchTicket, { auth: { getUser: () => logoutAuth.promise } }, 'account-b');
+loadGuard.reset();
+logoutAuth.resolve({ data: { user: { id: 'account-b' } }, error: null });
+await assert.rejects(pendingAfterLogout, error => error.code === 'STALE_LIBRARY_LOAD');
+assert.equal(loadGuard.activeUserId, null, 'logout invalidates responses and clears access to the former account recovery cache');
+
+const migrationTicket = loadGuard.begin();
+const migrationPersist = deferred();
+const interruptedStorage = new Map();
+const interruptedMigration = claimLegacyCache({ legacyRaw: JSON.stringify({ cards: [] }), migrationOwner: null, hasRemote: false, remote: {}, normalize: value => value,
+  persist: () => migrationPersist.promise, userId: 'account-a',
+  storage: { setItem: (key, value) => interruptedStorage.set(key, value), removeItem: key => interruptedStorage.delete(key) },
+  assertCurrent: () => loadGuard.assertCurrent(migrationTicket) });
+loadGuard.reset();
+migrationPersist.resolve();
+await assert.rejects(interruptedMigration, error => error.code === 'STALE_LIBRARY_LOAD');
+assert.equal(interruptedStorage.has(LEGACY_MIGRATION_KEY), false, 'a superseded migration cannot claim shared legacy cache ownership after awaiting persistence');
 
 console.log('repository.test.mjs passed');
