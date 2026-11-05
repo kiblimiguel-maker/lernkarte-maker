@@ -687,8 +687,7 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
   function saveSessionProgress(){
     if(!session)return;
     const results=window.WortwerkModel.getStudyResults(session),index=window.WortwerkModel.getStudyCurrentIndex(session);
-    const record={id:session.id,setId:session.setId,startedAt:session.startedAt,cardIds:session.cards.map(card=>card.id),results,resultsByCardId:{...session.resultsByCardId},historyCardIds:session.historyCardIds.slice(),historyIndex:session.historyIndex,currentCardId:session.currentCardId,index:Math.max(0,Math.min(index,session.cards.length-1)),missedCardIdsCopied:[...(session.missedCardIdsCopied||[])]};
-    if(results.every(result=>result!==null)){completeSession(record);return}
+    const record={id:session.id,setId:session.setId,startedAt:session.startedAt,cardIds:session.cards.map(card=>card.id),results,resultsByCardId:{...session.resultsByCardId},historyCardIds:session.historyCardIds.slice(),historyIndex:session.historyIndex,currentCardId:session.currentCardId,shuffleRemainingCardIds:session.shuffleRemainingCardIds.slice(),index:Math.max(0,Math.min(index,session.cards.length-1)),missedCardIdsCopied:[...(session.missedCardIdsCopied||[])]};
     data.studySessions[session.setId]=record;save();
   }
   let activeSlotIndex = 0;
@@ -835,7 +834,7 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
     session.transitioning=true;
     window.WortwerkModel.updateCardAnswer(card,previous,known,timestamp);
     window.WortwerkModel.setStudyAnswer(session,cardId,known);
-    const remaining=window.WortwerkModel.getStudyResults(session).some(result=>result===null);
+    const remaining=session.shuffleRemainingCardIds.length>0||window.WortwerkModel.getStudyResults(session).some(result=>result===null);
     const nextCardId=remaining?window.WortwerkModel.getNextStudyCardId(session):null,hasNext=Boolean(nextCardId);
     if(hasNext)window.WortwerkModel.visitStudyCard(session,nextCardId);
     saveSessionProgress();
@@ -921,7 +920,7 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
   studyDialog.addEventListener('fullscreenchange',syncFullscreenButton);
   studyDialog.addEventListener('cancel',event=>{event.preventDefault();endStudy()});
   $('#study-expand').onclick=toggleStudyFullscreen;
-  $('#study-card-0').onclick=flip;$('#study-card-1').onclick=flip;$('#answer-no').onclick=()=>scoreCard(false);$('#answer-yes').onclick=()=>scoreCard(true);$('#study-prev').onclick=()=>moveStudy(-1);$('#study-next').onclick=nextStudyCard;$('#study-close').onclick=endStudy;$('#finish-study').onclick=()=>{endStudy();render()};$('#retry-missed').onclick=retryMissed;$('#create-missed-set').onclick=openMissedSetCreation;$('#create-missed-set-complete').onclick=openMissedSetCreation;$('#study-manage').onclick=()=>{endStudy();render()};$('#shuffle-toggle').onclick=()=>{if(!session||session.transitioning||!$('#study-complete').hidden)return;const shuffled=window.WortwerkModel.shuffleUnvisitedStudyCards(session);if(!shuffled){toast('Es gibt nicht genügend noch offene Karten zum Mischen.');return}$('#shuffle-toggle').setAttribute('aria-pressed','true');saveSessionProgress();renderStudyCard()};
+  $('#study-card-0').onclick=flip;$('#study-card-1').onclick=flip;$('#answer-no').onclick=()=>scoreCard(false);$('#answer-yes').onclick=()=>scoreCard(true);$('#study-prev').onclick=()=>moveStudy(-1);$('#study-next').onclick=nextStudyCard;$('#study-close').onclick=endStudy;$('#finish-study').onclick=()=>{endStudy();render()};$('#retry-missed').onclick=retryMissed;$('#create-missed-set').onclick=openMissedSetCreation;$('#create-missed-set-complete').onclick=openMissedSetCreation;$('#study-manage').onclick=()=>{endStudy();render()};$('#shuffle-toggle').onclick=()=>{if(!session||session.transitioning||!$('#study-complete').hidden)return;const shuffled=window.WortwerkModel.shuffleStudyCards(session);if(!shuffled){toast('Zum Mischen brauchst du mindestens zwei Karten.');return}session.flipped=false;$('#shuffle-toggle').setAttribute('aria-pressed','true');saveSessionProgress();studyDialog.classList.add('is-instant-navigation');activeSlotIndex=1-activeSlotIndex;renderStudyCard();void studyDialog.offsetWidth;studyDialog.classList.remove('is-instant-navigation');toast('Alle Karten neu gemischt. Bewertungen bleiben erhalten.')};
   document.addEventListener('keydown',event=>{
     const action=studyKeyboardAction(event,{
       open:studyDialog.open,

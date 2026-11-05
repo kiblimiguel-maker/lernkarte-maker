@@ -91,3 +91,13 @@ Server-Secrets werden weiterhin nur in serverseitigen Umgebungsvariablen gelesen
 ## Veröffentlichung
 
 Die Veröffentlichung erfolgt über den bestehenden Git-Workflow auf `origin/main` und Vercel nach erfolgreicher Prüfung. Der abschliessende Deployment-Status wird im Abschlussbericht genannt; dieser Bericht allein behauptet keine erfolgreiche Live-Zahlung.
+
+## Ergänzung: vollständiges Mischen der Lernsession
+
+„Karten mischen“ bezieht jetzt sämtliche Karten der aktuellen Session ein, auch die sichtbare und bereits bewertete Karten. Fisher-Yates erzeugt eine neue Reihenfolge; bei mindestens zwei Karten erscheint eine andere Karte an erster Stelle. Der gespeicherte Kartenbestand und seine Positionen bleiben unverändert. Der bisherige Rückweg bleibt erreichbar; ab dem Mischpunkt beginnt ein neuer vollständiger Durchlauf.
+
+Bewertungen bleiben an Karten-IDs gebunden. Eine erneute Bewertung derselben Karte korrigiert den bestehenden Sessionstatus und wird nicht als zusätzlicher Versuch gezählt. Der noch ausstehende Mischdurchlauf wird mit der Session gespeichert und beim Fortsetzen wiederhergestellt. Ein vollständiger Bewertungsstand allein beendet den Mischdurchlauf nicht vorzeitig: Das Ergebnis wird erst beim tatsächlichen Abschluss geschrieben, inklusive einer Korrektur auf der letzten Karte.
+
+Zusätzliche automatisierte Regressionstests prüfen vollständige Mischreihenfolgen, wiederholtes Mischen, Verlauf, Fortsetzung, ungültige gespeicherte IDs, einzelne/leere Stapel sowie korrekte Bewertungszähler. `npm test`, `npm run build` und `git diff --check` sind erfolgreich.
+
+Im isolierten Browserlauf mit fünf Karten wurden Mischen nach einem Flip, erneutes Mischen, Zurück/Vorwärts, Reload/Fortsetzen und der komplette Abschluss geprüft. Bereits vorhandene Richtig-/Falsch-Bewertungen blieben zugeordnet. Die letzte falsche Bewertung wurde korrigiert; das gespeicherte Ergebnis zeigte korrekt 5 gewusste Karten, 0 falsche und genau einen Versuch pro Karte. Keine Konsolenfehler. Die Browser-Speicherung verwendete lokale Testdaten; produktive Nutzerfortschritte wurden nicht verändert. Keine Datenbankmigration erforderlich.

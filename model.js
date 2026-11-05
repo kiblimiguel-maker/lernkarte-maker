@@ -330,6 +330,7 @@
       }
     }
     const currentCardId = historyCardIds[historyIndex];
+    const validIds = new Set(cardIds);
     return {
       id: saved?.id,
       setId: saved?.setId,
@@ -338,7 +339,8 @@
       resultsByCardId,
       historyCardIds,
       historyIndex,
-      currentCardId: currentCardId || cardIds[0] || null
+      currentCardId: currentCardId || cardIds[0] || null,
+      shuffleRemainingCardIds: Array.isArray(saved?.shuffleRemainingCardIds) ? [...new Set(saved.shuffleRemainingCardIds.filter(id => validIds.has(id) && (historyIndex < historyCardIds.length - 1 || id !== currentCardId)))] : []
     };
   }
 
@@ -361,6 +363,7 @@
   function getNextStudyCardId(session) {
     if (!session?.cards.length) return null;
     if (session.historyIndex < session.historyCardIds.length - 1) return session.historyCardIds[session.historyIndex + 1];
+    if (session.shuffleRemainingCardIds?.length) return session.shuffleRemainingCardIds[0];
     const currentIndex = getStudyCurrentIndex(session);
     const visited = new Set(session.historyCardIds);
     for (const [cardId, result] of Object.entries(session.resultsByCardId)) if (result !== null) visited.add(cardId);
@@ -382,6 +385,7 @@
       session.currentCardId = cardId;
       return true;
     }
+    session.shuffleRemainingCardIds = (session.shuffleRemainingCardIds || []).filter(id => id !== cardId);
     session.historyCardIds = session.historyCardIds.slice(0, session.historyIndex + 1);
     session.historyCardIds.push(cardId);
     session.historyIndex = session.historyCardIds.length - 1;
@@ -401,24 +405,27 @@
     return nextCardId ? visitStudyCard(session, nextCardId) : false;
   }
 
-  function shuffleUnvisitedStudyCards(session, random = Math.random) {
-    if (!session?.cards.length) return false;
-    const visited = new Set(session.historyCardIds);
-    for (const [cardId, result] of Object.entries(session.resultsByCardId)) if (result !== null) visited.add(cardId);
-    const unvisited = session.cards.filter(card => !visited.has(card.id));
-    if (unvisited.length < 2) return false;
-    const originalOrder = unvisited.map(card => card.id);
-    for (let index = unvisited.length - 1; index > 0; index--) {
+  function shuffleStudyCards(session, random = Math.random) {
+    if (!session || session.cards.length < 2) return false;
+    const shuffled = session.cards.slice();
+    for (let index = shuffled.length - 1; index > 0; index--) {
       const target = Math.floor(random() * (index + 1));
-      [unvisited[index], unvisited[target]] = [unvisited[target], unvisited[index]];
+      [shuffled[index], shuffled[target]] = [shuffled[target], shuffled[index]];
     }
-    // A random shuffle can legitimately reproduce the same order. Make the
-    // action visibly effective for small stacks instead of silently doing nothing.
-    if (unvisited.every((card, index) => card.id === originalOrder[index])) {
-      [unvisited[0], unvisited[1]] = [unvisited[1], unvisited[0]];
+    // A mix deliberately replaces the visible card too. Keep the remaining
+    // permutation random while avoiding a seemingly inactive mix button.
+    if (shuffled[0].id === session.currentCardId) {
+      const target = 1 + Math.floor(random() * (shuffled.length - 1));
+      [shuffled[0], shuffled[target]] = [shuffled[target], shuffled[0]];
     }
-    let next = 0;
-    session.cards = session.cards.map(card => visited.has(card.id) ? card : unvisited[next++]);
+    session.cards = shuffled;
+    session.shuffleRemainingCardIds = shuffled.slice(1).map(card => card.id);
+    // Start a new forward branch, retaining the path back to the current card.
+    // Every card in the replaced branch also belongs to the new full schedule.
+    session.historyCardIds = session.historyCardIds.slice(0, session.historyIndex + 1);
+    session.historyCardIds.push(shuffled[0].id);
+    session.historyIndex = session.historyCardIds.length - 1;
+    session.currentCardId = shuffled[0].id;
     return true;
   }
 
@@ -485,7 +492,7 @@
     return -1;
   }
 
-  const api = { normalizeLibrary, getLibrarySiblings, reorderLibraryItems, canMoveLibraryItem, moveLibraryItem, nextLibraryPosition, getFolderDescendantIds, createImportedCards, createCopiedCards, nextSetName, swapSetCardSides, recordCardAnswer, updateCardAnswer, createStudySession, getStudyResults, getStudyResult, getStudyCurrentIndex, getStudyCard, getNextStudyCardId, visitStudyCard, navigateStudySession, shuffleUnvisitedStudyCards, setStudyAnswer, getCardProgress, getSetProgress, resetSetProgress, summarizeResults, summarizeSession, nextUnratedIndex };
+  const api = { normalizeLibrary, getLibrarySiblings, reorderLibraryItems, canMoveLibraryItem, moveLibraryItem, nextLibraryPosition, getFolderDescendantIds, createImportedCards, createCopiedCards, nextSetName, swapSetCardSides, recordCardAnswer, updateCardAnswer, createStudySession, getStudyResults, getStudyResult, getStudyCurrentIndex, getStudyCard, getNextStudyCardId, visitStudyCard, navigateStudySession, shuffleStudyCards, setStudyAnswer, getCardProgress, getSetProgress, resetSetProgress, summarizeResults, summarizeSession, nextUnratedIndex };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (typeof globalThis !== 'undefined') globalThis.WortwerkModel = api;
 })();
