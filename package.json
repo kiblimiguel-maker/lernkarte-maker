@@ -6,7 +6,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node parser.test.js && node model.test.js && node shuffle.test.js && node presentation.test.js && node card-themes.test.js && node study-keyboard.test.mjs && node auth-lifecycle.test.mjs && node library-view.test.mjs && node repository.test.mjs && node donation.test.mjs"
+    "test": "node parser.test.js && node model.test.js && node shuffle.test.js && node presentation.test.js && node card-themes.test.js && node appearance.test.mjs && node study-keyboard.test.mjs && node auth-lifecycle.test.mjs && node library-view.test.mjs && node repository.test.mjs && node donation.test.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "2.117.2",

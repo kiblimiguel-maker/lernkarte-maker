@@ -1,6 +1,10 @@
 import { inject } from '@vercel/analytics';
 import { isSupabaseConfigured, supabase } from './supabaseClient.js';
 import { createAuthLifecycle } from './auth-lifecycle.mjs';
+import { getAppAppearance } from './appearance.mjs';
+
+// Apply the same saved surface during authentication and in the library.
+getAppAppearance();
 
 inject({
   mode: import.meta.env.PROD ? 'production' : 'development',
