@@ -1,14 +1,14 @@
 import { supabase } from './supabaseClient.js';
-import { cardListPage, libraryCardCounts } from './library-view.mjs';
+import { cardListPage, libraryCardCounts, searchLibrary } from './library-view.mjs';
 import { studyKeyboardAction } from './study-keyboard.mjs';
 import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown, parseDonationAmountCents, shouldShowDonationWelcome, setDonationReminderEnabled, isDonationReminderEnabled } from './donation-values.mjs';
 
 (() => {
   'use strict';
   const palette = [
-    ['#3378F6','Kobaltblau'],['#0AA4CF','Azur'],['#00A88F','Jade'],['#26A65B','Smaragd'],
-    ['#99B62A','Limette'],['#E7A623','Safran'],['#EE7937','Mandarine'],['#DC4D5A','Koralle'],
-    ['#CE458B','Himbeere'],['#9359DB','Amethyst'],['#6264DA','Indigo'],['#77889E','Schiefer']
+    ['#4876B4','Kobaltblau'],['#2A879E','Azur'],['#287C68','Jade'],['#4A8057','Smaragd'],
+    ['#7D8A42','Olive'],['#B88A35','Ocker'],['#C2784A','Terrakotta'],['#BB5B61','Koralle'],
+    ['#A85F83','Himbeere'],['#8A70AE','Amethyst'],['#626FA9','Indigo'],['#73818B','Schiefer']
   ];
   const colors = palette.map(([hex])=>hex);
   const safeColor = (value,fallback=colors[0]) => typeof value==='string' && /^#[0-9a-f]{6}$/i.test(value) ? value : fallback;
@@ -54,6 +54,7 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
   let data = initial(), activeSubject = null, activeFolder = null, activeSet = null, view = donationReturn ? 'donations' : 'library';
   let librarySorting = false, librarySortSaving = false, entitySaving = false;
   let cardCounts=new Map(),cardListSetId=null,cardListQuery='',cardListLimit=100,recoveryAwaitingChoice=false;
+  let librarySearchScope='',librarySearchQuery='',librarySearchLimit=100;
   // Sidebar disclosure is independent from the current library location.
   const expandedSidebarSubjects = new Set();
   let formContext = null, importRows = [], importChecked = false, importHasErrors = false, importErrors=[],importPreviewLimit=100, session = null;
@@ -101,19 +102,29 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
     });
     if(!result.persisted)toast('Farbschema übernommen. Die dauerhafte Speicherung ist in diesem Browser nicht verfügbar.');render();
   }
+  let renderedLocation = '';
   function render(){
+    const location=view==='donations'?'donations':`${view}:${activeSubject||''}:${activeFolder||''}:${activeSet||''}`;
+    const changedLocation=location!==renderedLocation;
+    renderedLocation=location;
     cardCounts=libraryCardCounts(data.cards);
     if(view!=='library'||activeSet)librarySorting=false;
     renderNav();
     $('#content').classList.toggle('is-sorting',librarySorting);$('#content').inert=librarySortSaving||recoveryAwaitingChoice;$('#content').setAttribute('aria-busy',String(librarySortSaving));
     if(view==='donations'){
-      activeSubject=null;activeFolder=null;activeSet=null;renderDonations();return;
+      activeSubject=null;activeFolder=null;activeSet=null;renderDonations();
+    }else if(activeSet&&setById(activeSet)){
+      renderSet();
+    }else if(activeFolder&&folder(activeFolder)){
+      renderFolder();renderLibrarySearch();
+    }else if(activeSubject&&subject(activeSubject)){
+      renderSubject();renderLibrarySearch();
+    }else{
+      renderLibrary();
+      if(view==='library')renderDonationWelcome();
+      renderLibrarySearch();
     }
-    if(activeSet&&setById(activeSet)){renderSet();return}
-    if(activeFolder&&folder(activeFolder)){renderFolder();return}
-    if(activeSubject&&subject(activeSubject)){renderSubject();return}
-    renderLibrary();
-    if(view==='library')renderDonationWelcome();
+    if(changedLocation)window.scrollTo({top:0,left:0,behavior:'instant'});
   }
   function renderNav(){
     document.querySelectorAll('[data-view]').forEach(button=>button.onclick=event=>{
@@ -191,8 +202,8 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
     markDonationWelcomeShown();
     const welcome=document.createElement('section');
     welcome.className='donation-welcome';welcome.setAttribute('aria-labelledby','donation-welcome-title');
-    welcome.innerHTML=`<div class="donation-welcome-copy"><div class="eyebrow">EIN FREIWILLIGER BEITRAG</div><h2 id="donation-welcome-title">Schön, dass du Lernkarten Maker nutzt!</h2><p>Lernkarten Maker ist kostenlos und soll es auch bleiben. Wenn dir die App gefällt und du die Weiterentwicklung unterstützen möchtest, kannst du freiwillig eine Spende geben. Jede Unterstützung hilft. Vielen Dank!</p></div><div class="donation-welcome-actions"><button type="button" class="primary-button" data-donation-welcome="donate">Jetzt spenden</button><button type="button" class="quiet-button" data-donation-welcome="continue">Weiter zur App</button></div><button type="button" class="icon-button donation-welcome-close" data-donation-welcome="continue" aria-label="Begrüssung schliessen" title="Schliessen">×</button>`;
-    $('#content').prepend(welcome);
+    welcome.innerHTML=`<div class="donation-welcome-copy"><h2 id="donation-welcome-title">Gemeinsam weiterlernen.</h2><p>Lernkarten Maker bleibt kostenlos. Mit einer freiwilligen Spende hilfst du bei der Weiterentwicklung.</p></div><div class="donation-welcome-actions"><button type="button" class="quiet-button" data-donation-welcome="donate">Jetzt spenden</button><button type="button" class="text-button" data-donation-welcome="continue">Nicht jetzt</button></div><button type="button" class="icon-button donation-welcome-close" data-donation-welcome="continue" aria-label="Begrüssung schliessen" title="Schliessen">×</button>`;
+    const heading=$('#content .page-heading');if(heading)heading.after(welcome);else $('#content').prepend(welcome);
     welcome.querySelectorAll('[data-donation-welcome]').forEach(button=>button.addEventListener('click',()=>{
       donationGreetingDismissed=true;
       if(button.dataset.donationWelcome==='donate'){view='donations';activeSubject=null;activeFolder=null;activeSet=null}
@@ -455,6 +466,39 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
   $('#content').addEventListener('pointermove',event=>{const state=sortingPointer;if(!state||state.pointerId!==event.pointerId)return;if(!state.dragging&&Math.hypot(event.clientX-state.x,event.clientY-state.y)<6)return;state.dragging=true;state.tile.classList.add('is-dragging');document.querySelectorAll('.drop-before,.drop-after').forEach(el=>el.classList.remove('drop-before','drop-after'));const target=document.elementFromPoint(event.clientX,event.clientY)?.closest('[data-sort-id]');state.target=null;if(!target||target===state.tile||target.dataset.sortType!==state.tile.dataset.sortType)return;const siblings=window.WortwerkModel.getLibrarySiblings(data,state.tile.dataset.sortType,state.tile.dataset.sortId);if(!siblings.some(item=>item.id===target.dataset.sortId))return;const rect=target.getBoundingClientRect();state.placement=event.clientY<rect.top+rect.height/2?'before':'after';state.target=target;target.classList.add('drop-'+state.placement)});
   $('#content').addEventListener('pointerup',event=>{const state=sortingPointer;if(!state||state.pointerId!==event.pointerId)return;const {tile,target,placement}=state;clearSortPointer();if(target)reorderItem(tile.dataset.sortType,tile.dataset.sortId,target.dataset.sortId,placement)});
   $('#content').addEventListener('pointercancel',clearSortPointer);
+  function renderLibrarySearch(){
+    if(activeSet||view==='donations'||librarySorting||!data.subjects.length)return;
+    const scope=`${view}:${activeSubject||''}:${activeFolder||''}`;
+    if(librarySearchScope!==scope){librarySearchScope=scope;librarySearchQuery='';librarySearchLimit=100}
+    const heading=$('.page-heading, .subpage-heading');if(!heading)return;
+    const toolbar=document.createElement('div');toolbar.className='library-search-toolbar';
+    const location=activeFolder?folder(activeFolder)?.name:activeSubject?subject(activeSubject)?.name:view==='recent'?'Zuletzt gelernt':'Bibliothek';
+    toolbar.innerHTML=`<label class="library-search"><svg class="library-search-icon" viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="m13 13 4 4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg><span class="sr-only">${esc(location)} durchsuchen</span><input id="library-search" type="search" autocomplete="off" placeholder="${activeSubject?'Name oder Beschreibung suchen':'Fächer, Ordner oder Lernstapel suchen'}" value="${esc(librarySearchQuery)}"></label><span class="library-search-summary" role="status"></span><button class="text-button library-search-clear" type="button" hidden>Suche zurücksetzen</button>`;
+    heading.after(toolbar);
+    const results=document.createElement('div');results.className='library-search-results';results.hidden=true;toolbar.after(results);
+    $('#library-search').addEventListener('input',event=>{librarySearchQuery=event.currentTarget.value;librarySearchLimit=100;refreshLibrarySearch()});
+    $('.library-search-clear').onclick=()=>{librarySearchQuery='';librarySearchLimit=100;$('#library-search').value='';refreshLibrarySearch();$('#library-search').focus()};
+    refreshLibrarySearch();
+  }
+  function refreshLibrarySearch(){
+    const toolbar=$('.library-search-toolbar'),results=$('.library-search-results');if(!toolbar||!results)return;
+    const searching=Boolean(librarySearchQuery.trim());
+    for(const child of $('#content').children){
+      if(child===toolbar||child===results||child.matches('.page-heading, .subpage-heading'))continue;
+      if(searching&&!child.hidden){child.dataset.librarySearchHidden='true';child.hidden=true}
+      else if(!searching&&child.dataset.librarySearchHidden){delete child.dataset.librarySearchHidden;child.hidden=false}
+    }
+    results.hidden=!searching;$('.library-search-clear').hidden=!searching;
+    if(!searching){results.innerHTML='';$('.library-search-summary').textContent=activeFolder?'Mit Unterordnern':activeSubject?'Im ganzen Fach':'';return}
+    const recentIds=view==='recent'?(data.recent||[]).map(item=>item.setId):null;
+    const found=searchLibrary(data,librarySearchQuery,{subjectId:activeSubject,folderId:activeFolder,setIds:recentIds,limit:librarySearchLimit});
+    const count=found.subjects.length+found.folders.length+found.sets.length;
+    $('.library-search-summary').textContent=`${count<found.total?`${count} von `:''}${found.total} Treffer`;
+    const group=(entries,type,label)=>entries.length?`<section class="library-search-group"><h2>${label}<span class="count-label">${entries.length}</span></h2>${entries.map(({item,path})=>`<button type="button" class="library-search-result" data-open-${type}="${esc(item.id)}"><span class="library-search-result-icon" style="--dot:${safeColor(item.color)}" aria-hidden="true">${type==='folder'?folderSymbol():type==='subject'?'▤':'<svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><path d="M6 18H5a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><rect x="8" y="6" width="13" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>'}</span><span class="library-search-result-copy"><strong>${esc(item.name)}</strong><small>${esc(path)}</small></span><span class="library-search-result-kind">${type==='set'?`${cardCounts.get(item.id)||0} ${(cardCounts.get(item.id)||0)===1?'Karte':'Karten'}`:type==='subject'?'Fach':'Ordner'}</span><span aria-hidden="true">→</span></button>`).join('')}</section>`:'';
+    results.innerHTML=group(found.subjects,'subject','Fächer')+group(found.folders,'folder','Ordner')+group(found.sets,'set','Lernstapel')+(!found.total?'<div class="library-search-empty"><h2>Keine passenden Inhalte</h2><p>Versuche einen anderen Namen, eine Beschreibung oder den Speicherort.</p></div>':'')+(count<found.total?'<button class="quiet-button" type="button" id="library-search-more">Weitere 100 Ergebnisse anzeigen</button>':'');
+    $('#library-search-more')?.addEventListener('click',()=>{librarySearchLimit+=100;refreshLibrarySearch()});
+    bindSubjectCards();bindFolderCards();bindSetCards();
+  }
   function renderLibrary(){
     activeSubject=null;activeFolder=null;activeSet=null;
     const recentSets=(data.recent||[]).map(item=>setById(item.setId)).filter(Boolean).filter((set,index,list)=>list.findIndex(candidate=>candidate.id===set.id)===index).slice(0,view==='recent'?30:4);
@@ -464,7 +508,7 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
     }
     const subjectCards=data.subjects.map((item,index)=>{
       const sets=subjectSets(item.id),cards=sets.reduce((sum,set)=>sum+(cardCounts.get(set.id)||0),0);
-      return `<article class="subject-card" ${sortAttributes('subject',item)} tabindex="0" data-open-subject="${esc(item.id)}" style="${subjectAppearance(item,colors[index%colors.length])}"><div class="subject-card-top">${subjectSymbol(item,icons[index%icons.length])}</div><h2>${esc(item.name)}</h2><p>${sets.length} ${sets.length===1?'Set':'Sets'} · ${cards} ${cards===1?'Karte':'Karten'}</p><span class="card-arrow" aria-hidden="true">→</span>${sortControls('subject',item)}</article>`;
+      return `<article class="subject-card" ${sortAttributes('subject',item)} tabindex="0" data-open-subject="${esc(item.id)}" style="${subjectAppearance(item,colors[index%colors.length])}"><div class="subject-card-top">${subjectSymbol(item,icons[index%icons.length])}</div><h2>${esc(item.name)}</h2><p>${sets.length} Lernstapel · ${cards} ${cards===1?'Karte':'Karten'}</p><span class="card-arrow" aria-hidden="true">→</span>${sortControls('subject',item)}</article>`;
     }).join('');
     const recentSection=recentSets.length?`<section class="recent-section"><div class="section-head"><h2>Zuletzt gelernt</h2><button class="text-button" data-view="recent">Alle anzeigen</button></div><div class="recent-list">${recentSets.map(set=>`<button class="recent-item" data-open-set="${esc(set.id)}"><span>${esc(set.name)}</span><small>${esc(subject(set.subjectId)?.name||'Fach')}</small><span aria-hidden="true">→</span></button>`).join('')}</div></section>`:'';
     $('#content').innerHTML=`<div class="page-heading"><div><div class="eyebrow">DEIN PERSÖNLICHER LERNRAUM</div><h1 class="page-title">Bibliothek</h1><p class="page-subtitle">Alles, was du lernen möchtest. An einem Ort.</p></div><div class="page-primary-actions"><button class="quiet-button" id="home-add-subject">＋ Fach anlegen</button><button class="primary-button" id="home-create-set">＋ Lernstapel erstellen</button></div></div><section class="library-section"><div class="section-head"><h2>Fächer <span class="count-label">${data.subjects.length}</span></h2>${data.subjects.length>1?sortingButton():''}</div>${data.subjects.length?`<div class="subject-grid">${subjectCards}</div>`:empty('Dein Lernraum ist noch leer','Lege zuerst ein Fach an. Darin kannst du Lernstapel und Ordner sammeln.','＋')}</section>${librarySorting?'<p class="sort-instructions">Ziehe am Griff oder verwende die Pfeile. Die Reihenfolge wird automatisch gespeichert.</p>':''}${recentSection}`;
@@ -492,11 +536,11 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
   }
   function bindSetCards(){
     document.querySelectorAll('[data-open-set]').forEach(element=>{
-      const open=()=>{activeSet=element.dataset.openSet;const set=setById(activeSet);activeSubject=set?.subjectId||null;activeFolder=set?.folderId||null;render()};
+      const open=()=>{activeSet=element.dataset.openSet;const set=setById(activeSet);activeSubject=set?.subjectId||null;activeFolder=set?.folderId||null;view='library';if(element.classList.contains('library-search-result')&&activeSubject)expandedSidebarSubjects.add(activeSubject);render()};
       element.onclick=event=>{if((event.target.closest('button,details')&&event.target.closest('button,details')!==element)||librarySorting)return;open()};element.onkeydown=event=>{if(event.target===element&&!librarySorting&&(event.key==='Enter'||event.key===' ')){event.preventDefault();open()}};
     });
     document.querySelectorAll('[data-quick-study]').forEach(button=>button.onclick=event=>{event.stopPropagation();beginStudy(button.dataset.quickStudy)});
-    document.querySelectorAll('[data-quick-edit]').forEach(button=>button.onclick=event=>{event.stopPropagation();(()=>{activeSet=button.dataset.quickEdit;const item=setById(activeSet);activeSubject=item?.subjectId;activeFolder=item?.folderId;render()})()});
+    document.querySelectorAll('[data-quick-edit]').forEach(button=>button.onclick=event=>{event.stopPropagation();(()=>{activeSet=button.dataset.quickEdit;const item=setById(activeSet);activeSubject=item?.subjectId;activeFolder=item?.folderId;view='library';render()})()});
   }
   function folderCard(item){
     const count=subjectSets(item.subjectId).filter(set=>set.folderId===item.id).length,children=subjectFolders(item.subjectId).filter(child=>child.parentId===item.id).length;
@@ -504,7 +548,7 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
   }
   function bindFolderCards(){
     document.querySelectorAll('[data-open-folder]').forEach(element=>{
-      const open=()=>{activeFolder=element.dataset.openFolder;activeSet=null;render()};
+      const open=()=>{activeFolder=element.dataset.openFolder;activeSubject=folder(activeFolder)?.subjectId||null;activeSet=null;view='library';if(element.classList.contains('library-search-result')&&activeSubject)expandedSidebarSubjects.add(activeSubject);render()};
       element.onclick=event=>{if((event.target.closest('button,details')&&event.target.closest('button,details')!==element)||librarySorting)return;open()};element.onkeydown=event=>{if(event.target===element&&!librarySorting&&(event.key==='Enter'||event.key===' ')){event.preventDefault();open()}};
     });
     document.querySelectorAll('[data-edit-folder]').forEach(button=>button.onclick=()=>editEntity('folder',button.dataset.editFolder));
@@ -518,7 +562,7 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
     const cardCount=subjectSets(item.id).reduce((sum,set)=>sum+(cardCounts.get(set.id)||0),0);
     const folderSection=folders.length?`<div class="folder-grid">${folders.map(folderCard).join('')}</div>`:'';
     const looseSection=looseSets.length?`<div class="section-head"><h2>Lernstapel <span class="count-label">${looseSets.length}</span></h2></div><div class="set-grid">${looseSets.map(setCard).join('')}</div>`:'';
-    $('#content').innerHTML=`<div class="subpage-heading">${backButton('Bibliothek')}<div class="subject-heading" style="${subjectAppearance(item)}">${subjectSymbol(item)}<div><h1 class="page-title">${esc(item.name)}</h1><p class="page-subtitle">${esc(item.description||`${subjectSets(item.id).length} Sets · ${cardCount} Karten`)}</p></div></div>${managementActions('<button id="edit-subject">Fach bearbeiten</button><button class="danger-action" id="delete-subject">Fach löschen</button>')}</div><section class="library-section"><div class="section-head"><h2>Ordner <span class="count-label">${folders.length}</span></h2><div class="section-actions">${sortingButton()}<button class="quiet-button" id="add-folder">＋ Ordner anlegen</button><button class="primary-button" id="subject-new-set">＋ Lernstapel erstellen</button></div></div>${folderSection||'<p class="section-note">Ordner sind optional. Lege sie an, wenn du deine Lernstapel weiter gliedern möchtest.</p>'}</section>${looseSection}`;
+    $('#content').innerHTML=`<div class="subpage-heading">${backButton('Bibliothek')}<div class="subject-heading" style="${subjectAppearance(item)}">${subjectSymbol(item)}<div><h1 class="page-title">${esc(item.name)}</h1><p class="page-subtitle">${esc(item.description||`${subjectSets(item.id).length} Lernstapel · ${cardCount} ${cardCount===1?'Karte':'Karten'}`)}</p></div></div>${managementActions('<button id="edit-subject">Fach bearbeiten</button><button class="danger-action" id="delete-subject">Fach löschen</button>')}</div><section class="library-section"><div class="section-head"><h2>Ordner <span class="count-label">${folders.length}</span></h2><div class="section-actions">${sortingButton()}<button class="quiet-button" id="add-folder">＋ Ordner anlegen</button><button class="primary-button" id="subject-new-set">＋ Lernstapel erstellen</button></div></div>${folderSection||'<p class="section-note">Ordner sind optional. Lege sie an, wenn du deine Lernstapel weiter gliedern möchtest.</p>'}</section>${looseSection}`;
     $('#go-back').onclick=()=>{librarySorting=false;activeSubject=null;activeFolder=null;render()};$('#edit-subject').onclick=()=>editEntity('subject',item.id);$('#delete-subject').onclick=()=>deleteSubject(item.id);$('#add-folder').onclick=()=>openEntity('folder');$('#subject-new-set').onclick=()=>openEntity('set');
     bindFolderCards();bindSetCards();bindSubjectCards();
   }
@@ -537,16 +581,16 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
     const previous=parentFolder?.name||parent?.name||'Zurück';
     const progress=window.WortwerkModel.getSetProgress(cards);
     const studyLabel=studyActionLabel(item.id);
-    $('#content').innerHTML=`<div class="subpage-heading">${backButton(previous)}<div><div class="page-context">${esc(parentFolder?.name||parent?.name||'Lernstapel')}</div><h1 class="page-title">${esc(item.name)}</h1><p class="page-subtitle">${esc(item.description||`${cards.length} Lernkarten`)}</p></div>${managementActions(`<button id="edit-set">Lernstapel bearbeiten</button><button data-move-item="set" data-item-id="${esc(item.id)}">Lernstapel verschieben …</button><button id="swap-card-sides" ${cards.length?'':'disabled'}>Vorder- und Rückseiten tauschen</button><button class="danger-action" id="delete-set">Lernstapel löschen</button>`)}</div>${cards.length?`<section class="study-banner" aria-labelledby="learning-progress-title"><div class="learning-progress-copy"><h2 id="learning-progress-title">Lernfortschritt</h2><p>${cards.length} Karten · ${progress.secure} sicher · ${progress.practice} zu üben · ${progress.new} neu</p><div class="library-progress" role="progressbar" aria-label="Sicher beherrschte Karten" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${progress.percentage}"><span style="width:${progress.percentage}%"></span></div><small class="study-progress-caption">${progress.percentage}% sicher beherrscht · mindestens zwei richtige Antworten.</small></div><div class="study-banner-actions"><button class="primary-button" id="start-study">${studyLabel}</button><button class="quiet-button" id="reset-progress">Lernfortschritt zurücksetzen</button></div></section>`:''}<section class="library-section"><div class="section-head"><h2>Lernkarten <span class="count-label">${cards.length}</span></h2><div class="section-actions"><button class="quiet-button" id="import-this">Karten importieren</button><button class="quiet-button" id="add-card">＋ Karte erstellen</button></div></div>${cards.length?renderCardList(cards):empty('Noch keine Lernkarten','Erstelle deine erste Karte oder importiere mehrere Begriffe aus Text.','▤')}</section>`;
+    $('#content').innerHTML=`<div class="subpage-heading">${backButton(previous)}<div><div class="page-context">${esc(parentFolder?.name||parent?.name||'Lernstapel')}</div><h1 class="page-title">${esc(item.name)}</h1><p class="page-subtitle">${esc(item.description||`${cards.length} ${cards.length===1?'Lernkarte':'Lernkarten'}`)}</p></div>${managementActions(`<button id="edit-set">Lernstapel bearbeiten</button><button data-move-item="set" data-item-id="${esc(item.id)}">Lernstapel verschieben …</button><button id="swap-card-sides" ${cards.length?'':'disabled'}>Vorder- und Rückseiten tauschen</button><button class="danger-action" id="delete-set">Lernstapel löschen</button>`)}</div>${cards.length?`<section class="study-banner" aria-labelledby="learning-progress-title"><div class="learning-progress-copy"><h2 id="learning-progress-title">Lernfortschritt</h2><p>${cards.length} ${cards.length===1?'Karte':'Karten'} · ${progress.secure} sicher · ${progress.practice} zu üben · ${progress.new} neu</p><div class="library-progress" role="progressbar" aria-label="Sicher beherrschte Karten" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${progress.percentage}"><span style="width:${progress.percentage}%"></span></div><small class="study-progress-caption">${progress.percentage}% sicher beherrscht · mindestens zwei richtige Antworten.</small></div><div class="study-banner-actions"><button class="primary-button" id="start-study">${studyLabel}</button><button class="quiet-button" id="reset-progress">Lernfortschritt zurücksetzen</button></div></section>`:''}<section class="library-section"><div class="section-head"><h2>Lernkarten <span class="count-label">${cards.length}</span></h2><div class="section-actions"><button class="quiet-button" id="import-this">Karten importieren</button><button class="quiet-button" id="add-card">＋ Karte erstellen</button></div></div>${cards.length?renderCardList(cards):empty('Noch keine Lernkarten','Erstelle deine erste Karte oder importiere mehrere Begriffe aus Text.','▤')}</section>`;
     $('#go-back').onclick=()=>{librarySorting=false;activeSet=null;activeFolder=item.folderId||null;render()};$('#edit-set').onclick=()=>editEntity('set',item.id);$('#delete-set').onclick=()=>deleteSet(item.id);$('#start-study')?.addEventListener('click',()=>beginStudy(item.id));$('#reset-progress')?.addEventListener('click',()=>openResetProgress(item.id));$('#swap-card-sides').onclick=()=>swapSetSides(item.id);$('#add-card').onclick=()=>openEntity('card');$('#import-this').onclick=()=>openImport(item.id);
     bindCardList();bindSubjectCards();
   }
   function renderCardList(cards){
     const page=cardListPage(cards,cardListQuery,cardListLimit),positions=new Map(cards.map((card,index)=>[card.id,index]));
-    return `<div class="card-list-toolbar"><label class="card-search"><span class="sr-only">Lernkarten durchsuchen</span><input type="search" id="card-search" placeholder="Begriffe oder Beispielsätze suchen" value="${esc(cardListQuery)}"></label><span class="card-list-count" role="status">${page.cards.length} von ${page.total} ${cardListQuery?'Treffern':'Karten'}</span></div><div id="card-list-results">${cardRows(page,positions,cards.length)}</div>`;
+    return `<div class="card-list-toolbar"><label class="card-search"><span class="sr-only">Lernkarten durchsuchen</span><input type="search" id="card-search" placeholder="Begriffe oder Beispielsätze suchen" value="${esc(cardListQuery)}"></label><span class="card-list-count" role="status">${page.cards.length} von ${page.total} ${cardListQuery?(page.total===1?'Treffer':'Treffern'):(page.total===1?'Karte':'Karten')}</span></div><div id="card-list-results">${cardRows(page,positions,cards.length)}</div>`;
   }
   function cardRows(page,positions,total){
-    return `<div class="card-list">${page.cards.map(card=>{const index=positions.get(card.id),progress=window.WortwerkModel.getCardProgress(card),label=progress.state==='secure'?'Sicher':progress.state==='practice'?'Zu üben':'Neu';return `<div class="flash-row"><div class="term">${cardSideMarkup(card,'front')}<small class="flash-progress">${label} · ${progress.attempts} ${progress.attempts===1?'Versuch':'Versuche'}</small></div><div class="definition">${cardSideMarkup(card,'back')}</div><div class="row-actions"><button data-move-card="${esc(card.id)}" data-direction="-1" aria-label="Karte nach oben verschieben" title="Karte nach oben verschieben" ${index===0?'disabled':''}>↑</button><button data-move-card="${esc(card.id)}" data-direction="1" aria-label="Karte nach unten verschieben" title="Karte nach unten verschieben" ${index===total-1?'disabled':''}>↓</button><button data-edit-card="${esc(card.id)}" aria-label="Karte bearbeiten" title="Karte bearbeiten">✎</button><button data-delete-card="${esc(card.id)}" aria-label="Karte löschen" title="Karte löschen">×</button></div></div>`}).join('')}</div>${!page.total?'<p class="section-note">Keine passenden Karten. Versuche einen anderen Suchbegriff.</p>':''}${page.cards.length<page.total?'<button type="button" class="quiet-button card-list-more" id="card-list-more">Weitere 100 Karten anzeigen</button>':''}`;
+    return `${page.total?'<div class="card-list-columns" aria-hidden="true"><span>Vorderseite</span><span>Rückseite</span><span></span></div>':''}<div class="card-list">${page.cards.map(card=>{const index=positions.get(card.id),progress=window.WortwerkModel.getCardProgress(card),label=progress.state==='secure'?'Sicher':progress.state==='practice'?'Zu üben':'Neu';return `<div class="flash-row"><div class="term">${cardSideMarkup(card,'front')}<small class="flash-progress">${label} · ${progress.attempts} ${progress.attempts===1?'Versuch':'Versuche'}</small></div><div class="definition">${cardSideMarkup(card,'back')}</div><div class="row-actions"><button data-move-card="${esc(card.id)}" data-direction="-1" aria-label="Karte nach oben verschieben" title="Karte nach oben verschieben" ${index===0?'disabled':''}>↑</button><button data-move-card="${esc(card.id)}" data-direction="1" aria-label="Karte nach unten verschieben" title="Karte nach unten verschieben" ${index===total-1?'disabled':''}>↓</button><button data-edit-card="${esc(card.id)}" aria-label="Karte bearbeiten" title="Karte bearbeiten">✎</button><button data-delete-card="${esc(card.id)}" aria-label="Karte löschen" title="Karte löschen">×</button></div></div>`}).join('')}</div>${!page.total?'<p class="section-note">Keine passenden Karten. Versuche einen anderen Suchbegriff.</p>':''}${page.cards.length<page.total?'<button type="button" class="quiet-button card-list-more" id="card-list-more">Weitere 100 Karten anzeigen</button>':''}`;
   }
   function bindCardList(){
     const search=$('#card-search');if(search)search.oninput=()=>{cardListQuery=search.value;cardListLimit=100;refreshCardRows()};
@@ -554,7 +598,7 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
     document.querySelectorAll('[data-edit-card]').forEach(button=>button.onclick=()=>editCard(button.dataset.editCard));document.querySelectorAll('[data-delete-card]').forEach(button=>button.onclick=()=>deleteCard(button.dataset.deleteCard));
     $('#card-list-more')?.addEventListener('click',()=>{cardListLimit+=100;refreshCardRows()});
   }
-  function refreshCardRows(){const cards=setCards(activeSet),page=cardListPage(cards,cardListQuery,cardListLimit);$('#card-list-results').innerHTML=cardRows(page,new Map(cards.map((card,index)=>[card.id,index])),cards.length);$('.card-list-count').textContent=`${page.cards.length} von ${page.total} ${cardListQuery?'Treffern':'Karten'}`;bindCardList()}
+  function refreshCardRows(){const cards=setCards(activeSet),page=cardListPage(cards,cardListQuery,cardListLimit);$('#card-list-results').innerHTML=cardRows(page,new Map(cards.map((card,index)=>[card.id,index])),cards.length);$('.card-list-count').textContent=`${page.cards.length} von ${page.total} ${cardListQuery?(page.total===1?'Treffer':'Treffern'):(page.total===1?'Karte':'Karten')}`;bindCardList()}
   function openEntity(type){formContext={type};fillForm(type);$('#form-dialog').showModal()}
   function editEntity(type,key){formContext={type,key};fillForm(type, type==='subject'?subject(key):type==='folder'?folder(key):setById(key));$('#form-dialog').showModal()}
   function fillForm(type,entity){$('#form-dialog').classList.toggle('has-set-design',type==='set');$('#form-save-error').hidden=true;$('#form-save-error').textContent='';const title=entity?`Bearbeite ${{subject:'Fach',folder:'Ordner',set:'Lernstapel',card:'Lernkarte'}[type]}`:({subject:'Fach anlegen',folder:'Ordner anlegen',set:'Lernstapel erstellen',card:'Lernkarte erstellen'})[type];$('#form-title').textContent=title;$('#form-eyebrow').textContent=entity?'BEARBEITEN':'NEU IN DEINER BIBLIOTHEK';$('#form-submit').textContent=entity?'Speichern':'Erstellen';let fields='';const input=(name,label,value='',placeholder='',required=true)=>`<label class="field-label" for="f-${name}">${label}</label><input id="f-${name}" name="${name}" value="${esc(value)}" placeholder="${esc(placeholder)}" maxlength="100" ${required?'required':''}>`;
@@ -735,6 +779,7 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
   function openMissedSetCreation(){if(!session||session.missedSetPending)return;const cards=getUncopiedMissedCards();if(!cards.length){toast('Bewerte zuerst Karten als „Nicht gewusst“.');return}const originalSet=setById(session.setId);session.missedSetPending=true;formContext={type:'set',defaultSubjectId:originalSet?.subjectId||activeSubject||data.subjects[0]?.id||'',defaultFolderId:originalSet?.folderId||null,copyCards:cards.slice(),sourceSessionId:session.id};fillForm('set');$('#form-submit').textContent='Lernstapel erstellen';$('#form-dialog').showModal();$('#f-name').focus();updateMissedSetActions()}
   function resetSlotOrientation(slotObj){
     if(!slotObj)return;
+    slotObj.button.setAttribute('aria-pressed','false');
     slotObj.inner.classList.add('no-transition');
     slotObj.inner.classList.remove('flipped');
     void slotObj.inner.offsetWidth;
@@ -794,7 +839,11 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
     $('#answer-no').disabled=false;
     $('#answer-yes').disabled=false;
     $('#study-prev').disabled=session.historyIndex<=0;
-    $('#study-next').disabled=!hasNext;
+    const canFinish=!hasNext&&window.WortwerkModel.getStudyResults(session).every(result=>result!==null);
+    $('#study-next').disabled=!hasNext&&!canFinish;
+    $('#study-next').setAttribute('aria-label',canFinish?'Lernrunde abschliessen':'Nächste Karte');
+    $('#study-next').title=canFinish?'Lernrunde abschliessen':'Nächste Karte';
+    $('#study-next .study-step-label').textContent=canFinish?'Abschliessen':'Weiter';
   }
   function flip(){
     if(!session||session.transitioning||!$('#study-complete').hidden)return;
@@ -898,7 +947,7 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
       }
     }
   }
-  function finishStudy(){if(!session)return;const results=window.WortwerkModel.getStudyResults(session);if(!session.completionRecorded)completeSession({id:session.id,setId:session.setId,startedAt:session.startedAt,cardIds:session.cards.map(card=>card.id),results});const {known,missed,unrated,percentage}=window.WortwerkModel.summarizeResults(results);const evaluated=known+missed,circumference=2*Math.PI*42,knownLength=circumference*(evaluated?known/evaluated:0),missedLength=circumference*(evaluated?missed/evaluated:0);$('#study-progress-bar').style.width='100%';$('#study-progress-track').setAttribute('aria-valuenow',String(session.cards.length));$('#complete-copy').textContent=`${evaluated} von ${session.cards.length} Karten bewertet`;$('#score-value').textContent=`${percentage}%`;$('#score-ring-known').style.strokeDasharray=`${knownLength} ${circumference-knownLength}`;$('#score-ring-missed').style.strokeDasharray=`${missedLength} ${circumference-missedLength}`;$('#score-ring-missed').style.strokeDashoffset=String(-knownLength);$('#result-chart').setAttribute('aria-label',`${percentage} Prozent richtig: ${known} gewusst und ${missed} noch zu üben`);$('#result-known').textContent=String(known);$('#result-missed').textContent=String(missed);$('#result-unrated').textContent=String(unrated);$('#retry-missed').hidden=missed===0;$('#study-complete').hidden=false;updateMissedSetActions()}
+  function finishStudy(){if(!session)return;const results=window.WortwerkModel.getStudyResults(session);if(!session.completionRecorded)completeSession({id:session.id,setId:session.setId,startedAt:session.startedAt,cardIds:session.cards.map(card=>card.id),results});const {known,missed,unrated,percentage}=window.WortwerkModel.summarizeResults(results);const evaluated=known+missed,circumference=2*Math.PI*42,knownLength=circumference*(evaluated?known/evaluated:0),missedLength=circumference*(evaluated?missed/evaluated:0);$('#study-progress-bar').style.width='100%';$('#study-progress-track').setAttribute('aria-valuenow',String(session.cards.length));$('#complete-copy').textContent=`${evaluated} von ${session.cards.length} ${session.cards.length===1?'Karte':'Karten'} bewertet`;$('#score-value').textContent=`${percentage}%`;$('#score-ring-known').style.strokeDasharray=`${knownLength} ${circumference-knownLength}`;$('#score-ring-missed').style.strokeDasharray=`${missedLength} ${circumference-missedLength}`;$('#score-ring-missed').style.strokeDashoffset=String(-knownLength);$('#result-chart').setAttribute('aria-label',`${percentage} Prozent richtig: ${known} gewusst und ${missed} noch zu üben`);$('#result-known').textContent=String(known);$('#result-missed').textContent=String(missed);$('#result-unrated').textContent=String(unrated);$('#retry-missed').hidden=missed===0;$('#study-complete').hidden=false;updateMissedSetActions()}
   function retryMissed(){if(!session)return;const cards=session.cards.filter(card=>window.WortwerkModel.getStudyResult(session,card.id)===false);if(!cards.length)return;const retryState=window.WortwerkModel.createStudySession(cards);session={...retryState,id:id(),setId:session.setId,startedAt:new Date().toISOString(),flipped:false,missedCardIdsCopied:new Set(),missedSetPending:false};activeSlotIndex=0;saveSessionProgress();$('#study-title').textContent=`Wiederholung · ${setById(session.setId)?.name||'Lernsession'}`;$('#study-complete').hidden=true;$('#shuffle-toggle').setAttribute('aria-pressed','false');renderStudyCard()}
   const studyDialog=$('#study-dialog');
   const settingsDialog=$('#settings-dialog');
@@ -916,11 +965,11 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
   $('#settings-done').onclick=()=>settingsDialog.close();
   function syncFullscreenButton(){const active=document.fullscreenElement===studyDialog||studyDialog.classList.contains('is-fullscreen'),button=$('#study-expand');button.setAttribute('aria-pressed',String(active));button.setAttribute('aria-label',active?'Vollbild verlassen':'Lernmodus im Vollbild öffnen');button.title=active?'Vollbild verlassen':'Vollbild';$('#study-expand-label').textContent=active?'Fenster':'Vollbild'}
   async function toggleStudyFullscreen(){if(document.fullscreenElement===studyDialog||studyDialog.classList.contains('is-fullscreen')){studyDialog.classList.remove('is-fullscreen');if(document.fullscreenElement===studyDialog){try{await document.exitFullscreen()}catch(error){console.warn('Vollbildmodus konnte nicht beendet werden.',error)}}syncFullscreenButton();return}try{if(studyDialog.requestFullscreen)await studyDialog.requestFullscreen();else studyDialog.classList.add('is-fullscreen')}catch(error){studyDialog.classList.add('is-fullscreen')}syncFullscreenButton()}
-  function endStudy(){const setId=session?.setId;clearActiveStudyTransition();if(document.fullscreenElement===studyDialog)document.exitFullscreen().catch(()=>{});studyDialog.classList.remove('is-fullscreen');studyDialog.close();session=null;cardThemes.applyTheme(activeCardThemeId);syncFullscreenButton();if(setId){const label=studyActionLabel(setId);if(activeSet===setId){const button=$('#start-study');if(button)button.textContent=label}document.querySelectorAll('[data-quick-study]').forEach(button=>{if(button.dataset.quickStudy===setId)button.textContent=label})}}
+  function endStudy(){const setId=session?.setId;clearActiveStudyTransition();if(document.fullscreenElement===studyDialog)document.exitFullscreen().catch(()=>{});studyDialog.classList.remove('is-fullscreen');studyDialog.close();session=null;cardThemes.applyTheme(activeCardThemeId);syncFullscreenButton();if(setId){const label=studyActionLabel(setId);if(activeSet===setId){const button=$('#start-study');if(button)button.textContent=label}document.querySelectorAll('[data-quick-study]').forEach(button=>{if(button.dataset.quickStudy===setId)button.textContent=label});render()}}
   studyDialog.addEventListener('fullscreenchange',syncFullscreenButton);
   studyDialog.addEventListener('cancel',event=>{event.preventDefault();endStudy()});
   $('#study-expand').onclick=toggleStudyFullscreen;
-  $('#study-card-0').onclick=flip;$('#study-card-1').onclick=flip;$('#answer-no').onclick=()=>scoreCard(false);$('#answer-yes').onclick=()=>scoreCard(true);$('#study-prev').onclick=()=>moveStudy(-1);$('#study-next').onclick=nextStudyCard;$('#study-close').onclick=endStudy;$('#finish-study').onclick=()=>{endStudy();render()};$('#retry-missed').onclick=retryMissed;$('#create-missed-set').onclick=openMissedSetCreation;$('#create-missed-set-complete').onclick=openMissedSetCreation;$('#study-manage').onclick=()=>{endStudy();render()};$('#shuffle-toggle').onclick=()=>{if(!session||session.transitioning||!$('#study-complete').hidden)return;const shuffled=window.WortwerkModel.shuffleStudyCards(session);if(!shuffled){toast('Zum Mischen brauchst du mindestens zwei Karten.');return}session.flipped=false;$('#shuffle-toggle').setAttribute('aria-pressed','true');saveSessionProgress();studyDialog.classList.add('is-instant-navigation');activeSlotIndex=1-activeSlotIndex;renderStudyCard();void studyDialog.offsetWidth;studyDialog.classList.remove('is-instant-navigation');toast('Alle Karten neu gemischt. Bewertungen bleiben erhalten.')};
+  $('#study-card-0').onclick=flip;$('#study-card-1').onclick=flip;$('#answer-no').onclick=()=>scoreCard(false);$('#answer-yes').onclick=()=>scoreCard(true);$('#study-prev').onclick=()=>moveStudy(-1);$('#study-next').onclick=nextStudyCard;$('#study-close').onclick=endStudy;$('#finish-study').onclick=endStudy;$('#retry-missed').onclick=retryMissed;$('#create-missed-set').onclick=openMissedSetCreation;$('#create-missed-set-complete').onclick=openMissedSetCreation;$('#study-manage').onclick=endStudy;$('#shuffle-toggle').onclick=()=>{if(!session||session.transitioning||!$('#study-complete').hidden)return;const shuffled=window.WortwerkModel.shuffleStudyCards(session);if(!shuffled){toast('Zum Mischen brauchst du mindestens zwei Karten.');return}session.flipped=false;$('#shuffle-toggle').setAttribute('aria-pressed','true');saveSessionProgress();studyDialog.classList.add('is-instant-navigation');activeSlotIndex=1-activeSlotIndex;renderStudyCard();void studyDialog.offsetWidth;studyDialog.classList.remove('is-instant-navigation');toast('Alle Karten neu gemischt. Bewertungen bleiben erhalten.')};
   document.addEventListener('keydown',event=>{
     const action=studyKeyboardAction(event,{
       open:studyDialog.open,
@@ -947,7 +996,7 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
   window.addEventListener('online',()=>{if(saveFailed&&!entitySaving&&!librarySortSaving&&!recoveryAwaitingChoice)save().catch(()=>{})});
   window.addEventListener('beforeunload',event=>{if(unsavedChanges){event.preventDefault();event.returnValue=''}});
   let libraryLoadVersion=0;
-  window.WortwerkResetWorkspace=()=>{libraryLoadVersion++;window.WortwerkRepository.resetLibraryOwner?.();if(session)endStudy();clearOrganisationPointer();clearSortPointer();document.querySelectorAll('dialog[open]').forEach(dialog=>dialog.close());data=initial();activeSubject=null;activeFolder=null;activeSet=null;view='library';expandedSidebarSubjects.clear();cardListSetId=null;formContext=null;librarySortSaving=false;entitySaving=false;$('#entity-form').inert=false;recoveryAwaitingChoice=false;$('#recovery-notice')?.remove();unsavedChanges=false;saveFailed=false;showSaveStatus('');closeNavigation();$('#content').innerHTML=''};
+  window.WortwerkResetWorkspace=()=>{libraryLoadVersion++;window.WortwerkRepository.resetLibraryOwner?.();if(session)endStudy();clearOrganisationPointer();clearSortPointer();document.querySelectorAll('dialog[open]').forEach(dialog=>dialog.close());data=initial();activeSubject=null;activeFolder=null;activeSet=null;view='library';expandedSidebarSubjects.clear();cardListSetId=null;librarySearchScope='';librarySearchQuery='';librarySearchLimit=100;formContext=null;librarySortSaving=false;entitySaving=false;$('#entity-form').inert=false;recoveryAwaitingChoice=false;$('#recovery-notice')?.remove();unsavedChanges=false;saveFailed=false;showSaveStatus('');closeNavigation();$('#content').innerHTML=''};
 
   function offerPendingRecovery(){
     $('#recovery-notice')?.remove();

@@ -228,6 +228,22 @@ const legacyResume = createStudySession(navigationCards, { cardIds: navigationCa
 assert.equal(legacyResume.currentCardId, 'nav-3', 'legacy saved sessions migrate to stable current IDs');
 assert.deepEqual(getStudyResults(legacyResume), [true, false, null, null, null], 'legacy positional results migrate to card IDs');
 
+const subsetResume = createStudySession(navigationCards, {
+  cardIds: ['nav-1'], results: [false], index: 0,
+  resultsByCardId: { 'nav-1': false, 'nav-2': true },
+  historyCardIds: ['nav-1', 'nav-2'], historyIndex: 1, currentCardId: 'nav-2',
+  shuffleRemainingCardIds: ['nav-2']
+});
+assert.deepEqual(subsetResume.cards.map(card => card.id), ['nav-1'], 'a resumed retry remains limited to its saved subset');
+assert.equal(getStudyCard(subsetResume)?.id, 'nav-1', 'stale history outside the retry subset cannot restore an invisible active card');
+assert.deepEqual(subsetResume.historyCardIds, ['nav-1']);
+assert.deepEqual(Object.keys(subsetResume.resultsByCardId), ['nav-1'], 'unrelated saved ratings are not pulled into a retry');
+assert.equal(getStudyResult(subsetResume), false);
+assert.equal(getNextStudyCardId(subsetResume), null);
+const incompleteLegacyResume = createStudySession(navigationCards, { results: [true], index: 0 });
+assert.equal(getStudyCard(incompleteLegacyResume)?.id, 'nav-1', 'incomplete legacy state safely opens a visible card');
+assert.ok(getStudyResults(incompleteLegacyResume).every(result => result === null), 'positional answers without saved card IDs are not assigned to arbitrary cards');
+
 const rows = Array.from({ length: 50000 }, (_, index) => ({ front: `Begriff ${index}`, back: `Definition ${index}` }));
 const created = createImportedCards(rows, {
   setId: 'set-1', position: 7, timestamp: '2026-10-05T12:00:00.000Z', createId: (() => { let next = 0; return () => `card-${next++}`; })()

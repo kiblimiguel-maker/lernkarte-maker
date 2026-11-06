@@ -1,5 +1,7 @@
 # Qualitätsprüfung Lernkarten Maker
 
+Die anschliessende Produktüberarbeitung vom 6. November 2026 ist in [PRODUCT-QUALITY-REVIEW.md](PRODUCT-QUALITY-REVIEW.md) dokumentiert. Dieser Bericht hält die frühere Prüfung fest.
+
 Stand: 5. November 2026. Ausgangsstand: `a0d5459`.
 
 ## Umfang und Architektur

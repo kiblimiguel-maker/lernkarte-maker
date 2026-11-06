@@ -297,20 +297,21 @@
     const byId = new Map(records(cards).filter(card => typeof card.id === 'string').map(card => [card.id, card]));
     const savedIds = Array.isArray(saved?.cardIds) ? [...new Set(saved.cardIds.filter(id => byId.has(id)))] : [];
     const cardIds = savedIds.length ? savedIds : [...byId.keys()];
+    const validIds = new Set(cardIds);
     const orderedCards = cardIds.map(id => byId.get(id));
     const resultsByCardId = Object.create(null);
     for (const [cardId, result] of Object.entries(saved?.resultsByCardId || {})) {
-      if (byId.has(cardId) && (result === null || typeof result === 'boolean')) resultsByCardId[cardId] = result;
+      if (validIds.has(cardId) && (result === null || typeof result === 'boolean')) resultsByCardId[cardId] = result;
     }
-    if (Array.isArray(saved?.results)) saved.cardIds.forEach((cardId, index) => {
-      if (byId.has(cardId) && resultsByCardId[cardId] === undefined && (saved.results[index] === null || typeof saved.results[index] === 'boolean')) resultsByCardId[cardId] = saved.results[index];
+    if (Array.isArray(saved?.results) && Array.isArray(saved?.cardIds)) saved.cardIds.forEach((cardId, index) => {
+      if (validIds.has(cardId) && resultsByCardId[cardId] === undefined && (saved.results[index] === null || typeof saved.results[index] === 'boolean')) resultsByCardId[cardId] = saved.results[index];
     });
     for (const cardId of cardIds) if (resultsByCardId[cardId] === undefined) resultsByCardId[cardId] = null;
 
     const fallbackIndex = Number.isInteger(saved?.index) ? Math.max(0, Math.min(saved.index, cardIds.length - 1)) : 0;
     const fallbackCurrent = cardIds[fallbackIndex];
-    const savedHistory = Array.isArray(saved?.historyCardIds) ? saved.historyCardIds.filter(id => byId.has(id)) : [];
-    const savedCurrent = typeof saved?.currentCardId === 'string' && byId.has(saved.currentCardId) ? saved.currentCardId : fallbackCurrent;
+    const savedHistory = Array.isArray(saved?.historyCardIds) ? saved.historyCardIds.filter(id => validIds.has(id)) : [];
+    const savedCurrent = typeof saved?.currentCardId === 'string' && validIds.has(saved.currentCardId) ? saved.currentCardId : fallbackCurrent;
     let historyCardIds = savedHistory.length ? savedHistory : cardIds.slice(0, fallbackIndex + 1);
     let historyIndex = Number.isInteger(saved?.historyIndex) ? Math.max(0, Math.min(saved.historyIndex, historyCardIds.length - 1)) : historyCardIds.length - 1;
     if (!savedHistory.length) {
@@ -330,7 +331,6 @@
       }
     }
     const currentCardId = historyCardIds[historyIndex];
-    const validIds = new Set(cardIds);
     return {
       id: saved?.id,
       setId: saved?.setId,
