@@ -903,7 +903,7 @@ button { touch-action: manipulation; }
 .sidebar-section-label { margin: 22px 0 7px; padding: 16px 12px 0; border-top: 1px solid var(--line); color: var(--quiet-text); font-size: 10px; font-weight: 650; letter-spacing: 1px; }
 .sidebar-subjects { min-height: 0; flex: 0 1 auto; overflow: auto; overscroll-behavior: contain; scrollbar-width: thin; }
 .sidebar-subjects button>span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sidebar-dot { margin: 0 6px; flex: none; border-radius: 50%; background: var(--dot); }
+.sidebar-dot { margin: 0 6px; flex: none; border-radius: 50%; background: var(--subject-accent); }
 .sidebar-empty { padding: 0 13px; color: var(--muted); font-size: 12px; }
 .sidebar-footer { flex: none; margin-top: auto; padding-top: 11px; border-top: 1px solid var(--line); }
 .topbar { position: sticky; z-index: 10; display: flex; align-items: center; gap: 14px; width: 100%; max-width: none; min-height: 64px; padding: 10px max(var(--workspace-gutter),calc((100% - 1280px) / 2 + var(--workspace-gutter))); border-bottom: 1px solid var(--line); background: var(--background); top: 0; }
@@ -1188,25 +1188,47 @@ summary::-webkit-details-marker { display: none; }
 @media(max-width:480px) { .set-card { padding: 20px; } .appearance-field .color-palette { gap: 9px; } .folder-card { gap: 11px; } .folder-card .folder-icon { width: 48px; height: 43px; } .item-menu summary { width: 40px; height: 40px; } .custom-colour { gap: 8px; } .set-theme-grid { grid-template-columns: minmax(0,1fr); } .set-theme-inherit .set-theme-copy { display: block; } .set-theme-inherit .card-theme-preview { margin-top: 12px; } .set-design-fields .card-theme-preview-face { min-height: 98px; } }
 @media(prefers-reduced-motion:reduce) { .set-cover span, .sidebar-subject-toggle > span, .sidebar-subject-toggle > svg, .set-theme-option { transition: none; } }
 
-/* The chosen category colour tints the tile, while the text stays neutral. */
+/* Keep the chosen hue, and limit its intensity separately for each surface. */
+:is(.subject-card, .subject-heading:not(.library-folder-heading), .sidebar-dot) {
+  --subject-accent: color-mix(in oklab, var(--dot) 46%, var(--muted));
+  --subject-accent-lightness: .55;
+}
 .subject-card {
-  --subject-tint: 18%;
-  --subject-hover-tint: 23%;
-  --subject-detail: color-mix(in srgb, var(--text) 84%, var(--muted));
+  --subject-surface: color-mix(in oklab, var(--dot) var(--subject-fallback-tint), var(--surface));
+  --subject-fallback-tint: 16%;
+  --subject-lightness: .935;
+  --subject-chroma-limit: .032;
+  --subject-detail: color-mix(in srgb, var(--text) 66%, var(--muted));
   min-height: 142px;
   padding: 17px 18px;
-  background: color-mix(in oklab, var(--dot) var(--subject-tint), var(--surface));
-  border-color: color-mix(in oklab, var(--dot) 35%, var(--line));
+  background: var(--subject-surface);
+  border-color: color-mix(in oklab, var(--subject-accent) 22%, var(--subject-surface));
 }
-:root[data-appearance="dark"] .subject-card { --subject-tint: 32%; --subject-hover-tint: 35%; }
+:root[data-appearance="dark"] :is(.subject-card, .subject-heading:not(.library-folder-heading), .sidebar-dot) {
+  --subject-accent-lightness: .71;
+}
+:root[data-appearance="dark"] .subject-card {
+  --subject-fallback-tint: 22%;
+  --subject-lightness: .335;
+  --subject-chroma-limit: .055;
+}
+@supports (color: oklch(from #000 l c h)) {
+  :is(.subject-card, .subject-heading:not(.library-folder-heading), .sidebar-dot) {
+    --subject-accent: oklch(from var(--dot) var(--subject-accent-lightness) min(calc(c * .72), .105) h);
+  }
+  .subject-card {
+    --subject-surface: oklch(from var(--dot) var(--subject-lightness) min(calc(c * .56), var(--subject-chroma-limit)) h);
+  }
+}
 .subject-card:hover {
-  background: color-mix(in oklab, var(--dot) var(--subject-hover-tint), var(--surface));
-  border-color: color-mix(in oklab, var(--dot) 48%, var(--line-strong));
+  background: color-mix(in oklab, var(--subject-surface), var(--text) 4%);
+  border-color: color-mix(in oklab, var(--subject-accent) 40%, var(--subject-surface));
 }
 .subject-card p, .subject-card .sort-position, .subject-card .card-arrow { color: var(--subject-detail); }
 .subject-card .card-arrow { width: 24px; height: 24px; display: grid; place-items: center; font-size: 17px; }
-.subject-card .subject-icon, .subject-heading .subject-icon { border: 1px solid color-mix(in srgb,var(--dot) 28%,var(--line)); border-radius: 9px; background: color-mix(in srgb,var(--dot) 16%,var(--surface-raised)); box-shadow: none; }
-.subject-card .subject-icon { width: 42px; height: 42px; border-color: color-mix(in srgb, var(--text) 14%, transparent); background: color-mix(in srgb, var(--text) 7%, transparent); }
+.subject-card .subject-icon, .subject-heading .subject-icon { border-radius: 9px; box-shadow: none; }
+.subject-card .subject-icon { width: 42px; height: 42px; border-color: color-mix(in oklab, var(--subject-accent) 28%, var(--subject-surface)); background: color-mix(in oklab, var(--subject-accent) 12%, var(--subject-surface)); }
+.subject-heading .subject-icon { border-color: color-mix(in srgb, var(--subject-accent, var(--dot)) 28%, var(--line)); background: color-mix(in srgb, var(--subject-accent, var(--dot)) 16%, var(--surface-raised)); }
 .subject-icon .subject-flag { width: 34px; height: 25px; border-radius: 5px; box-shadow: 0 2px 4px #0002; }
 .subject-glyph { display: block; font-size: 27px; line-height: 1; }
 .subject-heading .subject-icon { width: 50px; height: 50px; }
