@@ -23,6 +23,7 @@ const bootScreen = document.querySelector('#boot-screen');
 const appShell = document.querySelector('#app-shell');
 const googleButton = document.querySelector('#google-sign-in');
 const authError = document.querySelector('#auth-error');
+const authRetry = document.querySelector('#auth-retry');
 const authLoading = document.querySelector('#auth-loading');
 const accountEmail = document.querySelector('#account-email');
 const signOutButton = document.querySelector('#sign-out');
@@ -30,10 +31,28 @@ const signOutButton = document.querySelector('#sign-out');
 let authEventObserved = false;
 let signingIn = false;
 let signingOut = false;
+let reloadingApp = false;
+
+// An open tab can still request chunks from the build preceding a deployment.
+// Reload at most once per build, and leave a manual action if that fails.
+window.addEventListener('vite:preloadError', () => {
+  if (reloadingApp) return;
+  const key = 'lernkarten-app-reload-build';
+  try {
+    if (sessionStorage.getItem(key) === import.meta.url) return;
+    sessionStorage.setItem(key, import.meta.url);
+  } catch {
+    return;
+  }
+  reloadingApp = true;
+  window.location.reload();
+});
+authRetry.addEventListener('click', () => window.location.reload());
 
 function setError(message = '') {
   authError.textContent = message;
   authError.hidden = !message;
+  authRetry.hidden = true;
 }
 
 function readOAuthError() {
@@ -105,10 +124,10 @@ const lifecycle = createAuthLifecycle({
   showSignedOut,
   resetWorkspace: () => window.WortwerkResetWorkspace?.(),
   onError(error) {
-    bootScreen.hidden = true;
-    appShell.hidden = true;
-    showSignedOut('Die Lernkarten-App konnte nicht geladen werden. Bitte lade die Seite erneut.');
     console.error(error);
+    if (reloadingApp) return;
+    showSignedOut('Die Lernkarten-App konnte nicht geladen werden. Lade die App neu, um es erneut zu versuchen.');
+    authRetry.hidden = false;
   }
 });
 

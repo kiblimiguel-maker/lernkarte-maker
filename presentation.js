@@ -49,18 +49,7 @@
     return (luminance + .05) / .05 >= 1.05 / (luminance + .05) ? '#000000' : '#FFFFFF';
   }
 
-  // Give large colour surfaces a quiet, solid finish without changing the
-  // user's saved colour. Small markers retain the original colour.
-  function subjectSurface(value) {
-    const hex = /^#[0-9a-f]{6}$/i.test(value) ? value : '#3378F6';
-    const base = [17, 20, 24];
-    return '#' + [1, 3, 5].map((offset, index) =>
-      Math.round(parseInt(hex.slice(offset, offset + 2), 16) * .8 + base[index] * .2)
-        .toString(16).padStart(2, '0')
-    ).join('').toUpperCase();
-  }
-
-  const api = { genderSegments, colourInk, subjectSurface };
+  const api = { genderSegments, colourInk };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (typeof globalThis !== 'undefined') globalThis.WortwerkPresentation = api;
 })();

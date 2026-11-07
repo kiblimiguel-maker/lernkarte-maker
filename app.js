@@ -298,6 +298,15 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
     const flag=icon==='🇫🇷'?'<svg class="subject-flag" viewBox="0 0 36 26" aria-hidden="true"><path fill="#0055A4" d="M0 0h12v26H0z"/><path fill="#FFF" d="M12 0h12v26H12z"/><path fill="#EF4135" d="M24 0h12v26H24z"/></svg>':`<span class="subject-glyph">${esc(icon)}</span>`;
     return `<span class="subject-icon" aria-hidden="true">${flag}</span>`;
   }
+  function subjectCardStyle(value,fallback){
+    const color=safeColor(value,fallback);
+    return `--dot:${color};--subject-ink:${window.WortwerkPresentation.colourInk(color)}`;
+  }
+  function subjectCardContents(item,fallbackIcon){
+    const sets=item.id?subjectSets(item.id):[];
+    const count=sets.reduce((sum,set)=>sum+(cardCounts.get(set.id)||0),0);
+    return `<div class="subject-card-top">${subjectSymbol(item,fallbackIcon)}<span class="card-arrow" aria-hidden="true">→</span></div><h2>${esc(item.name)}</h2><p>${sets.length} Lernstapel · ${count} ${count===1?'Karte':'Karten'}</p>`;
+  }
   function folderSymbol(){
     return '<svg viewBox="0 0 64 52" fill="none" aria-hidden="true"><path d="M4 13a6 6 0 0 1 6-6h15l6 6h23a6 6 0 0 1 6 6v25a5 5 0 0 1-5 5H9a5 5 0 0 1-5-5V13Z" fill="currentColor"/><path d="M4 20a5 5 0 0 1 5-5h46a5 5 0 0 1 5 5v24a5 5 0 0 1-5 5H9a5 5 0 0 1-5-5V20Z" fill="currentColor" stroke="white" stroke-opacity=".22"/><path d="M10 18h44" stroke="white" stroke-opacity=".28" stroke-linecap="round"/></svg>';
   }
@@ -419,15 +428,21 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
   document.addEventListener('keydown',event=>{if(event.key==='Escape'&&organisationPointer)clearOrganisationPointer()});
   window.addEventListener('blur',clearOrganisationPointer);
 
-  function appearanceFields(value){
+  function appearanceFields(value,subjectPreview=''){
     const color=safeColor(value,defaultFolderColor);
-    return `<fieldset class="appearance-field"><legend>Farbe</legend><input type="hidden" id="f-color" name="color" value="${color}"><div class="color-palette" role="group" aria-label="Abgestimmte Farben">${palette.map(([hex,name])=>`<button type="button" class="color-swatch${hex.toLowerCase()===color.toLowerCase()?' selected':''}" data-color="${hex}" aria-label="${name}" aria-pressed="${hex.toLowerCase()===color.toLowerCase()}" title="${name}" style="--swatch:${hex}"></button>`).join('')}</div><div class="custom-colour"><label for="colour-picker">Eigene Farbe</label><input type="color" id="colour-picker" value="${color}" aria-label="Eigene Farbe wählen"><label class="sr-only" for="colour-hex">Farbcode</label><input type="text" id="colour-hex" value="${color}" pattern="#[0-9a-fA-F]{6}" maxlength="7" required aria-label="Farbcode" spellcheck="false" autocomplete="off"></div></fieldset>`;
+    const swatches=palette.map(([hex,name])=>{
+      const selected=hex.toLowerCase()===color.toLowerCase();
+      const swatchClass=subjectPreview?'subject-preset':'color-swatch';
+      return `<button type="button" class="${swatchClass}${selected?' selected':''}" data-color="${hex}" aria-label="${name}" aria-pressed="${selected}" title="${name}" style="--swatch:${hex}">${subjectPreview?`<span class="subject-preset-chip" aria-hidden="true"></span><span>${name}</span>`:''}</button>`;
+    }).join('');
+    return `<fieldset class="appearance-field${subjectPreview?' subject-appearance-field':''}"><legend>${subjectPreview?'Fachfarbe':'Farbe'}</legend><input type="hidden" id="f-color" name="color" value="${color}">${subjectPreview}<div class="color-palette" role="group" aria-label="Farbvorschläge">${swatches}</div><div class="custom-colour"><label for="colour-picker">Eigene Farbe</label><input type="color" id="colour-picker" value="${color}" aria-label="Eigene Farbe wählen"><label class="sr-only" for="colour-hex">Farbcode</label><input type="text" id="colour-hex" value="${color}" pattern="#[0-9a-fA-F]{6}" maxlength="7" required aria-label="Farbcode" spellcheck="false" autocomplete="off"></div></fieldset>`;
   }
   function bindColourPicker(){
-    const input=$('#f-color'),picker=$('#colour-picker'),hex=$('#colour-hex');
+    const input=$('#f-color'),picker=$('#colour-picker'),hex=$('#colour-hex'),preview=$('#subject-card-preview');
     const choose=(color,fromHex=false)=>{
       if(!/^#[0-9a-f]{6}$/i.test(color))return;
       input.value=color;picker.value=color;if(!fromHex)hex.value=color.toUpperCase();
+      if(preview)preview.style.cssText=subjectCardStyle(color);
       document.querySelectorAll('[data-color]').forEach(button=>{const selected=button.dataset.color.toLowerCase()===color.toLowerCase();button.classList.toggle('selected',selected);button.setAttribute('aria-pressed',String(selected))});
     };
     document.querySelectorAll('[data-color]').forEach(button=>button.onclick=()=>choose(button.dataset.color));
@@ -520,10 +535,7 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
       $('#content').innerHTML=`<div class="page-heading"><div><h1 class="page-title">Zuletzt gelernt</h1><p class="page-subtitle">Hier findest du deine zuletzt geöffneten Lernstapel und kannst direkt weiterlernen.</p></div></div>${recentSets.length?`<div class="set-grid">${recentSets.map(setCard).join('')}</div>`:empty('Noch keine Lernrunde','Öffne einen Lernstapel und starte deine erste Runde. Deine letzten Stapel erscheinen danach hier.','◷')}`;
       bindSetCards();return;
     }
-    const subjectCards=data.subjects.map((item,index)=>{
-      const sets=subjectSets(item.id),cards=sets.reduce((sum,set)=>sum+(cardCounts.get(set.id)||0),0);
-      return `<article class="subject-card" ${sortAttributes('subject',item)} tabindex="0" data-open-subject="${esc(item.id)}" style="${subjectAppearance(item,colors[index%colors.length])}"><div class="subject-card-top">${subjectSymbol(item,icons[index%icons.length])}<span class="card-arrow" aria-hidden="true">→</span></div><h2>${esc(item.name)}</h2><p>${sets.length} Lernstapel · ${cards} ${cards===1?'Karte':'Karten'}</p>${sortControls('subject',item)}</article>`;
-    }).join('');
+    const subjectCards=data.subjects.map((item,index)=>`<article class="subject-card" ${sortAttributes('subject',item)} tabindex="0" data-open-subject="${esc(item.id)}" style="${subjectCardStyle(item.color,colors[index%colors.length])}">${subjectCardContents(item,icons[index%icons.length])}${sortControls('subject',item)}</article>`).join('');
     $('#content').innerHTML=`<div class="page-heading library-home-heading"><div><h1 class="page-title">Bibliothek</h1><p class="page-subtitle">Deine Fächer, Ordner und Lernstapel.</p></div><div class="page-primary-actions"><button class="quiet-button" id="home-add-subject">＋ Fach anlegen</button><button class="primary-button" id="home-create-set">＋ Lernstapel erstellen</button></div></div><section class="library-section"><div class="section-head"><h2>Fächer <span class="count-label">${data.subjects.length}</span></h2>${data.subjects.length>1?sortingButton():''}</div>${data.subjects.length?`<div class="subject-grid">${subjectCards}</div>`:empty('Dein Lernraum ist noch leer','Lege zuerst ein Fach an. Darin kannst du Lernstapel und Ordner sammeln.','＋')}</section>${librarySorting?'<p class="sort-instructions">Ziehe am Griff oder verwende die Pfeile. Die Reihenfolge wird automatisch gespeichert.</p>':''}`;
     $('#home-add-subject')?.addEventListener('click',()=>openEntity('subject'));
     $('#home-create-set')?.addEventListener('click',()=>openEntity('set'));
@@ -619,10 +631,13 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
   function refreshCardRows(){const cards=setCards(activeSet),page=cardListPage(cards,cardListQuery,cardListLimit);$('#card-list-results').innerHTML=cardRows(page,new Map(cards.map((card,index)=>[card.id,index])),cards.length);$('.card-list-count').textContent=`${page.cards.length} von ${page.total} ${cardListQuery?(page.total===1?'Treffer':'Treffern'):(page.total===1?'Karte':'Karten')}`;bindCardList()}
   function openEntity(type){formContext={type};fillForm(type);$('#form-dialog').showModal()}
   function editEntity(type,key){formContext={type,key};fillForm(type, type==='subject'?subject(key):type==='folder'?folder(key):setById(key));$('#form-dialog').showModal()}
-  function fillForm(type,entity){$('#form-dialog').classList.toggle('has-set-design',type==='set');$('#form-save-error').hidden=true;$('#form-save-error').textContent='';const title=entity?`Bearbeite ${{subject:'Fach',folder:'Ordner',set:'Lernstapel',card:'Lernkarte'}[type]}`:({subject:'Fach anlegen',folder:'Ordner anlegen',set:'Lernstapel erstellen',card:'Lernkarte erstellen'})[type];$('#form-title').textContent=title;$('#form-eyebrow').textContent=entity?'BEARBEITEN':'NEU IN DEINER BIBLIOTHEK';$('#form-submit').textContent=entity?'Speichern':'Erstellen';let fields='';const input=(name,label,value='',placeholder='',required=true)=>`<label class="field-label" for="f-${name}">${label}</label><input id="f-${name}" name="${name}" value="${esc(value)}" placeholder="${esc(placeholder)}" maxlength="100" ${required?'required':''}>`;
+  function fillForm(type,entity){$('#form-dialog').classList.toggle('has-set-design',type==='set');$('#form-dialog').classList.toggle('has-subject-appearance',type==='subject');$('#form-save-error').hidden=true;$('#form-save-error').textContent='';const title=entity?`Bearbeite ${{subject:'Fach',folder:'Ordner',set:'Lernstapel',card:'Lernkarte'}[type]}`:({subject:'Fach anlegen',folder:'Ordner anlegen',set:'Lernstapel erstellen',card:'Lernkarte erstellen'})[type];$('#form-title').textContent=title;$('#form-eyebrow').textContent=entity?'BEARBEITEN':'NEU IN DEINER BIBLIOTHEK';$('#form-submit').textContent=entity?'Speichern':'Erstellen';let fields='';const input=(name,label,value='',placeholder='',required=true)=>`<label class="field-label" for="f-${name}">${label}</label><input id="f-${name}" name="${name}" value="${esc(value)}" placeholder="${esc(placeholder)}" maxlength="100" ${required?'required':''}>`;
     if(type==='subject'){
-      const selectedEmoji=entity?.emoji||'📚';
-      fields=input('name','Fachname',entity?.name,'z. B. Französisch')+`<label class="field-label" for="f-description">Beschreibung <span class="optional-label">(optional)</span></label><input id="f-description" name="description" value="${esc(entity?.description||'')}" maxlength="160" placeholder="Was möchtest du in diesem Fach lernen?">`+appearanceFields(entity?.color||colors[data.subjects.length%colors.length])+`<span class="field-label" id="emoji-label">Symbol</span><input type="hidden" id="f-emoji" name="emoji" value="${esc(selectedEmoji)}"><label class="emoji-entry-wrap"><span class="emoji-current" id="emoji-current" aria-hidden="true">${esc(selectedEmoji)}</span><input id="emoji-entry" type="text" value="${esc(selectedEmoji)}" maxlength="20" aria-label="Eigenes Emoji eingeben" autocomplete="off"></label><label class="emoji-search-label"><span class="sr-only">Emoji suchen</span><input id="emoji-search" type="search" placeholder="Emoji suchen …" autocomplete="off"></label><div class="emoji-grid" role="group" aria-labelledby="emoji-label">${emojiChoices.map(([emoji,keywords,category])=>`<button type="button" class="emoji-option ${emoji===selectedEmoji?'selected':''}" data-emoji="${esc(emoji)}" data-search="${esc((keywords+' '+category).toLocaleLowerCase('de'))}" aria-label="${esc(keywords.split(' ')[0])}" aria-pressed="${emoji===selectedEmoji}">${emoji}</button>`).join('')}</div>`;
+      const subjectIndex=entity?data.subjects.indexOf(entity):data.subjects.length;
+      const selectedEmoji=entity?.emoji||entity?.icon||(entity?icons[subjectIndex%icons.length]:'📚');
+      const color=safeColor(entity?.color,colors[subjectIndex%colors.length]);
+      const subjectPreview=`<div class="subject-colour-preview"><div class="subject-preview-label">Kachelvorschau</div><div id="subject-card-preview" class="subject-card subject-card-preview" style="${subjectCardStyle(color)}" aria-hidden="true">${subjectCardContents({id:entity?.id,name:entity?.name||'Fachname',emoji:selectedEmoji})}</div></div>`;
+      fields=input('name','Fachname',entity?.name,'z. B. Französisch')+`<label class="field-label" for="f-description">Beschreibung <span class="optional-label">(optional)</span></label><input id="f-description" name="description" value="${esc(entity?.description||'')}" maxlength="160" placeholder="Was möchtest du in diesem Fach lernen?">`+appearanceFields(color,subjectPreview)+`<span class="field-label" id="emoji-label">Symbol</span><input type="hidden" id="f-emoji" name="emoji" value="${esc(selectedEmoji)}"><label class="emoji-entry-wrap"><span class="emoji-current" id="emoji-current" aria-hidden="true">${esc(selectedEmoji)}</span><input id="emoji-entry" type="text" value="${esc(selectedEmoji)}" maxlength="20" aria-label="Eigenes Emoji eingeben" autocomplete="off"></label><label class="emoji-search-label"><span class="sr-only">Emoji suchen</span><input id="emoji-search" type="search" placeholder="Emoji suchen …" autocomplete="off"></label><div class="emoji-grid" role="group" aria-labelledby="emoji-label">${emojiChoices.map(([emoji,keywords,category])=>`<button type="button" class="emoji-option ${emoji===selectedEmoji?'selected':''}" data-emoji="${esc(emoji)}" data-search="${esc((keywords+' '+category).toLocaleLowerCase('de'))}" aria-label="${esc(keywords.split(' ')[0])}" aria-pressed="${emoji===selectedEmoji}">${emoji}</button>`).join('')}</div>`;
     }
     if(type==='folder')fields=input('name','Ordnername',entity?.name||'','z. B. Kapitel 1')+appearanceFields(entity?.color||defaultFolderColor)+`<div class="field-hint">Die Ordnerfarbe ist unabhängig vom Fach und den Designs deiner Lernstapel.</div>`;
     if(type==='set'){
@@ -639,7 +654,27 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
     }
     $('#form-fields').innerHTML=fields;if(type==='subject'||type==='folder')bindColourPicker();if(type==='subject')bindSubjectAppearance();if(type==='set'){bindSetSubject();bindSetDesign()}$('#form-submit').onclick=e=>{e.preventDefault();submitEntity()};$('#entity-form').onsubmit=e=>{e.preventDefault();submitEntity()}}
   function bindSetSubject(){const selector=$('#f-subject');if(!selector)return;selector.addEventListener('change',()=>{$('#f-folder').innerHTML=`<option value="">Ohne Ordner</option>${subjectFolders(selector.value).map(item=>`<option value="${esc(item.id)}">${esc(folderLabel(item))}</option>`).join('')}`})}
-  function bindSubjectAppearance(){const emojiInput=$('#f-emoji'),emojiEntry=$('#emoji-entry'),current=$('#emoji-current'),grid=$('.emoji-grid');const chooseEmoji=value=>{const emoji=value.trim()||'📚';emojiInput.value=emoji;current.textContent=emoji;grid.querySelectorAll('[data-emoji]').forEach(button=>{const selected=button.dataset.emoji===emoji;button.classList.toggle('selected',selected);button.setAttribute('aria-pressed',String(selected))})};emojiEntry.addEventListener('input',()=>chooseEmoji(emojiEntry.value));grid.querySelectorAll('[data-emoji]').forEach(button=>button.onclick=()=>{emojiEntry.value=button.dataset.emoji;chooseEmoji(button.dataset.emoji)});$('#emoji-search').addEventListener('input',e=>{const query=e.target.value.trim().toLocaleLowerCase('de');grid.querySelectorAll('[data-emoji]').forEach(button=>{button.hidden=!!query&&!button.dataset.search.includes(query)})})}
+  function bindSubjectAppearance(){
+    const emojiInput=$('#f-emoji'),emojiEntry=$('#emoji-entry'),current=$('#emoji-current'),grid=$('.emoji-grid');
+    const preview=$('#subject-card-preview'),name=$('#f-name');
+    name.addEventListener('input',()=>{$('h2',preview).textContent=name.value.trim()||'Fachname'});
+    const chooseEmoji=value=>{
+      const emoji=value.trim()||'📚';
+      emojiInput.value=emoji;current.textContent=emoji;
+      $('.subject-icon',preview).outerHTML=subjectSymbol({emoji});
+      grid.querySelectorAll('[data-emoji]').forEach(button=>{
+        const selected=button.dataset.emoji===emoji;
+        button.classList.toggle('selected',selected);
+        button.setAttribute('aria-pressed',String(selected));
+      });
+    };
+    emojiEntry.addEventListener('input',()=>chooseEmoji(emojiEntry.value));
+    grid.querySelectorAll('[data-emoji]').forEach(button=>button.onclick=()=>{emojiEntry.value=button.dataset.emoji;chooseEmoji(button.dataset.emoji)});
+    $('#emoji-search').addEventListener('input',e=>{
+      const query=e.target.value.trim().toLocaleLowerCase('de');
+      grid.querySelectorAll('[data-emoji]').forEach(button=>{button.hidden=!!query&&!button.dataset.search.includes(query)});
+    });
+  }
   async function submitEntity(){if(entitySaving||librarySortSaving)return;const type=formContext?.type;const form=$('#entity-form');if(!form.reportValidity())return;const awaitSave=['subject','folder'].includes(type)||(type==='set'&&!formContext.copyCards?.length),owner=data,snapshot=awaitSave?{subjects:structuredClone(data.subjects),folders:structuredClone(data.folders),sets:structuredClone(data.sets)}:null,previousLocation={activeSubject,activeFolder,activeSet};$('#form-save-error').hidden=true;const fd=new FormData(form);let successNotice=null;if(type==='subject'){const v={name:fd.get('name').trim(),description:fd.get('description').trim(),color:fd.get('color'),emoji:fd.get('emoji')||'📚'};if(!v.name){toast('Der Fachname darf nicht leer sein.');return} if(formContext.key)Object.assign(subject(formContext.key),v,{updatedAt:new Date().toISOString()});else{const timestamp=new Date().toISOString();const s={id:id(),...v,icon:v.emoji,createdAt:timestamp,updatedAt:timestamp};s.position=window.WortwerkModel.nextLibraryPosition(data,'subject',s);data.subjects.push(s);activeSubject=s.id;activeFolder=null}}
     if(type==='folder'){const name=fd.get('name').trim();if(!name){toast('Der Ordnername darf nicht leer sein.');return}if(!activeSubject||!subject(activeSubject)){toast('Wähle zuerst ein Fach für den Ordner.');return}if(formContext.key)Object.assign(folder(formContext.key),{name,color:fd.get('color'),updatedAt:new Date().toISOString()});else{const timestamp=new Date().toISOString();const created={id:id(),name,color:fd.get('color'),subjectId:activeSubject,parentId:activeFolder||null,createdAt:timestamp,updatedAt:timestamp};created.position=window.WortwerkModel.nextLibraryPosition(data,'folder',created);data.folders.push(created)}}
     if(type==='set'){
