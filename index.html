@@ -59,7 +59,18 @@
       <header class="topbar">
         <button class="icon-button sidebar-toggle" id="navigation-toggle" aria-label="Seitenleiste ausblenden" aria-controls="app-navigation" aria-expanded="false"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h16v14H4zM9 5v14"/></svg></button>
         <nav class="breadcrumbs" id="breadcrumbs" aria-label="Bibliothekspfad"><span>Bibliothek</span></nav>
-        <div class="save-status-wrap" role="status" aria-live="polite"><span class="save-status" id="save-status"></span><button type="button" class="text-button save-retry" id="save-retry" hidden>Erneut speichern</button></div><details class="account-menu"><summary aria-label="Konto öffnen"><span class="account-avatar" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="9" r="3"/><path d="M5.5 18c.7-3 3-4.5 6.5-4.5s5.8 1.5 6.5 4.5"/></svg></span><span>Konto</span><span aria-hidden="true">⌄</span></summary><div class="account-menu-panel"><span class="field-hint">ANGEMELDET ALS</span><span class="account-email" id="account-email"></span><button class="quiet-button sign-out-button" id="sign-out">Abmelden</button></div></details>
+        <div class="save-status-wrap" role="status" aria-live="polite"><span class="save-status" id="save-status"></span><button type="button" class="text-button save-retry" id="save-retry" hidden>Erneut speichern</button></div>
+        <details class="account-menu">
+          <summary aria-label="Konto">
+            <span class="account-avatar" aria-hidden="true"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.25"/><path d="M5.5 19v-1.25A3.75 3.75 0 0 1 9.25 14h5.5a3.75 3.75 0 0 1 3.75 3.75V19"/></svg></span>
+            <span class="account-label">Konto</span>
+            <svg class="account-chevron" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 6 4 4 4-4"/></svg>
+          </summary>
+          <div class="account-menu-panel">
+            <div class="account-identity"><span class="field-hint">Angemeldet als</span><span class="account-email" id="account-email"></span></div>
+            <button type="button" class="quiet-button sign-out-button" id="sign-out"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5H5v14h6m-2-7h11m-4-4 4 4-4 4"/></svg>Abmelden</button>
+          </div>
+        </details>
       </header>
       <section class="content" id="content" tabindex="-1" aria-live="polite"></section>
     </main>

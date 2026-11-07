@@ -163,7 +163,18 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
   $('#navigation-toggle').onclick=()=>{if(!mobileNavigation.matches){sidebarCollapsed=!sidebarCollapsed;$('#app-shell').classList.toggle('sidebar-collapsed',sidebarCollapsed);try{localStorage.setItem('lernkarten-sidebar-collapsed',String(sidebarCollapsed))}catch{}syncNavigation();return}$('#app-shell').classList.add('navigation-open');syncNavigation();$('#navigation-close').focus()};
   $('#navigation-scrim').onclick=closeNavigation;$('#navigation-close').onclick=closeNavigation;
   mobileNavigation.addEventListener('change',()=>{if(!mobileNavigation.matches)$('#app-shell').classList.remove('navigation-open');syncNavigation()});syncNavigation();
-  document.addEventListener('keydown',event=>{if(event.key==='Escape'){closeNavigation();document.querySelector('.account-menu')?.removeAttribute('open')}if(event.key==='Tab'&&$('#app-shell').classList.contains('navigation-open')&&mobileNavigation.matches){const controls=[...$('#app-navigation').querySelectorAll('a,button')].filter(element=>!element.disabled&&element.getClientRects().length),first=controls[0],last=controls[controls.length-1];if(event.shiftKey&&document.activeElement===first){event.preventDefault();last.focus()}else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus()}}});
+  const accountMenu=$('.account-menu');
+  document.addEventListener('keydown',event=>{
+    if(event.key==='Escape'){
+      closeNavigation();
+      if(accountMenu.open){
+        const restoreFocus=accountMenu.contains(document.activeElement);
+        accountMenu.open=false;
+        if(restoreFocus)$('summary',accountMenu).focus();
+      }
+    }
+    if(event.key==='Tab'&&$('#app-shell').classList.contains('navigation-open')&&mobileNavigation.matches){const controls=[...$('#app-navigation').querySelectorAll('a,button')].filter(element=>!element.disabled&&element.getClientRects().length),first=controls[0],last=controls[controls.length-1];if(event.shiftKey&&document.activeElement===first){event.preventDefault();last.focus()}else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus()}}
+  });
   function renderDonations(){
     const resultMarkup=donationReturn?.type==='cancelled'
       ? '<div class="donation-result is-neutral" role="status">Der Checkout wurde abgebrochen. Du kannst jederzeit ohne Spende zur App zurückkehren.</div>'
@@ -301,6 +312,7 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
     return `<details class="item-menu"><summary aria-label="Aktionen für ${esc(item.name)}" title="Aktionen">•••</summary><div class="item-menu-panel"><button data-move-item="${type}" data-item-id="${esc(item.id)}">Verschieben …</button><button data-item-edit="${type}" data-item-id="${esc(item.id)}">${type==='folder'?'Name & Farbe ändern':'Bearbeiten & Design'}</button><button class="danger-action" data-item-delete="${type}" data-item-id="${esc(item.id)}">${type==='folder'?'Ordner':'Lernstapel'} löschen</button></div></details>`;
   }
   document.addEventListener('click',event=>{
+    if(accountMenu.open&&!accountMenu.contains(event.target))accountMenu.open=false;
     const move=event.target.closest('[data-move-item]');
     if(move){event.preventDefault();event.stopPropagation();move.closest('details')?.removeAttribute('open');openMoveDialog(move.dataset.moveItem,move.dataset.itemId);return}
     const remove=event.target.closest('[data-item-delete]');
@@ -501,28 +513,10 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
     $('#library-search-more')?.addEventListener('click',()=>{librarySearchLimit+=100;refreshLibrarySearch()});
     bindSubjectCards();bindFolderCards();bindSetCards();
   }
-  function renderLibraryResume(set){
-    const progress=window.WortwerkModel.getSetProgress(data.cards.filter(card=>card.setId===set.id));
-    const location=[subject(set.subjectId)?.name, ...folderPath(set.folderId).map(item=>item.name)].filter(Boolean).join(' / ');
-    return `<section class="library-resume" aria-labelledby="resume-heading">
-      <div class="section-head"><h2 id="resume-heading">Zuletzt gelernt</h2><button type="button" class="text-button" data-view="recent">Verlauf anzeigen</button></div>
-      <div class="library-resume-row">
-        <button type="button" class="library-resume-set" data-open-set="${esc(set.id)}">
-          <span class="library-resume-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 18H5a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2"/><rect x="8" y="6" width="13" height="16" rx="2"/></svg></span>
-          <span class="library-resume-copy"><strong>${esc(set.name)}</strong>${location?`<small>${esc(location)}</small>`:''}</span>
-        </button>
-        <div class="library-resume-progress">
-          <p>${progress.secure} von ${progress.total} Karten sicher</p>
-          <div class="library-progress" role="progressbar" aria-label="Sicher beherrschte Karten" aria-valuemin="0" aria-valuemax="${progress.total}" aria-valuenow="${progress.secure}"><span style="width:${progress.percentage}%"></span></div>
-        </div>
-        <button type="button" class="primary-button" data-quick-study="${esc(set.id)}">${studyActionLabel(set.id)}</button>
-      </div>
-    </section>`;
-  }
   function renderLibrary(){
     activeSubject=null;activeFolder=null;activeSet=null;
-    const recentSets=[...new Set(data.recent.map(item=>item.setId))].map(setById).filter(Boolean).slice(0,30);
     if(view==='recent'){
+      const recentSets=[...new Set(data.recent.map(item=>item.setId))].map(setById).filter(Boolean).slice(0,30);
       $('#content').innerHTML=`<div class="page-heading"><div><h1 class="page-title">Zuletzt gelernt</h1><p class="page-subtitle">Hier findest du deine zuletzt geöffneten Lernstapel und kannst direkt weiterlernen.</p></div></div>${recentSets.length?`<div class="set-grid">${recentSets.map(setCard).join('')}</div>`:empty('Noch keine Lernrunde','Öffne einen Lernstapel und starte deine erste Runde. Deine letzten Stapel erscheinen danach hier.','◷')}`;
       bindSetCards();return;
     }
@@ -530,8 +524,7 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
       const sets=subjectSets(item.id),cards=sets.reduce((sum,set)=>sum+(cardCounts.get(set.id)||0),0);
       return `<article class="subject-card" ${sortAttributes('subject',item)} tabindex="0" data-open-subject="${esc(item.id)}" style="${subjectAppearance(item,colors[index%colors.length])}"><div class="subject-card-top">${subjectSymbol(item,icons[index%icons.length])}<span class="card-arrow" aria-hidden="true">→</span></div><h2>${esc(item.name)}</h2><p>${sets.length} Lernstapel · ${cards} ${cards===1?'Karte':'Karten'}</p>${sortControls('subject',item)}</article>`;
     }).join('');
-    const resumeSet=recentSets.find(set=>cardCounts.get(set.id)>0);
-    $('#content').innerHTML=`<div class="page-heading library-home-heading"><div><h1 class="page-title">Bibliothek</h1><p class="page-subtitle">Deine Fächer, Ordner und Lernstapel.</p></div><div class="page-primary-actions"><button class="quiet-button" id="home-add-subject">＋ Fach anlegen</button><button class="primary-button" id="home-create-set">＋ Lernstapel erstellen</button></div></div>${resumeSet&&!librarySorting?renderLibraryResume(resumeSet):''}<section class="library-section"><div class="section-head"><h2>Fächer <span class="count-label">${data.subjects.length}</span></h2>${data.subjects.length>1?sortingButton():''}</div>${data.subjects.length?`<div class="subject-grid">${subjectCards}</div>`:empty('Dein Lernraum ist noch leer','Lege zuerst ein Fach an. Darin kannst du Lernstapel und Ordner sammeln.','＋')}</section>${librarySorting?'<p class="sort-instructions">Ziehe am Griff oder verwende die Pfeile. Die Reihenfolge wird automatisch gespeichert.</p>':''}`;
+    $('#content').innerHTML=`<div class="page-heading library-home-heading"><div><h1 class="page-title">Bibliothek</h1><p class="page-subtitle">Deine Fächer, Ordner und Lernstapel.</p></div><div class="page-primary-actions"><button class="quiet-button" id="home-add-subject">＋ Fach anlegen</button><button class="primary-button" id="home-create-set">＋ Lernstapel erstellen</button></div></div><section class="library-section"><div class="section-head"><h2>Fächer <span class="count-label">${data.subjects.length}</span></h2>${data.subjects.length>1?sortingButton():''}</div>${data.subjects.length?`<div class="subject-grid">${subjectCards}</div>`:empty('Dein Lernraum ist noch leer','Lege zuerst ein Fach an. Darin kannst du Lernstapel und Ordner sammeln.','＋')}</section>${librarySorting?'<p class="sort-instructions">Ziehe am Griff oder verwende die Pfeile. Die Reihenfolge wird automatisch gespeichert.</p>':''}`;
     $('#home-add-subject')?.addEventListener('click',()=>openEntity('subject'));
     $('#home-create-set')?.addEventListener('click',()=>openEntity('set'));
     $('#home-import')?.addEventListener('click',()=>openImport());
@@ -574,7 +567,10 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
     document.querySelectorAll('[data-edit-folder]').forEach(button=>button.onclick=()=>editEntity('folder',button.dataset.editFolder));
     document.querySelectorAll('[data-delete-folder]').forEach(button=>button.onclick=()=>deleteFolder(button.dataset.deleteFolder));
   }
-  function backButton(label){return `<button class="back-button" id="go-back" aria-label="Zurück zu ${esc(label)}"><span aria-hidden="true">←</span><span>${esc(label)}</span></button>`}
+  function backButton(label){
+    const destination=esc(label?`Zurück zu ${label}`:'Zurück');
+    return `<button type="button" class="back-button" id="go-back" aria-label="${destination}" title="${destination}"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m13 6-6 6 6 6M7 12h12"/></svg></button>`;
+  }
   function renderSubject(){
     const item=subject(activeSubject);if(!item){activeSubject=null;return renderLibrary()}
     crumbs(['Bibliothek',item.name]);
@@ -600,7 +596,7 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
     const parent=subject(item.subjectId),parentFolder=folder(item.folderId),cards=setCards(item.id);
     if(cardListSetId!==item.id){cardListSetId=item.id;cardListQuery='';cardListLimit=100}
     crumbs(libraryCrumbs(item,true));
-    const previous=parentFolder?.name||parent?.name||'Zurück';
+    const previous=parentFolder?.name||parent?.name;
     const progress=window.WortwerkModel.getSetProgress(cards);
     const studyLabel=studyActionLabel(item.id);
     $('#content').innerHTML=`<div class="subpage-heading">${backButton(previous)}<div><div class="page-context">${esc(parentFolder?.name||parent?.name||'Lernstapel')}</div><h1 class="page-title">${esc(item.name)}</h1><p class="page-subtitle">${esc(item.description||`${cards.length} ${cards.length===1?'Lernkarte':'Lernkarten'}`)}</p></div>${managementActions(`<button id="edit-set">Lernstapel bearbeiten</button><button data-move-item="set" data-item-id="${esc(item.id)}">Lernstapel verschieben …</button><button id="swap-card-sides" ${cards.length?'':'disabled'}>Vorder- und Rückseiten tauschen</button><button class="danger-action" id="delete-set">Lernstapel löschen</button>`)}</div>${cards.length?`<section class="study-banner" aria-labelledby="learning-progress-title"><div class="learning-progress-copy"><h2 id="learning-progress-title">Lernfortschritt</h2><p>${cards.length} ${cards.length===1?'Karte':'Karten'} · ${progress.secure} sicher · ${progress.practice} zu üben · ${progress.new} neu</p><div class="library-progress" role="progressbar" aria-label="Sicher beherrschte Karten" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${progress.percentage}"><span style="width:${progress.percentage}%"></span></div><small class="study-progress-caption">${progress.percentage}% sicher beherrscht · mindestens zwei richtige Antworten.</small></div><div class="study-banner-actions"><button class="primary-button" id="start-study">${studyLabel}</button><button class="quiet-button" id="reset-progress">Lernfortschritt zurücksetzen</button></div></section>`:''}<section class="library-section"><div class="section-head"><h2>Lernkarten <span class="count-label">${cards.length}</span></h2><div class="section-actions"><button class="quiet-button" id="import-this">Karten importieren</button><button class="quiet-button" id="add-card">＋ Karte erstellen</button></div></div>${cards.length?renderCardList(cards):empty('Noch keine Lernkarten','Erstelle deine erste Karte oder importiere mehrere Begriffe aus Text.','▤')}</section>`;
