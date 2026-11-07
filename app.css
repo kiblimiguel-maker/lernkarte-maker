@@ -1232,29 +1232,33 @@ summary::-webkit-details-marker { display: none; }
 .dialog .custom-colour input[type="text"] { width: 104px; min-height: 40px; padding: 7px 10px; flex: none; font-size: 13px; font-variant-numeric: tabular-nums; text-transform: uppercase; }
 .subject-colour-preview { display: grid; gap: 8px; margin-bottom: 12px; }
 .subject-preview-label { color: var(--muted); font-size: 12px; }
-.subject-appearance-field .color-palette { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; padding: 0; }
+.dialog.has-subject-appearance { width: min(560px, calc(100vw - 24px)); }
+.subject-appearance-field .color-palette { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 7px; padding: 0; }
 .subject-preset {
+  position: relative;
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 7px;
+  justify-content: center;
+  gap: 4px;
   min-width: 0;
   min-height: 44px;
-  padding: 7px 8px;
+  padding: 6px 3px;
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-control);
   background: var(--surface);
   color: var(--text);
   font-size: 11px;
-  text-align: left;
+  text-align: center;
   overflow-wrap: anywhere;
 }
 .subject-preset:hover { background: var(--surface-hover); }
 .subject-preset.selected { border-color: var(--accent); background: var(--accent-subtle); }
-.subject-preset.selected::after { content: "✓"; flex: none; margin-left: auto; color: var(--accent-text); }
-.subject-preset-chip { flex: none; width: 15px; height: 15px; border-radius: 4px; background: var(--swatch); }
+.subject-preset.selected::after { content: "✓"; position: absolute; top: 4px; right: 6px; color: var(--accent-text); }
+.subject-preset-chip { flex: none; width: 18px; height: 18px; border-radius: 4px; background: var(--swatch); box-shadow: inset 0 0 0 1px var(--control-border); }
 .dialog .subject-appearance-field .custom-colour input { min-height: 44px; }
 @media(max-width:760px) { .dialog .subject-appearance-field .custom-colour input[type="text"] { font-size: 16px; } }
-@media(max-width:420px) { .subject-appearance-field .color-palette { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media(max-width:375px) { .subject-appearance-field .color-palette { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .optional-label { color: var(--muted); }
 .dialog.has-set-design { width: min(760px,calc(100vw - 24px)); }
 .set-design-fields { min-width: 0; padding: 23px 0 0; margin: 25px 0 0; border: 0; border-top: 1px solid var(--line); }

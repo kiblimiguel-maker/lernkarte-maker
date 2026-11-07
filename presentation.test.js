@@ -1,7 +1,7 @@
 'use strict';
 
 const assert = require('node:assert/strict');
-const { genderSegments, colourInk, subjectSurface } = require('./presentation.js');
+const { genderSegments, colourInk, subjectPalette, subjectSurface } = require('./presentation.js');
 
 function colored(value) {
   return genderSegments(value).filter(segment => segment.gender).map(segment => [segment.text, segment.gender]);
@@ -49,6 +49,13 @@ for (const colour of ['#7895C8', '#729FAF', '#7EA590', '#B69871', '#A189BA', '#B
 function luminance(hex) {
   const channels = [1,3,5].map(i => parseInt(hex.slice(i,i+2),16)/255).map(v => v<=.04045?v/12.92:((v+.055)/1.055)**2.4);
   return channels[0]*.2126+channels[1]*.7152+channels[2]*.0722;
+}
+assert.equal(new Set(subjectPalette.map(([colour]) => colour)).size, 16);
+for (const [colour] of subjectPalette) {
+  const hex = colour.toLowerCase();
+  assert.equal(subjectSurface(hex), hex);
+  const background = luminance(hex), ink = luminance(colourInk(hex));
+  assert.ok((Math.max(background,ink)+.05)/(Math.min(background,ink)+.05)>=4.5, `readable ink on preset ${hex}`);
 }
 const samples = ['00', '20', '40', '60', '80', 'a0', 'c0', 'e0', 'ff'];
 for (const red of samples) {

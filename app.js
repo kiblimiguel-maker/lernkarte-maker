@@ -6,13 +6,14 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
 
 (() => {
   'use strict';
-  const palette = [
+  const folderPalette = [
     ['#7895C8','Schieferblau'],['#729FAF','Lagune'],['#7EA590','Salbei'],
     ['#B69871','Sand'],['#A189BA','Flieder'],['#BA858E','Rosenholz']
   ];
-  const defaultFolderColor = '#7895C8';
-  const colors = palette.map(([hex])=>hex);
-  const safeColor = (value,fallback=colors[0]) => typeof value==='string' && /^#[0-9a-f]{6}$/i.test(value) ? value : fallback;
+  const defaultFolderColor = folderPalette[0][0];
+  const { subjectPalette } = window.WortwerkPresentation;
+  const subjectColors = subjectPalette.map(([hex])=>hex);
+  const safeColor = (value,fallback=defaultFolderColor) => typeof value==='string' && /^#[0-9a-f]{6}$/i.test(value) ? value : fallback;
   const cardThemes = window.WortwerkCardThemes;
   const appAppearance = getAppAppearance();
   let activeCardThemeId = cardThemes.readThemeId();
@@ -292,7 +293,7 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
     donationStatusChecking=false;
     renderDonations();
   }
-  function subjectAppearance(item,fallback=colors[0]){return `--dot:${safeColor(item.color,fallback)}`}
+  function subjectAppearance(item,fallback=subjectColors[0]){return `--dot:${safeColor(item.color,fallback)}`}
   function subjectSymbol(item,fallback='📚'){
     const icon=item.emoji||item.icon||fallback;
     const flag=icon==='🇫🇷'?'<svg class="subject-flag" viewBox="0 0 36 26" aria-hidden="true"><path fill="#0055A4" d="M0 0h12v26H0z"/><path fill="#FFF" d="M12 0h12v26H12z"/><path fill="#EF4135" d="M24 0h12v26H24z"/></svg>':`<span class="subject-glyph">${esc(icon)}</span>`;
@@ -431,12 +432,13 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
 
   function appearanceFields(value,subjectPreview=''){
     const color=safeColor(value,defaultFolderColor);
+    const palette=subjectPreview?subjectPalette:folderPalette;
     const swatches=palette.map(([hex,name])=>{
       const selected=hex.toLowerCase()===color.toLowerCase();
       const swatchClass=subjectPreview?'subject-preset':'color-swatch';
       return `<button type="button" class="${swatchClass}${selected?' selected':''}" data-color="${hex}" aria-label="${name}" aria-pressed="${selected}" title="${name}" style="--swatch:${hex}">${subjectPreview?`<span class="subject-preset-chip" aria-hidden="true"></span><span>${name}</span>`:''}</button>`;
     }).join('');
-    return `<fieldset class="appearance-field${subjectPreview?' subject-appearance-field':''}"><legend>${subjectPreview?'Fachfarbe':'Farbe'}</legend><input type="hidden" id="f-color" name="color" value="${color}">${subjectPreview}<div class="color-palette" role="group" aria-label="Farbvorschläge">${swatches}</div><div class="custom-colour"><label for="colour-picker">Eigene Farbe</label><input type="color" id="colour-picker" value="${color}" aria-label="Eigene Farbe wählen"><label class="sr-only" for="colour-hex">Farbcode</label><input type="text" id="colour-hex" value="${color}" pattern="#[0-9a-fA-F]{6}" maxlength="7" required aria-label="Farbcode" spellcheck="false" autocomplete="off"></div></fieldset>`;
+    return `<fieldset class="appearance-field${subjectPreview?' subject-appearance-field':''}"><legend>${subjectPreview?'Fachfarbe':'Farbe'}</legend><input type="hidden" id="f-color" name="color" value="${color}">${subjectPreview}<div class="color-palette" role="group" aria-label="${subjectPreview?'Farbstift-Schachtel':'Farbvorschläge'}">${swatches}</div><div class="custom-colour"><label for="colour-picker">Eigene Farbe</label><input type="color" id="colour-picker" value="${color}" aria-label="Eigene Farbe wählen"><label class="sr-only" for="colour-hex">Farbcode</label><input type="text" id="colour-hex" value="${color}" pattern="#[0-9a-fA-F]{6}" maxlength="7" required aria-label="Farbcode" spellcheck="false" autocomplete="off"></div></fieldset>`;
   }
   function bindColourPicker(){
     const input=$('#f-color'),picker=$('#colour-picker'),hex=$('#colour-hex'),preview=$('#subject-card-preview');
@@ -536,7 +538,7 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
       $('#content').innerHTML=`<div class="page-heading"><div><h1 class="page-title">Zuletzt gelernt</h1><p class="page-subtitle">Hier findest du deine zuletzt geöffneten Lernstapel und kannst direkt weiterlernen.</p></div></div>${recentSets.length?`<div class="set-grid">${recentSets.map(setCard).join('')}</div>`:empty('Noch keine Lernrunde','Öffne einen Lernstapel und starte deine erste Runde. Deine letzten Stapel erscheinen danach hier.','◷')}`;
       bindSetCards();return;
     }
-    const subjectCards=data.subjects.map((item,index)=>`<article class="subject-card" ${sortAttributes('subject',item)} tabindex="0" data-open-subject="${esc(item.id)}" style="${subjectCardStyle(item.color,colors[index%colors.length])}">${subjectCardContents(item,icons[index%icons.length])}${sortControls('subject',item)}</article>`).join('');
+    const subjectCards=data.subjects.map((item,index)=>`<article class="subject-card" ${sortAttributes('subject',item)} tabindex="0" data-open-subject="${esc(item.id)}" style="${subjectCardStyle(item.color,subjectColors[index%subjectColors.length])}">${subjectCardContents(item,icons[index%icons.length])}${sortControls('subject',item)}</article>`).join('');
     $('#content').innerHTML=`<div class="page-heading library-home-heading"><div><h1 class="page-title">Bibliothek</h1><p class="page-subtitle">Deine Fächer, Ordner und Lernstapel.</p></div><div class="page-primary-actions"><button class="quiet-button" id="home-add-subject">＋ Fach anlegen</button><button class="primary-button" id="home-create-set">＋ Lernstapel erstellen</button></div></div><section class="library-section"><div class="section-head"><h2>Fächer <span class="count-label">${data.subjects.length}</span></h2>${data.subjects.length>1?sortingButton():''}</div>${data.subjects.length?`<div class="subject-grid">${subjectCards}</div>`:empty('Dein Lernraum ist noch leer','Lege zuerst ein Fach an. Darin kannst du Lernstapel und Ordner sammeln.','＋')}</section>${librarySorting?'<p class="sort-instructions">Ziehe am Griff oder verwende die Pfeile. Die Reihenfolge wird automatisch gespeichert.</p>':''}`;
     $('#home-add-subject')?.addEventListener('click',()=>openEntity('subject'));
     $('#home-create-set')?.addEventListener('click',()=>openEntity('set'));
@@ -636,8 +638,8 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
     if(type==='subject'){
       const subjectIndex=entity?data.subjects.indexOf(entity):data.subjects.length;
       const selectedEmoji=entity?.emoji||entity?.icon||(entity?icons[subjectIndex%icons.length]:'📚');
-      const color=safeColor(entity?.color,colors[subjectIndex%colors.length]);
-      const subjectPreview=`<div class="subject-colour-preview"><div class="subject-preview-label">Kachelvorschau</div><div id="subject-card-preview" class="subject-card subject-card-preview" style="${subjectCardStyle(color)}" aria-hidden="true">${subjectCardContents({id:entity?.id,name:entity?.name||'Fachname',emoji:selectedEmoji})}</div><small class="subject-preview-label">Sehr kräftige Farben erscheinen auf der Kachel dezenter.</small></div>`;
+      const color=safeColor(entity?.color,subjectColors[subjectIndex%subjectColors.length]);
+      const subjectPreview=`<div class="subject-colour-preview"><div class="subject-preview-label">Kachelvorschau</div><div id="subject-card-preview" class="subject-card subject-card-preview" style="${subjectCardStyle(color)}" aria-hidden="true">${subjectCardContents({id:entity?.id,name:entity?.name||'Fachname',emoji:selectedEmoji})}</div><small class="subject-preview-label">Sehr kräftige eigene Farben erscheinen auf der Kachel dezenter.</small></div>`;
       fields=input('name','Fachname',entity?.name,'z. B. Französisch')+`<label class="field-label" for="f-description">Beschreibung <span class="optional-label">(optional)</span></label><input id="f-description" name="description" value="${esc(entity?.description||'')}" maxlength="160" placeholder="Was möchtest du in diesem Fach lernen?">`+appearanceFields(color,subjectPreview)+`<span class="field-label" id="emoji-label">Symbol</span><input type="hidden" id="f-emoji" name="emoji" value="${esc(selectedEmoji)}"><label class="emoji-entry-wrap"><span class="emoji-current" id="emoji-current" aria-hidden="true">${esc(selectedEmoji)}</span><input id="emoji-entry" type="text" value="${esc(selectedEmoji)}" maxlength="20" aria-label="Eigenes Emoji eingeben" autocomplete="off"></label><label class="emoji-search-label"><span class="sr-only">Emoji suchen</span><input id="emoji-search" type="search" placeholder="Emoji suchen …" autocomplete="off"></label><div class="emoji-grid" role="group" aria-labelledby="emoji-label">${emojiChoices.map(([emoji,keywords,category])=>`<button type="button" class="emoji-option ${emoji===selectedEmoji?'selected':''}" data-emoji="${esc(emoji)}" data-search="${esc((keywords+' '+category).toLocaleLowerCase('de'))}" aria-label="${esc(keywords.split(' ')[0])}" aria-pressed="${emoji===selectedEmoji}">${emoji}</button>`).join('')}</div>`;
     }
     if(type==='folder')fields=input('name','Ordnername',entity?.name||'','z. B. Kapitel 1')+appearanceFields(entity?.color||defaultFolderColor)+`<div class="field-hint">Die Ordnerfarbe ist unabhängig vom Fach und den Designs deiner Lernstapel.</div>`;
@@ -684,7 +686,7 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
       if(!subject(subjectId)){
         if(data.subjects.length)subjectId=data.subjects[0].id;
         else{
-          const timestamp=new Date().toISOString(),defaultSubject={id:id(),name:'Allgemein',description:'',color:colors[0],emoji:'📚',icon:'📚',createdAt:timestamp,updatedAt:timestamp};
+          const timestamp=new Date().toISOString(),defaultSubject={id:id(),name:'Allgemein',description:'',color:subjectColors[0],emoji:'📚',icon:'📚',createdAt:timestamp,updatedAt:timestamp};
           defaultSubject.position=window.WortwerkModel.nextLibraryPosition(data,'subject',defaultSubject);data.subjects.push(defaultSubject);subjectId=defaultSubject.id;
         }
       }

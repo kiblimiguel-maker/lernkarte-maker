@@ -49,12 +49,20 @@
     return (luminance + .05) / .05 >= 1.05 / (luminance + .05) ? '#000000' : '#FFFFFF';
   }
 
+  const subjectPalette = [
+    ['#C7433D', 'Rot'], ['#83B8D9', 'Hellblau'], ['#39834B', 'Grün'], ['#91BB63', 'Hellgrün'],
+    ['#275C3A', 'Dunkelgrün'], ['#366FA8', 'Blau'], ['#29466F', 'Dunkelblau'], ['#888B8D', 'Grau'],
+    ['#292929', 'Schwarz'], ['#FFFFFF', 'Weiss'], ['#E8C44B', 'Gelb'], ['#D9873E', 'Orange'],
+    ['#CF6D96', 'Pink'], ['#8665A8', 'Violett'], ['#459E9D', 'Türkis'], ['#D8BD97', 'Beige']
+  ];
+
   function subjectSurface(hex) {
     const rgb = [1, 3, 5].map(offset => parseInt(hex.slice(offset, offset + 2), 16));
     const low = Math.min(...rgb), high = Math.max(...rgb);
     const spread = high - low;
     const comfortableSpread = 80;
-    if (spread <= comfortableSpread) return hex;
+    const selected = hex.toUpperCase();
+    if (spread <= comfortableSpread || subjectPalette.some(([colour]) => colour === selected)) return hex;
 
     // Soften only vivid colours. Scaling every channel by the same amount
     // preserves the hue, while a lower midpoint takes the glare off the tile.
@@ -65,7 +73,7 @@
       .toString(16).padStart(2, '0')).join('');
   }
 
-  const api = { genderSegments, colourInk, subjectSurface };
+  const api = { genderSegments, colourInk, subjectPalette, subjectSurface };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (typeof globalThis !== 'undefined') globalThis.WortwerkPresentation = api;
 })();
