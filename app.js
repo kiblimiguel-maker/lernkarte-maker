@@ -299,8 +299,9 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
     return `<span class="subject-icon" aria-hidden="true">${flag}</span>`;
   }
   function subjectCardStyle(value,fallback){
-    const color=safeColor(value,fallback);
-    return `--dot:${color};--subject-ink:${window.WortwerkPresentation.colourInk(color)}`;
+    const { subjectSurface, colourInk } = window.WortwerkPresentation;
+    const surface=subjectSurface(safeColor(value,fallback));
+    return `--subject-surface:${surface};--subject-ink:${colourInk(surface)}`;
   }
   function subjectCardContents(item,fallbackIcon){
     const sets=item.id?subjectSets(item.id):[];
@@ -636,7 +637,7 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
       const subjectIndex=entity?data.subjects.indexOf(entity):data.subjects.length;
       const selectedEmoji=entity?.emoji||entity?.icon||(entity?icons[subjectIndex%icons.length]:'📚');
       const color=safeColor(entity?.color,colors[subjectIndex%colors.length]);
-      const subjectPreview=`<div class="subject-colour-preview"><div class="subject-preview-label">Kachelvorschau</div><div id="subject-card-preview" class="subject-card subject-card-preview" style="${subjectCardStyle(color)}" aria-hidden="true">${subjectCardContents({id:entity?.id,name:entity?.name||'Fachname',emoji:selectedEmoji})}</div></div>`;
+      const subjectPreview=`<div class="subject-colour-preview"><div class="subject-preview-label">Kachelvorschau</div><div id="subject-card-preview" class="subject-card subject-card-preview" style="${subjectCardStyle(color)}" aria-hidden="true">${subjectCardContents({id:entity?.id,name:entity?.name||'Fachname',emoji:selectedEmoji})}</div><small class="subject-preview-label">Sehr kräftige Farben erscheinen auf der Kachel dezenter.</small></div>`;
       fields=input('name','Fachname',entity?.name,'z. B. Französisch')+`<label class="field-label" for="f-description">Beschreibung <span class="optional-label">(optional)</span></label><input id="f-description" name="description" value="${esc(entity?.description||'')}" maxlength="160" placeholder="Was möchtest du in diesem Fach lernen?">`+appearanceFields(color,subjectPreview)+`<span class="field-label" id="emoji-label">Symbol</span><input type="hidden" id="f-emoji" name="emoji" value="${esc(selectedEmoji)}"><label class="emoji-entry-wrap"><span class="emoji-current" id="emoji-current" aria-hidden="true">${esc(selectedEmoji)}</span><input id="emoji-entry" type="text" value="${esc(selectedEmoji)}" maxlength="20" aria-label="Eigenes Emoji eingeben" autocomplete="off"></label><label class="emoji-search-label"><span class="sr-only">Emoji suchen</span><input id="emoji-search" type="search" placeholder="Emoji suchen …" autocomplete="off"></label><div class="emoji-grid" role="group" aria-labelledby="emoji-label">${emojiChoices.map(([emoji,keywords,category])=>`<button type="button" class="emoji-option ${emoji===selectedEmoji?'selected':''}" data-emoji="${esc(emoji)}" data-search="${esc((keywords+' '+category).toLocaleLowerCase('de'))}" aria-label="${esc(keywords.split(' ')[0])}" aria-pressed="${emoji===selectedEmoji}">${emoji}</button>`).join('')}</div>`;
     }
     if(type==='folder')fields=input('name','Ordnername',entity?.name||'','z. B. Kapitel 1')+appearanceFields(entity?.color||defaultFolderColor)+`<div class="field-hint">Die Ordnerfarbe ist unabhängig vom Fach und den Designs deiner Lernstapel.</div>`;

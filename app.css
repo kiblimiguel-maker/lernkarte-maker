@@ -1284,7 +1284,7 @@ summary::-webkit-details-marker { display: none; }
 .subject-card {
   min-height: 142px;
   padding: 17px 18px;
-  background: var(--dot);
+  background: var(--subject-surface);
   color: var(--subject-ink);
   border-color: color-mix(in srgb, currentColor 22%, transparent);
 }

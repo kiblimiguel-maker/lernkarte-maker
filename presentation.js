@@ -49,7 +49,23 @@
     return (luminance + .05) / .05 >= 1.05 / (luminance + .05) ? '#000000' : '#FFFFFF';
   }
 
-  const api = { genderSegments, colourInk };
+  function subjectSurface(hex) {
+    const rgb = [1, 3, 5].map(offset => parseInt(hex.slice(offset, offset + 2), 16));
+    const low = Math.min(...rgb), high = Math.max(...rgb);
+    const spread = high - low;
+    const comfortableSpread = 80;
+    if (spread <= comfortableSpread) return hex;
+
+    // Soften only vivid colours. Scaling every channel by the same amount
+    // preserves the hue, while a lower midpoint takes the glare off the tile.
+    const intensity = (spread - comfortableSpread) / (255 - comfortableSpread);
+    const scale = (comfortableSpread - intensity * 12) / spread;
+    const midpoint = (low + high) / 2;
+    return '#' + rgb.map(channel => Math.round(midpoint - intensity * 36 + (channel - midpoint) * scale)
+      .toString(16).padStart(2, '0')).join('');
+  }
+
+  const api = { genderSegments, colourInk, subjectSurface };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (typeof globalThis !== 'undefined') globalThis.WortwerkPresentation = api;
 })();

@@ -1,7 +1,7 @@
 'use strict';
 
 const assert = require('node:assert/strict');
-const { genderSegments, colourInk } = require('./presentation.js');
+const { genderSegments, colourInk, subjectSurface } = require('./presentation.js');
 
 function colored(value) {
   return genderSegments(value).filter(segment => segment.gender).map(segment => [segment.text, segment.gender]);
@@ -39,6 +39,13 @@ assert.equal(colourInk('#00ff00'), '#000000');
 assert.equal(colourInk('#757575'), '#FFFFFF');
 assert.equal(colourInk('#767676'), '#000000');
 assert.equal(colourInk('invalid'), colourInk('#3378F6'));
+assert.equal(subjectSurface('#00F900'), '#387c38');
+assert.equal(subjectSurface('#FF00FF'), '#7e3a7e');
+assert.equal(subjectSurface('#0099FF'), '#3a627e');
+for (const colour of ['#7895C8', '#729FAF', '#7EA590', '#B69871', '#A189BA', '#BA858E', '#000000', '#ffffff']) {
+  assert.equal(subjectSurface(colour), colour);
+}
+
 function luminance(hex) {
   const channels = [1,3,5].map(i => parseInt(hex.slice(i,i+2),16)/255).map(v => v<=.04045?v/12.92:((v+.055)/1.055)**2.4);
   return channels[0]*.2126+channels[1]*.7152+channels[2]*.0722;
@@ -48,8 +55,10 @@ for (const red of samples) {
   for (const green of samples) {
     for (const blue of samples) {
       const colour = `#${red}${green}${blue}`;
-      const background = luminance(colour), ink = luminance(colourInk(colour));
-      assert.ok((Math.max(background,ink)+.05)/(Math.min(background,ink)+.05)>=4.5, `readable ink on ${colour}`);
+      const surface = subjectSurface(colour);
+      assert.match(surface, /^#[0-9a-f]{6}$/i);
+      const background = luminance(surface), ink = luminance(colourInk(surface));
+      assert.ok((Math.max(background,ink)+.05)/(Math.min(background,ink)+.05)>=4.5, `readable ink on ${surface} from ${colour}`);
     }
   }
 }
