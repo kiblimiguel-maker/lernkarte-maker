@@ -1,4 +1,59 @@
-# Qualitätsprüfung Lernkarten Maker
+# Qualitätsbericht Lernkarten Maker
+
+## Graphit-Überarbeitung vom 7. November 2026
+
+Ausgangsstand `835d098`. Die Überarbeitung baut auf der bestehenden Vite-Anwendung, dem Bibliotheksmodell und den vorhandenen Oberflächeneinstellungen auf.
+
+### Oberfläche und Designentscheidungen
+
+| Rolle | Graphit |
+| --- | --- |
+| Arbeitsfläche | `#101216` |
+| Seitenleiste | `#14171C` |
+| Fächer, Ordner und Dialoge | `#191D24` |
+| Erhöhte Flächen und Menüs | `#1E232B` |
+| Ausgewählte Navigation | `#26344A` |
+| Primäre Aktionen | `#7895C8` mit dunkler Beschriftung |
+| Text und Sekundärtext | `#F0F2F5` und `#A9B1BD` |
+
+- Graphit gilt bereits beim ersten Laden und ist die Voreinstellung für Browser ohne gespeicherte Darstellungswahl. Hell und System bleiben bewusst wählbar. Eine frühere ausdrückliche Auswahl hat Vorrang.
+- Die einklappbare Seitenleiste gruppiert Lernraum, Fächer und weitere Bereiche. Aktive Einträge erhalten eine Stahlblaufläche und eine schmale Markierung. Die mobile Navigation hält den Hintergrund beim Öffnen inaktiv und verhindert dessen Scrollen.
+- Die Bibliothek zeigt den letzten lernbaren Stapel mit Speicherort, tatsächlichem Lernstand und direktem Einstieg. Der Verlauf bleibt separat erreichbar. Fächerfarben sitzen an Symbolen, Ordner haben eine eigene Form und Lernstapel zeigen gestapelte Karten. Gespeicherte Farben, Hierarchien, Verschieben und Reihenfolgen bleiben nutzbar.
+- Die Lernansicht gruppiert Titel, Kartenposition, Fortschritt und Ergebniszähler. Grün und Rot kennzeichnen Bewertungszustände. Die Ergebnisüberschrift erhält nach Abschluss den Fokus. Die vorhandenen Bewegungsabläufe und Tastenkürzel bleiben nutzbar.
+- Graphite ergänzt die zehn vorhandenen Kartendesigns und ist die Karten-Voreinstellung ohne gültige gespeicherte Auswahl. Original und bestehende Designs pro Stapel bleiben verfügbar. Die Flächenfarben der bisherigen Designs sind erhalten. Elf zu kontrastarme Rot-Blau-Farbwerte wurden pro Kartenfläche angepasst.
+- Anmeldung, Kontomenü, Spendenansicht, Auswahlfelder, Fehlerzustände und Dialoge verwenden die gemeinsamen Oberflächen- und Textfarben. Auf schmalen Geräten stehen die Importfelder untereinander. Die Aktionen im Import, in Einstellungen und bei der Stapelgestaltung bleiben beim Scrollen erreichbar.
+- Auf kurzen Smartphone-Displays lassen kleinere Innenabstände mehr Platz für Begriffe und Beispielsätze. Längere Inhalte sind innerhalb der Karte scrollbar.
+
+### Prüfungen
+
+| Prüfung | Ergebnis |
+| --- | --- |
+| `npm test` | 11 Testsuiten bestanden |
+| Kontrastprüfung der App | 172 Farbpaarungen in Graphit und Hell bestanden, mit mindestens 4,5:1 für geprüfte Texte und 3:1 für geprüfte Fokus- und Feldgrenzen |
+| Kartendesigns | 22 Kartenflächen mit mindestens 4,5:1 für Haupttext, Begleittext und Rot-Blau-Markierungen geprüft |
+| `npm run build` | Produktionsbuild erfolgreich |
+| `node --check` | Alle versionierten JavaScript- und MJS-Dateien syntaktisch geprüft |
+| `git diff --check` | Erfolgreich |
+
+Die visuellen und funktionalen Prüfungen liefen im Browser bei 1440, 1024, 834, 390 und 320 px. Für die angemeldeten Ansichten wurde die tatsächliche Oberfläche mit isolierten lokalen Testinhalten geöffnet.
+
+- Bibliothek und verschachtelte Ordner über die Suche geöffnet. Einen Stapel per Drag-and-drop verschoben und neu sortiert. Position und Reihenfolge blieben nach Reload erhalten.
+- Die Seitenleiste am Laptop ein- und ausgeblendet. Den mobilen Drawer, seinen inaktiven Hintergrund und gesperrtes Hintergrundscrollen geprüft.
+- Karten gewendet und die französischen Pluralmarker im Graphit-Design überprüft. N und M ergaben je eine Bewertung. Auf 320 × 568 px blieben die Bewertungsaktionen erreichbar und der geprüfte Beispielsatz vollständig sichtbar.
+- Vollbild geöffnet und geschlossen. Einen Stapel mit eigenem Sky-Mint-Design abgeschlossen. Die Ergebnisanzeige meldete 100 Prozent für die gewusste Karte und fokussierte die Überschrift.
+- Alle 22 Vorschaubilder in den Einstellungen vorgefunden. Hell und Original gewählt und nach Reload wiedergefunden. Anschliessend zu Graphit gewechselt.
+- Ungültige Importzeile erkannt und Erstellung blockiert. Danach einen gültigen Eintrag mit Beispielsatz importiert. Bei 320 px blieb der Dialog ohne horizontalen Überlauf und seine Aktionsleiste sichtbar.
+- Anmeldung, leere Bibliothek, Fachformular, Kontomenü und den Spendenzustand bei deaktiviertem Checkout betrachtet. In den geprüften Ansichten erschienen keine Konsolenfehler.
+
+### Offene Prüfgrenzen
+
+- Für Linting und statisches Typechecking gibt es im Repository keine eigenen Skripte. Ausgeführt wurden die vorhandenen Tests, der Build und die JavaScript-Syntaxprüfung.
+- Google-Anmeldung wurde visuell geprüft. Ein vollständiger OAuth-Rundlauf, echte Zahlungen und produktive Schreibzugriffe waren nicht Teil des lokalen Tests. Die Anwendung besitzt einen gemeinsamen Google-Einstieg für Anmeldung und Registrierung.
+- Die Bildschirmgrössen wurden im Browser emuliert. Tests auf physischer iPhone-Hardware stehen aus.
+
+---
+
+## Früherer Qualitätsbericht vom 5. November 2026
 
 Die anschliessende Produktüberarbeitung vom 6. November 2026 ist in [PRODUCT-QUALITY-REVIEW.md](PRODUCT-QUALITY-REVIEW.md) dokumentiert. Dieser Bericht hält die frühere Prüfung fest.
 

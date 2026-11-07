@@ -28,18 +28,18 @@ function harness(saved, dark = false, overrides = {}) {
   };
 }
 
-// Default light is deliberate, even when the device is dark; unknown saved
-// values must not produce an unstyled or unexpectedly dark page.
+// First visits use Graphite even on light devices. Stale stored values follow
+// the same fallback as a fresh visit.
 for (const saved of [undefined, '', 'unknown', 'LIGHT', '{}']) {
-  const current = harness(saved, true);
-  assert.equal(current.controller.preference, 'light');
-  assert.equal(current.attributes['data-appearance'], 'light');
-  assert.equal(current.root.style.colorScheme, 'light');
-  assert.equal(current.metadata.content, '#FCFCFD');
+  const current = harness(saved, false);
+  assert.equal(current.controller.preference, 'dark');
+  assert.equal(current.attributes['data-appearance'], 'dark');
+  assert.equal(current.root.style.colorScheme, 'dark');
+  assert.equal(current.metadata.content, '#101216');
   current.controller.destroy();
 }
-assert.equal(readAppearancePreference({ getItem() { throw new Error('denied'); } }), 'light');
-assert.equal(readAppearancePreference(), 'light');
+assert.equal(readAppearancePreference({ getItem() { throw new Error('denied'); } }), 'dark');
+assert.equal(readAppearancePreference(), 'dark');
 assert.equal(resolveAppearance('system', true), 'dark');
 assert.equal(resolveAppearance('system', false), 'light');
 assert.equal(resolveAppearance('light', true), 'light');
@@ -70,7 +70,7 @@ assert.equal(selected.controller.appearance, 'dark');
 selected.changeSystem(false);
 assert.equal(selected.controller.appearance, 'light');
 selected.changeSystem(true);
-assert.equal(selected.metadata.content, '#111113');
+assert.equal(selected.metadata.content, '#101216');
 assert.equal(selected.values.get(APPEARANCE_STORAGE_KEY), 'system');
 
 // A blocked store still allows switching this page, with an honest failure
@@ -100,7 +100,7 @@ assert.equal(notifications.length, 1);
 selected.eventTarget.emit('storage', { key: APPEARANCE_STORAGE_KEY, newValue: 'system' });
 assert.equal(selected.controller.appearance, 'dark');
 selected.eventTarget.emit('storage', { key: null, newValue: null });
-assert.equal(selected.controller.preference, 'light');
+assert.equal(selected.controller.preference, 'dark');
 unsubscribe();
 selected.controller.setPreference('dark');
 assert.equal(notifications.length, 3);
@@ -183,14 +183,22 @@ const palettes = {
 const contrastFailures = [];
 let contrastChecks = 0;
 for (const [appearance, tokens] of Object.entries(palettes)) {
-  const check = (foreground, background) => {
+  assert.equal(resolveToken(tokens, '--background'), APPEARANCE_COLORS[appearance]);
+  const check = (foreground, background, minimum = 4.5) => {
     const ratio = contrast(resolveToken(tokens, foreground), resolveToken(tokens, background));
     contrastChecks++;
-    if (ratio < 4.5) contrastFailures.push(`${appearance}: ${foreground} on ${background} has ${ratio.toFixed(2)}:1 (needs 4.5:1)`);
+    if (ratio < minimum) contrastFailures.push(`${appearance}: ${foreground} on ${background} has ${ratio.toFixed(2)}:1 (needs ${minimum}:1)`);
   };
-  const surfaces = ['--background', '--surface', '--surface-raised', '--accent-subtle', '--accent-subtle-hover'];
-  const textRoles = ['--text', '--muted', '--accent-text', '--success', '--danger', '--gender-masculine-dark-surface', '--gender-feminine-dark-surface'];
-  for (const background of surfaces) for (const foreground of textRoles) check(foreground, background);
+  const surfaces = [
+    '--background', '--surface', '--surface-sidebar', '--surface-raised',
+    '--surface-hover', '--surface-input', '--accent-subtle', '--accent-subtle-hover'
+  ];
+  const textRoles = ['--text', '--soft', '--muted', '--quiet-text', '--accent-text', '--success', '--danger', '--gender-masculine-dark-surface', '--gender-feminine-dark-surface'];
+  for (const background of surfaces) {
+    for (const foreground of textRoles) check(foreground, background);
+    check('--focus-ring', background, 3);
+  }
+  check('--control-border', '--surface-input', 3);
   check('--ink-on-accent', '--accent');
   check('--ink-on-accent', '--accent-hover');
   check('--danger', '--danger-surface');

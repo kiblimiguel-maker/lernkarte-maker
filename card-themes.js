@@ -2,11 +2,24 @@
   'use strict';
 
   const STORAGE_KEY = 'wortwerk-card-theme-v1';
-  const DEFAULT_THEME_ID = 'wortwerk-original';
+  const DEFAULT_THEME_ID = 'graphite';
 
   // Card surfaces use the exact reference colors. Text and gender markers are
   // chosen per surface so that the cards remain readable in every palette.
   const themes = [
+    {
+      id: 'graphite',
+      name: 'Graphite',
+      description: 'Graphit und gedämpftes Schieferblau',
+      front: {
+        surface: '#242A33', text: '#F2F5FA', muted: '#BAC5D5', border: '#465262',
+        'gender-masculine': '#8DBDFF', 'gender-feminine': '#FF8E9E'
+      },
+      back: {
+        surface: '#26344A', text: '#F2F5FA', muted: '#BAC5D5', border: '#4D6181',
+        'gender-masculine': '#8DBDFF', 'gender-feminine': '#FF8E9E'
+      }
+    },
     {
       id: 'wortwerk-original',
       name: 'Original',
@@ -26,7 +39,7 @@
       description: 'Violett und warmes Apricot',
       front: {
         surface: '#6A00F4', text: '#FFFFFF', muted: '#FFFFFF', border: '#8A3BEA',
-        'gender-masculine': '#8ABFFF', 'gender-feminine': '#FF8997'
+        'gender-masculine': '#B7DAFF', 'gender-feminine': '#FFC2C9'
       },
       back: {
         surface: '#FFD6A5', text: '#0B0D10', muted: '#0B0D10', border: '#E7BD86',
@@ -65,7 +78,7 @@
       description: 'Leuchtendes Magenta und tiefes Schwarz',
       front: {
         surface: '#E445FF', text: '#0B0D10', muted: '#0B0D10', border: '#C82FE1',
-        'gender-masculine': '#001F80', 'gender-feminine': '#75001F'
+        'gender-masculine': '#001A69', 'gender-feminine': '#500016'
       },
       back: {
         surface: '#141418', text: '#FFFFFF', muted: '#FFFFFF', border: '#34343B',
@@ -91,7 +104,7 @@
       description: 'Ruhiges Teal und kühles Nebelgrau',
       front: {
         surface: '#5FA6A6', text: '#0B0D10', muted: '#0B0D10', border: '#4B9292',
-        'gender-masculine': '#001F80', 'gender-feminine': '#75001F'
+        'gender-masculine': '#001F80', 'gender-feminine': '#63001A'
       },
       back: {
         surface: '#E6EBEA', text: '#0B0D10', muted: '#0B0D10', border: '#CFD6D5',
@@ -104,7 +117,7 @@
       description: 'Gedämpftes Rosé und warmes Beige',
       front: {
         surface: '#D8A7A9', text: '#0B0D10', muted: '#0B0D10', border: '#C49396',
-        'gender-masculine': '#104B8B', 'gender-feminine': '#A4002D'
+        'gender-masculine': '#0B3D75', 'gender-feminine': '#820026'
       },
       back: {
         surface: '#E6D7C8', text: '#0B0D10', muted: '#0B0D10', border: '#D2C1B0',
@@ -117,7 +130,7 @@
       description: 'Sanftes Lavendel und helles Steingrau',
       front: {
         surface: '#B5A8B8', text: '#0B0D10', muted: '#0B0D10', border: '#A295A5',
-        'gender-masculine': '#124A8A', 'gender-feminine': '#9D1732'
+        'gender-masculine': '#0B3671', 'gender-feminine': '#76001F'
       },
       back: {
         surface: '#E3E0DB', text: '#0B0D10', muted: '#0B0D10', border: '#CECBC6',
@@ -130,7 +143,7 @@
       description: 'Warmes Umbra und heller Sand',
       front: {
         surface: '#7A3E2D', text: '#FFFFFF', muted: '#FFFFFF', border: '#965744',
-        'gender-masculine': '#75BCFF', 'gender-feminine': '#FF7A8C'
+        'gender-masculine': '#A0D1FF', 'gender-feminine': '#FFB4BF'
       },
       back: {
         surface: '#E6D3B1', text: '#0B0D10', muted: '#0B0D10', border: '#D3BE98',

@@ -29,9 +29,13 @@ function hueAndSaturation(hex) {
   return { hue, saturation };
 }
 
-assert.equal(themes.length, 10, 'the original design, existing palettes, and all six attached palettes are available');
-assert.equal(themes[0].id, DEFAULT_THEME_ID, 'the original design is the default');
-assert.deepEqual(themes.map(theme => [theme.front.surface, theme.back.surface]), [
+const graphite = themes.find(theme => theme.id === 'graphite');
+const original = themes.find(theme => theme.id === 'wortwerk-original');
+const violet = themes.find(theme => theme.id === 'ultra-violet-soft-apricot');
+const mint = themes.find(theme => theme.id === 'sky-mint-graphite');
+const ion = themes.find(theme => theme.id === 'ion-blue-drift-silver');
+assert.equal(DEFAULT_THEME_ID, graphite.id, 'Graphite is the default');
+assert.deepEqual(themes.filter(theme => theme !== graphite).map(theme => [theme.front.surface, theme.back.surface]), [
   ['#DDE3EA', '#EAF2F8'],
   ['#6A00F4', '#FFD6A5'],
   ['#B8F7E4', '#25272C'],
@@ -47,13 +51,14 @@ assert.deepEqual(themes.map(theme => [theme.front.surface, theme.back.surface]),
 for (const theme of themes) {
   for (const side of ['front', 'back']) {
     const face = theme[side];
-    assert.ok(['#0B0D10', '#FFFFFF'].includes(face.text), `${theme.name} ${side} uses black or white text`);
-    assert.equal(face.muted, face.text, `${theme.name} ${side} supporting text keeps the same high-contrast color`);
+    if (theme !== graphite) {
+      assert.ok(['#0B0D10', '#FFFFFF'].includes(face.text), `${theme.name} ${side} uses black or white text`);
+      assert.equal(face.muted, face.text, `${theme.name} ${side} supporting text keeps the same high-contrast color`);
+    }
     assert.ok(contrast(face.surface, face.text) >= 4.5, `${theme.name} ${side} text has readable contrast`);
     assert.ok(contrast(face.surface, face.muted) >= 4.5, `${theme.name} ${side} supporting text has readable contrast`);
-    const largeBoldTextMinimum = 3;
-    assert.ok(contrast(face.surface, face['gender-masculine']) >= largeBoldTextMinimum, `${theme.name} ${side} masculine marker has readable contrast`);
-    assert.ok(contrast(face.surface, face['gender-feminine']) >= largeBoldTextMinimum, `${theme.name} ${side} feminine marker has readable contrast`);
+    assert.ok(contrast(face.surface, face['gender-masculine']) >= 4.5, `${theme.name} ${side} masculine marker has readable contrast`);
+    assert.ok(contrast(face.surface, face['gender-feminine']) >= 4.5, `${theme.name} ${side} feminine marker has readable contrast`);
     const blue = hueAndSaturation(face['gender-masculine']);
     const red = hueAndSaturation(face['gender-feminine']);
     assert.ok(blue.hue >= 195 && blue.hue <= 240 && blue.saturation >= 0.7, `${theme.name} ${side} masculine marker remains vivid blue`);
@@ -66,44 +71,44 @@ const storage = {
   getItem(key) { return values.get(key) ?? null; },
   setItem(key, value) { values.set(key, value); }
 };
-assert.equal(readThemeId(storage), DEFAULT_THEME_ID, 'missing preference uses the established default');
-const saved = saveTheme(themes[0].id, storage);
+assert.equal(readThemeId(storage), graphite.id, 'missing preference uses the new default');
+const saved = saveTheme(original.id, storage);
 assert.equal(saved.persisted, true);
-assert.equal(readThemeId(storage), themes[0].id, 'selection survives reloading from storage');
+assert.equal(readThemeId(storage), original.id, 'the saved original design survives reloading after the default changes');
 assert.equal(readThemeId({ getItem: () => 'unknown-theme' }), DEFAULT_THEME_ID, 'invalid saved value safely falls back');
 
 const applied = new Map();
 const root = { dataset: {}, style: { setProperty(key, value) { applied.set(key, value); } } };
-assert.equal(applyTheme(themes[1].id, root), themes[1].id);
-assert.equal(root.dataset.cardTheme, themes[1].id);
+assert.equal(applyTheme(violet.id, root), violet.id);
+assert.equal(root.dataset.cardTheme, violet.id);
 assert.equal(applied.get('--study-front-surface'), '#6A00F4');
 assert.equal(applied.get('--study-back-gender-feminine'), '#B00020');
 
 const inheritedSet = Object.freeze({ id: 'legacy-set', subjectId: 'french' });
-const violetSet = Object.freeze({ id: 'violet-set', cardThemeId: themes[1].id, folderId: 'red-folder' });
-const mintSet = Object.freeze({ id: 'mint-set', cardThemeId: themes[2].id, folderId: 'red-folder' });
-assert.equal(resolveSetThemeId(inheritedSet, themes[3].id), themes[3].id, 'legacy sets inherit the current global selection');
-assert.equal(resolveSetThemeId(null, themes[3].id), themes[3].id, 'missing sets safely inherit the global selection');
-assert.equal(resolveSetThemeId({ cardThemeId: '' }, themes[3].id), themes[3].id, 'empty overrides use the global design');
-assert.equal(resolveSetThemeId({ cardThemeId: 'unknown-theme' }, themes[3].id), themes[3].id, 'invalid overrides do not override a valid global design');
-assert.equal(resolveSetThemeId(inheritedSet, 'unknown-theme'), DEFAULT_THEME_ID, 'invalid global values use the original design');
-assert.equal(resolveSetThemeId(inheritedSet), DEFAULT_THEME_ID, 'missing preferences keep the established default');
-assert.equal(resolveSetThemeId(violetSet, 'unknown-theme'), themes[1].id, 'a valid set override takes priority over an invalid global selection');
-assert.equal(resolveSetThemeId(violetSet, themes[3].id), themes[1].id);
-assert.equal(resolveSetThemeId(mintSet, themes[3].id), themes[2].id, 'sets in the same folder retain independent designs');
-assert.deepEqual(violetSet, { id: 'violet-set', cardThemeId: themes[1].id, folderId: 'red-folder' }, 'resolving a design never changes the set or its location');
+const violetSet = Object.freeze({ id: 'violet-set', cardThemeId: violet.id, folderId: 'red-folder' });
+const mintSet = Object.freeze({ id: 'mint-set', cardThemeId: mint.id, folderId: 'red-folder' });
+assert.equal(resolveSetThemeId(inheritedSet, ion.id), ion.id, 'legacy sets inherit the current global selection');
+assert.equal(resolveSetThemeId(null, ion.id), ion.id, 'missing sets safely inherit the global selection');
+assert.equal(resolveSetThemeId({ cardThemeId: '' }, ion.id), ion.id, 'empty overrides use the global design');
+assert.equal(resolveSetThemeId({ cardThemeId: 'unknown-theme' }, ion.id), ion.id, 'invalid overrides do not override a valid global design');
+assert.equal(resolveSetThemeId(inheritedSet, 'unknown-theme'), DEFAULT_THEME_ID, 'invalid global values use the default design');
+assert.equal(resolveSetThemeId(inheritedSet), graphite.id, 'missing preferences use Graphite');
+assert.equal(resolveSetThemeId(violetSet, 'unknown-theme'), violet.id, 'a valid set override takes priority over an invalid global selection');
+assert.equal(resolveSetThemeId(violetSet, ion.id), violet.id);
+assert.equal(resolveSetThemeId(mintSet, ion.id), mint.id, 'sets in the same folder retain independent designs');
+assert.deepEqual(violetSet, { id: 'violet-set', cardThemeId: violet.id, folderId: 'red-folder' }, 'resolving a design never changes the set or its location');
 
 const storageDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
 let preferenceAccesses = 0;
 try {
   Object.defineProperty(globalThis, 'localStorage', { configurable: true, get() { preferenceAccesses++; return storage; } });
-  saveTheme(themes[3].id, storage);
-  applyTheme(resolveSetThemeId(violetSet, themes[3].id), root);
-  assert.equal(root.dataset.cardTheme, themes[1].id, 'applying a set override changes the displayed card');
-  assert.equal(readThemeId(storage), themes[3].id, 'the global preference is retained after displaying a set override');
+  saveTheme(ion.id, storage);
+  applyTheme(resolveSetThemeId(violetSet, ion.id), root);
+  assert.equal(root.dataset.cardTheme, violet.id, 'applying a set override changes the displayed card');
+  assert.equal(readThemeId(storage), ion.id, 'the global preference is retained after displaying a set override');
   assert.equal(preferenceAccesses, 0, 'resolving and applying a set design never reads or writes global storage');
-  applyTheme(resolveSetThemeId(inheritedSet, themes[3].id), root);
-  assert.equal(root.dataset.cardTheme, themes[3].id, 'another set returns to the global design');
+  applyTheme(resolveSetThemeId(inheritedSet, ion.id), root);
+  assert.equal(root.dataset.cardTheme, ion.id, 'another set returns to the global design');
 } finally {
   if (storageDescriptor) Object.defineProperty(globalThis, 'localStorage', storageDescriptor);
   else delete globalThis.localStorage;

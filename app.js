@@ -7,10 +7,10 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
 (() => {
   'use strict';
   const palette = [
-    ['#3E63DD','Indigo'],['#0090FF','Blau'],['#63706B','Salbei'],
-    ['#12A594','Teal'],['#FFC53D','Amber'],['#AB4ABA','Pflaume']
+    ['#7895C8','Schieferblau'],['#729FAF','Lagune'],['#7EA590','Salbei'],
+    ['#B69871','Sand'],['#A189BA','Flieder'],['#BA858E','Rosenholz']
   ];
-  const defaultFolderColor = '#0090FF';
+  const defaultFolderColor = '#7895C8';
   const colors = palette.map(([hex])=>hex);
   const safeColor = (value,fallback=colors[0]) => typeof value==='string' && /^#[0-9a-f]{6}$/i.test(value) ? value : fallback;
   const cardThemes = window.WortwerkCardThemes;
@@ -281,7 +281,7 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
     donationStatusChecking=false;
     renderDonations();
   }
-  function subjectAppearance(item,fallback=colors[0]){const colour=safeColor(item.color,fallback),surface=window.WortwerkPresentation.subjectSurface(colour);return `--dot:${colour};--subject-surface:${surface};--subject-ink:${window.WortwerkPresentation.colourInk(surface)}`}
+  function subjectAppearance(item,fallback=colors[0]){return `--dot:${safeColor(item.color,fallback)}`}
   function subjectSymbol(item,fallback='📚'){
     const icon=item.emoji||item.icon||fallback;
     const flag=icon==='🇫🇷'?'<svg class="subject-flag" viewBox="0 0 36 26" aria-hidden="true"><path fill="#0055A4" d="M0 0h12v26H0z"/><path fill="#FFF" d="M12 0h12v26H12z"/><path fill="#EF4135" d="M24 0h12v26H24z"/></svg>':`<span class="subject-glyph">${esc(icon)}</span>`;
@@ -501,19 +501,37 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
     $('#library-search-more')?.addEventListener('click',()=>{librarySearchLimit+=100;refreshLibrarySearch()});
     bindSubjectCards();bindFolderCards();bindSetCards();
   }
+  function renderLibraryResume(set){
+    const progress=window.WortwerkModel.getSetProgress(data.cards.filter(card=>card.setId===set.id));
+    const location=[subject(set.subjectId)?.name, ...folderPath(set.folderId).map(item=>item.name)].filter(Boolean).join(' / ');
+    return `<section class="library-resume" aria-labelledby="resume-heading">
+      <div class="section-head"><h2 id="resume-heading">Zuletzt gelernt</h2><button type="button" class="text-button" data-view="recent">Verlauf anzeigen</button></div>
+      <div class="library-resume-row">
+        <button type="button" class="library-resume-set" data-open-set="${esc(set.id)}">
+          <span class="library-resume-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 18H5a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2"/><rect x="8" y="6" width="13" height="16" rx="2"/></svg></span>
+          <span class="library-resume-copy"><strong>${esc(set.name)}</strong>${location?`<small>${esc(location)}</small>`:''}</span>
+        </button>
+        <div class="library-resume-progress">
+          <p>${progress.secure} von ${progress.total} Karten sicher</p>
+          <div class="library-progress" role="progressbar" aria-label="Sicher beherrschte Karten" aria-valuemin="0" aria-valuemax="${progress.total}" aria-valuenow="${progress.secure}"><span style="width:${progress.percentage}%"></span></div>
+        </div>
+        <button type="button" class="primary-button" data-quick-study="${esc(set.id)}">${studyActionLabel(set.id)}</button>
+      </div>
+    </section>`;
+  }
   function renderLibrary(){
     activeSubject=null;activeFolder=null;activeSet=null;
-    const recentSets=(data.recent||[]).map(item=>setById(item.setId)).filter(Boolean).filter((set,index,list)=>list.findIndex(candidate=>candidate.id===set.id)===index).slice(0,view==='recent'?30:4);
+    const recentSets=[...new Set(data.recent.map(item=>item.setId))].map(setById).filter(Boolean).slice(0,30);
     if(view==='recent'){
       $('#content').innerHTML=`<div class="page-heading"><div><h1 class="page-title">Zuletzt gelernt</h1><p class="page-subtitle">Hier findest du deine zuletzt geöffneten Lernstapel und kannst direkt weiterlernen.</p></div></div>${recentSets.length?`<div class="set-grid">${recentSets.map(setCard).join('')}</div>`:empty('Noch keine Lernrunde','Öffne einen Lernstapel und starte deine erste Runde. Deine letzten Stapel erscheinen danach hier.','◷')}`;
       bindSetCards();return;
     }
     const subjectCards=data.subjects.map((item,index)=>{
       const sets=subjectSets(item.id),cards=sets.reduce((sum,set)=>sum+(cardCounts.get(set.id)||0),0);
-      return `<article class="subject-card" ${sortAttributes('subject',item)} tabindex="0" data-open-subject="${esc(item.id)}" style="${subjectAppearance(item,colors[index%colors.length])}"><div class="subject-card-top">${subjectSymbol(item,icons[index%icons.length])}</div><h2>${esc(item.name)}</h2><p>${sets.length} Lernstapel · ${cards} ${cards===1?'Karte':'Karten'}</p><span class="card-arrow" aria-hidden="true">→</span>${sortControls('subject',item)}</article>`;
+      return `<article class="subject-card" ${sortAttributes('subject',item)} tabindex="0" data-open-subject="${esc(item.id)}" style="${subjectAppearance(item,colors[index%colors.length])}"><div class="subject-card-top">${subjectSymbol(item,icons[index%icons.length])}<span class="card-arrow" aria-hidden="true">→</span></div><h2>${esc(item.name)}</h2><p>${sets.length} Lernstapel · ${cards} ${cards===1?'Karte':'Karten'}</p>${sortControls('subject',item)}</article>`;
     }).join('');
-    const recentSection=recentSets.length?`<section class="recent-section"><div class="section-head"><h2>Zuletzt gelernt</h2><button class="text-button" data-view="recent">Alle anzeigen</button></div><div class="recent-list">${recentSets.map(set=>`<button class="recent-item" data-open-set="${esc(set.id)}"><span>${esc(set.name)}</span><small>${esc(subject(set.subjectId)?.name||'Fach')}</small><span aria-hidden="true">→</span></button>`).join('')}</div></section>`:'';
-    $('#content').innerHTML=`<div class="page-heading"><div><div class="eyebrow">DEIN PERSÖNLICHER LERNRAUM</div><h1 class="page-title">Bibliothek</h1><p class="page-subtitle">Alles, was du lernen möchtest. An einem Ort.</p></div><div class="page-primary-actions"><button class="quiet-button" id="home-add-subject">＋ Fach anlegen</button><button class="primary-button" id="home-create-set">＋ Lernstapel erstellen</button></div></div><section class="library-section"><div class="section-head"><h2>Fächer <span class="count-label">${data.subjects.length}</span></h2>${data.subjects.length>1?sortingButton():''}</div>${data.subjects.length?`<div class="subject-grid">${subjectCards}</div>`:empty('Dein Lernraum ist noch leer','Lege zuerst ein Fach an. Darin kannst du Lernstapel und Ordner sammeln.','＋')}</section>${librarySorting?'<p class="sort-instructions">Ziehe am Griff oder verwende die Pfeile. Die Reihenfolge wird automatisch gespeichert.</p>':''}${recentSection}`;
+    const resumeSet=recentSets.find(set=>cardCounts.get(set.id)>0);
+    $('#content').innerHTML=`<div class="page-heading library-home-heading"><div><h1 class="page-title">Bibliothek</h1><p class="page-subtitle">Deine Fächer, Ordner und Lernstapel.</p></div><div class="page-primary-actions"><button class="quiet-button" id="home-add-subject">＋ Fach anlegen</button><button class="primary-button" id="home-create-set">＋ Lernstapel erstellen</button></div></div>${resumeSet&&!librarySorting?renderLibraryResume(resumeSet):''}<section class="library-section"><div class="section-head"><h2>Fächer <span class="count-label">${data.subjects.length}</span></h2>${data.subjects.length>1?sortingButton():''}</div>${data.subjects.length?`<div class="subject-grid">${subjectCards}</div>`:empty('Dein Lernraum ist noch leer','Lege zuerst ein Fach an. Darin kannst du Lernstapel und Ordner sammeln.','＋')}</section>${librarySorting?'<p class="sort-instructions">Ziehe am Griff oder verwende die Pfeile. Die Reihenfolge wird automatisch gespeichert.</p>':''}`;
     $('#home-add-subject')?.addEventListener('click',()=>openEntity('subject'));
     $('#home-create-set')?.addEventListener('click',()=>openEntity('set'));
     $('#home-import')?.addEventListener('click',()=>openImport());
@@ -563,7 +581,7 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
     const folders=subjectFolders(item.id).filter(child=>!child.parentId),looseSets=subjectSets(item.id).filter(set=>!set.folderId);
     const cardCount=subjectSets(item.id).reduce((sum,set)=>sum+(cardCounts.get(set.id)||0),0);
     const folderSection=folders.length?`<div class="folder-grid">${folders.map(folderCard).join('')}</div>`:'';
-    const looseSection=looseSets.length?`<div class="section-head"><h2>Lernstapel <span class="count-label">${looseSets.length}</span></h2></div><div class="set-grid">${looseSets.map(setCard).join('')}</div>`:'';
+    const looseSection=looseSets.length?`<section class="library-section"><div class="section-head"><h2>Lernstapel <span class="count-label">${looseSets.length}</span></h2></div><div class="set-grid">${looseSets.map(setCard).join('')}</div></section>`:'';
     $('#content').innerHTML=`<div class="subpage-heading">${backButton('Bibliothek')}<div class="subject-heading" style="${subjectAppearance(item)}">${subjectSymbol(item)}<div><h1 class="page-title">${esc(item.name)}</h1><p class="page-subtitle">${esc(item.description||`${subjectSets(item.id).length} Lernstapel · ${cardCount} ${cardCount===1?'Karte':'Karten'}`)}</p></div></div>${managementActions('<button id="edit-subject">Fach bearbeiten</button><button class="danger-action" id="delete-subject">Fach löschen</button>')}</div><section class="library-section"><div class="section-head"><h2>Ordner <span class="count-label">${folders.length}</span></h2><div class="section-actions">${sortingButton()}<button class="quiet-button" id="add-folder">＋ Ordner anlegen</button><button class="primary-button" id="subject-new-set">＋ Lernstapel erstellen</button></div></div>${folderSection||'<p class="section-note">Ordner sind optional. Lege sie an, wenn du deine Lernstapel weiter gliedern möchtest.</p>'}</section>${looseSection}`;
     $('#go-back').onclick=()=>{librarySorting=false;activeSubject=null;activeFolder=null;render()};$('#edit-subject').onclick=()=>editEntity('subject',item.id);$('#delete-subject').onclick=()=>deleteSubject(item.id);$('#add-folder').onclick=()=>openEntity('folder');$('#subject-new-set').onclick=()=>openEntity('set');
     bindFolderCards();bindSetCards();bindSubjectCards();
@@ -572,7 +590,9 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
     const item=folder(activeFolder);if(!item){activeFolder=null;return renderSubject()}
     const parent=subject(item.subjectId);if(!parent){activeFolder=null;return renderLibrary()}
     const sets=subjectSets(parent.id).filter(set=>set.folderId===item.id),children=subjectFolders(parent.id).filter(child=>child.parentId===item.id);crumbs(libraryCrumbs(item));
-    $('#content').innerHTML=`<div class="subpage-heading">${backButton(folder(item.parentId)?.name||parent.name)}<div><div class="page-context">ORDNER · ${esc(parent.name)}</div><h1 class="page-title">${esc(item.name)}</h1><p class="page-subtitle">${children.length} Unterordner · ${sets.length} Lernstapel</p></div>${managementActions(`<button id="edit-folder-current">Ordner bearbeiten</button><button data-move-item="folder" data-item-id="${esc(item.id)}">Ordner verschieben …</button><button class="danger-action" id="delete-folder-current">Ordner löschen</button>`)}</div><section class="library-section"><div class="section-head"><h2>In diesem Ordner</h2><div class="section-actions">${sortingButton()}<button class="quiet-button" id="add-subfolder">＋ Unterordner</button><button class="primary-button" id="folder-new-set">＋ Lernstapel erstellen</button></div></div>${children.length?`<div class="folder-grid">${children.map(folderCard).join('')}</div>`:''}${sets.length?`<div class="set-grid">${sets.map(setCard).join('')}</div>`:!children.length?empty('Platz für dein nächstes Lernziel','Erstelle einen Lernstapel oder gliedere deine Inhalte mit Unterordnern.','▤'):''}</section>`;
+    const subfolders=children.length?`<section class="library-section"><div class="section-head"><h2>Unterordner <span class="count-label">${children.length}</span></h2></div><div class="folder-grid">${children.map(folderCard).join('')}</div></section>`:'';
+    const stacks=sets.length?`<section class="library-section"><div class="section-head"><h2>Lernstapel <span class="count-label">${sets.length}</span></h2></div><div class="set-grid">${sets.map(setCard).join('')}</div></section>`:'';
+    $('#content').innerHTML=`<div class="subpage-heading">${backButton(folder(item.parentId)?.name||parent.name)}<div class="subject-heading library-folder-heading" style="--dot:${safeColor(item.color,defaultFolderColor)}"><span class="subject-icon" aria-hidden="true">${folderSymbol()}</span><div><div class="page-context">Ordner</div><h1 class="page-title">${esc(item.name)}</h1><p class="page-subtitle">${children.length} Unterordner · ${sets.length} Lernstapel</p></div></div>${managementActions(`<button id="edit-folder-current">Ordner bearbeiten</button><button data-move-item="folder" data-item-id="${esc(item.id)}">Ordner verschieben …</button><button class="danger-action" id="delete-folder-current">Ordner löschen</button>`)}</div><div class="section-actions library-folder-actions">${sortingButton()}<button class="quiet-button" id="add-subfolder">＋ Unterordner</button><button class="primary-button" id="folder-new-set">＋ Lernstapel erstellen</button></div>${subfolders}${stacks}${!children.length&&!sets.length?empty('Dieser Ordner ist leer','Lege einen Lernstapel oder einen Unterordner an.','▤'):''}`;
     $('#go-back').onclick=()=>{librarySorting=false;activeFolder=item.parentId||null;render()};$('#edit-folder-current').onclick=()=>editEntity('folder',item.id);$('#delete-folder-current').onclick=()=>deleteFolder(item.id);$('#folder-new-set').onclick=()=>openEntity('set');$('#add-subfolder').onclick=()=>openEntity('folder');bindFolderCards();bindSetCards();bindSubjectCards();
   }
   function renderSet(){
@@ -775,7 +795,24 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
     const lastStudiedAt=new Date().toISOString();setById(key).lastStudiedAt=lastStudiedAt;data.recent=data.recent.filter(entry=>entry.setId!==key);data.recent.unshift({setId:key,at:lastStudiedAt});data.recent=data.recent.slice(0,30);saveSessionProgress();
     $('#study-title').textContent=setById(key)?.name||'Lernsession';$('#study-complete').hidden=true;$('#shuffle-toggle').setAttribute('aria-pressed','false');$('#study-dialog').classList.remove('is-fullscreen');$('#study-dialog').showModal();renderStudyCard();
   }
-  function updateStudyScoreCounts(){if(!session)return;const results=window.WortwerkModel.getStudyResults(session),known=results.filter(result=>result===true).length,missed=results.filter(result=>result===false).length;$('#known-count').textContent=String(known);$('#missed-count').textContent=String(missed);$('#study-known').textContent=`${known} ✓ · ${missed} ✕`;$('#answer-yes').setAttribute('aria-label',`Gewusst, bisher ${known}`);$('#answer-no').setAttribute('aria-label',`Nicht gewusst, bisher ${missed}`);$('#shuffle-toggle').disabled=Boolean(session.transitioning);updateMissedSetActions()}
+  function updateStudyScoreCounts(){
+    if(!session)return;
+    const results=window.WortwerkModel.getStudyResults(session);
+    const known=results.filter(result=>result===true).length;
+    const missed=results.filter(result=>result===false).length;
+    const reviewed=known+missed,total=session.cards.length;
+    $('#known-count').textContent=String(known);
+    $('#missed-count').textContent=String(missed);
+    $('#study-progress-bar').style.width=`${total?Math.round(reviewed/total*100):0}%`;
+    const track=$('#study-progress-track');
+    track.setAttribute('aria-valuemax',String(total));
+    track.setAttribute('aria-valuenow',String(reviewed));
+    track.setAttribute('aria-valuetext',`${reviewed} von ${total} bewertet`);
+    $('#answer-yes').setAttribute('aria-label',`Gewusst, bisher ${known}`);
+    $('#answer-no').setAttribute('aria-label',`Nicht gewusst, bisher ${missed}`);
+    $('#shuffle-toggle').disabled=Boolean(session.transitioning);
+    updateMissedSetActions();
+  }
   function getUncopiedMissedCards(){if(!session)return[];const copied=session.missedCardIdsCopied||new Set();return session.cards.filter(card=>window.WortwerkModel.getStudyResult(session,card.id)===false&&!copied.has(card.id))}
   function updateMissedSetActions(){if(!session)return;const results=window.WortwerkModel.getStudyResults(session),totalMissed=results.filter(result=>result===false).length,available=getUncopiedMissedCards().length,pending=Boolean(session.missedSetPending);const button=$('#create-missed-set');button.disabled=!available||pending||session.transitioning;button.textContent=available?`Lernstapel aus ${available} falschen Karten erstellen`:totalMissed?'Lernstapel erstellt':'Lernstapel aus falschen Karten erstellen';button.title=available?'Bisher falsch bewertete Karten in einen eigenen Lernstapel kopieren':totalMissed?'Alle bisher falschen Karten wurden bereits kopiert':'Bewerte zuerst eine Karte als Nicht gewusst';const resultButton=$('#create-missed-set-complete');resultButton.hidden=totalMissed===0;resultButton.disabled=!available||pending;resultButton.textContent=available?`Lernstapel aus ${available} falschen Karten erstellen`:totalMissed?'Lernstapel erstellt':'Lernstapel aus falschen Karten erstellen';resultButton.title=button.title}
   function openMissedSetCreation(){if(!session||session.missedSetPending)return;const cards=getUncopiedMissedCards();if(!cards.length){toast('Bewerte zuerst Karten als „Nicht gewusst“.');return}const originalSet=setById(session.setId);session.missedSetPending=true;formContext={type:'set',defaultSubjectId:originalSet?.subjectId||activeSubject||data.subjects[0]?.id||'',defaultFolderId:originalSet?.folderId||null,copyCards:cards.slice(),sourceSessionId:session.id};fillForm('set');$('#form-submit').textContent='Lernstapel erstellen';$('#form-dialog').showModal();$('#f-name').focus();updateMissedSetActions()}
@@ -791,11 +828,7 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
     if(!session)return;
     const total=session.cards.length,index=window.WortwerkModel.getStudyCurrentIndex(session),card=window.WortwerkModel.getStudyCard(session);
     const nextCardId=window.WortwerkModel.getNextStudyCardId(session),hasNext=Boolean(nextCardId);
-    $('#study-progress-label').textContent=`${index+1} von ${total}`;
-    const reviewed=window.WortwerkModel.getStudyResults(session).filter(result=>result!==null).length;
-    $('#study-progress-bar').style.width=`${Math.round(reviewed/total*100)}%`;
-    $('#study-progress-track').setAttribute('aria-valuemax',String(total));
-    $('#study-progress-track').setAttribute('aria-valuenow',String(reviewed));
+    $('#study-progress-label').textContent=`Karte ${index+1} von ${total}`;
     updateStudyScoreCounts();
 
     const result=window.WortwerkModel.getStudyResult(session);
@@ -949,7 +982,28 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
       }
     }
   }
-  function finishStudy(){if(!session)return;const results=window.WortwerkModel.getStudyResults(session);if(!session.completionRecorded)completeSession({id:session.id,setId:session.setId,startedAt:session.startedAt,cardIds:session.cards.map(card=>card.id),results});const {known,missed,unrated,percentage}=window.WortwerkModel.summarizeResults(results);const evaluated=known+missed,circumference=2*Math.PI*42,knownLength=circumference*(evaluated?known/evaluated:0),missedLength=circumference*(evaluated?missed/evaluated:0);$('#study-progress-bar').style.width='100%';$('#study-progress-track').setAttribute('aria-valuenow',String(session.cards.length));$('#complete-copy').textContent=`${evaluated} von ${session.cards.length} ${session.cards.length===1?'Karte':'Karten'} bewertet`;$('#score-value').textContent=`${percentage}%`;$('#score-ring-known').style.strokeDasharray=`${knownLength} ${circumference-knownLength}`;$('#score-ring-missed').style.strokeDasharray=`${missedLength} ${circumference-missedLength}`;$('#score-ring-missed').style.strokeDashoffset=String(-knownLength);$('#result-chart').setAttribute('aria-label',`${percentage} Prozent richtig: ${known} gewusst und ${missed} noch zu üben`);$('#result-known').textContent=String(known);$('#result-missed').textContent=String(missed);$('#result-unrated').textContent=String(unrated);$('#retry-missed').hidden=missed===0;$('#study-complete').hidden=false;updateMissedSetActions()}
+  function finishStudy(){
+    if(!session)return;
+    const results=window.WortwerkModel.getStudyResults(session);
+    if(!session.completionRecorded)completeSession({id:session.id,setId:session.setId,startedAt:session.startedAt,cardIds:session.cards.map(card=>card.id),results});
+    const {known,missed,unrated,percentage}=window.WortwerkModel.summarizeResults(results);
+    const evaluated=known+missed,circumference=2*Math.PI*42;
+    const knownLength=evaluated?circumference*known/evaluated:0;
+    const missedLength=evaluated?circumference*missed/evaluated:0;
+    $('#complete-copy').textContent=`${evaluated} von ${session.cards.length} ${session.cards.length===1?'Karte':'Karten'} bewertet`;
+    $('#score-value').textContent=`${percentage}%`;
+    $('#score-ring-known').style.strokeDasharray=`${knownLength} ${circumference-knownLength}`;
+    $('#score-ring-missed').style.strokeDasharray=`${missedLength} ${circumference-missedLength}`;
+    $('#score-ring-missed').style.strokeDashoffset=String(-knownLength);
+    $('#result-chart').setAttribute('aria-label',`${percentage} Prozent richtig: ${known} gewusst und ${missed} noch zu üben`);
+    $('#result-known').textContent=String(known);
+    $('#result-missed').textContent=String(missed);
+    $('#result-unrated').textContent=String(unrated);
+    $('#retry-missed').hidden=missed===0;
+    $('#study-complete').hidden=false;
+    updateMissedSetActions();
+    $('#complete-title').focus({preventScroll:true});
+  }
   function retryMissed(){if(!session)return;const cards=session.cards.filter(card=>window.WortwerkModel.getStudyResult(session,card.id)===false);if(!cards.length)return;const retryState=window.WortwerkModel.createStudySession(cards);session={...retryState,id:id(),setId:session.setId,startedAt:new Date().toISOString(),flipped:false,missedCardIdsCopied:new Set(),missedSetPending:false};activeSlotIndex=0;saveSessionProgress();$('#study-title').textContent=`Wiederholung · ${setById(session.setId)?.name||'Lernsession'}`;$('#study-complete').hidden=true;$('#shuffle-toggle').setAttribute('aria-pressed','false');renderStudyCard()}
   const studyDialog=$('#study-dialog');
   const settingsDialog=$('#settings-dialog');

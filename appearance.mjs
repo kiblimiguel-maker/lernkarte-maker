@@ -1,7 +1,7 @@
 // The app surface is independent from the selected learning-card palette.
 export const APPEARANCE_STORAGE_KEY = 'lernkarten-appearance-v1';
-export const DEFAULT_APPEARANCE = 'light';
-export const APPEARANCE_COLORS = Object.freeze({ light: '#FCFCFD', dark: '#111113' });
+export const DEFAULT_APPEARANCE = 'dark';
+export const APPEARANCE_COLORS = Object.freeze({ light: '#FCFCFD', dark: '#101216' });
 
 const validPreferences = new Set(['light', 'dark', 'system']);
 const normalizePreference = value => validPreferences.has(value) ? value : DEFAULT_APPEARANCE;
@@ -12,7 +12,8 @@ export function readAppearancePreference(storage) {
 }
 
 export function resolveAppearance(preference, systemIsDark = false) {
-  return preference === 'dark' || (preference === 'system' && systemIsDark) ? 'dark' : 'light';
+  if (preference === 'system') return systemIsDark ? 'dark' : 'light';
+  return preference === 'light' ? 'light' : DEFAULT_APPEARANCE;
 }
 
 export function createAppearanceController({ root, themeColor, storage, mediaQuery, eventTarget } = {}) {
