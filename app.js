@@ -6,14 +6,17 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
 
 (() => {
   'use strict';
+  const defaultFolderColor = '#7D9DBD';
   const folderPalette = [
-    ['#7895C8','Schieferblau'],['#729FAF','Lagune'],['#7EA590','Salbei'],
-    ['#B69871','Sand'],['#A189BA','Flieder'],['#BA858E','Rosenholz']
+    ['#B97575', 'Rot'], ['#C99A76', 'Orange'], ['#D9BD79', 'Gelb'], ['#86A48B', 'Grün'],
+    ['#7EA9A5', 'Türkis'], [defaultFolderColor, 'Blau'], ['#617A9B', 'Dunkelblau'], ['#A094B9', 'Violett'],
+    ['#C99FAC', 'Rosa'], ['#A58B78', 'Braun'], ['#D8CCBA', 'Beige'], ['#92969B', 'Grau'],
+    ['#668571', 'Dunkelgrün'], ['#B2C69B', 'Hellgrün'], ['#A9C9DC', 'Hellblau'], ['#414346', 'Schwarz'],
+    ['#F5F3EF', 'Weiss']
   ];
-  const defaultFolderColor = folderPalette[0][0];
   const { subjectPalette } = window.WortwerkPresentation;
   const subjectColors = subjectPalette.map(([hex])=>hex);
-  const safeColor = (value,fallback=defaultFolderColor) => typeof value==='string' && /^#[0-9a-f]{6}$/i.test(value) ? value : fallback;
+  const safeColor = (value,fallback='#7895C8') => typeof value==='string' && /^#[0-9a-f]{6}$/i.test(value) ? value : fallback;
   const cardThemes = window.WortwerkCardThemes;
   const appAppearance = getAppAppearance();
   let activeCardThemeId = cardThemes.readThemeId();
@@ -429,26 +432,32 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
   document.addEventListener('keydown',event=>{if(event.key==='Escape'&&organisationPointer)clearOrganisationPointer()});
   window.addEventListener('blur',clearOrganisationPointer);
 
-  function appearanceFields(value,subjectPreview=''){
-    const color=safeColor(value,defaultFolderColor);
-    const palette=subjectPreview?subjectPalette:folderPalette;
+  function appearanceFields(type,color,preview){
+    const isSubject=type==='subject';
+    const palette=isSubject?subjectPalette:folderPalette;
     const swatches=palette.map(([hex,name])=>{
       const selected=hex.toLowerCase()===color.toLowerCase();
-      const swatchClass=subjectPreview?'subject-preset':'color-swatch';
-      return `<button type="button" class="${swatchClass}${selected?' selected':''}" data-color="${hex}" aria-label="${name}" aria-pressed="${selected}" title="${name}" style="--swatch:${hex}">${subjectPreview?`<span class="subject-preset-chip" aria-hidden="true"></span><span>${name}</span>`:''}</button>`;
+      return `<button type="button" class="appearance-preset${selected?' selected':''}" data-color="${hex}" aria-label="${name}" aria-pressed="${selected}" title="${name}" style="--swatch:${hex}"><span class="appearance-preset-chip" aria-hidden="true"></span><span>${name}</span></button>`;
     }).join('');
-    return `<fieldset class="appearance-field${subjectPreview?' subject-appearance-field':''}"><legend>${subjectPreview?'Fachfarbe':'Farbe'}</legend><input type="hidden" id="f-color" name="color" value="${color}">${subjectPreview}<div class="color-palette" role="group" aria-label="${subjectPreview?'Farbstift-Schachtel':'Farbvorschläge'}">${swatches}</div><div class="custom-colour"><label for="colour-picker">Eigene Farbe</label><input type="color" id="colour-picker" value="${color}" aria-label="Eigene Farbe wählen"><label class="sr-only" for="colour-hex">Farbcode</label><input type="text" id="colour-hex" value="${color}" pattern="#[0-9a-fA-F]{6}" maxlength="7" required aria-label="Farbcode" spellcheck="false" autocomplete="off"></div></fieldset>`;
+    return `<fieldset class="appearance-field"><legend>${isSubject?'Fachfarbe':'Ordnerfarbe'}</legend><input type="hidden" id="f-color" name="color" value="${color}">${preview}<div class="color-palette" role="group" aria-label="${isSubject?'Farbstift-Schachtel':'Schulordner-Farbpalette'}">${swatches}</div><div class="custom-colour"><label for="colour-picker">Eigene Farbe</label><input type="color" id="colour-picker" value="${color}" aria-label="Eigene Farbe wählen"><label class="sr-only" for="colour-hex">Farbcode</label><input type="text" id="colour-hex" value="${color}" pattern="#[0-9a-fA-F]{6}" maxlength="7" required aria-label="Farbcode" spellcheck="false" autocomplete="off"></div></fieldset>`;
   }
   function bindColourPicker(){
-    const input=$('#f-color'),picker=$('#colour-picker'),hex=$('#colour-hex'),preview=$('#subject-card-preview');
+    const input=$('#f-color'),picker=$('#colour-picker'),hex=$('#colour-hex');
+    const subjectPreview=$('#subject-card-preview'),folderPreview=$('#folder-colour-preview');
+    const swatches=document.querySelectorAll('#form-fields [data-color]');
     const choose=(color,fromHex=false)=>{
       if(!/^#[0-9a-f]{6}$/i.test(color))return;
       input.value=color;picker.value=color;if(!fromHex)hex.value=color.toUpperCase();
-      if(preview)preview.style.cssText=subjectCardStyle(color);
-      document.querySelectorAll('[data-color]').forEach(button=>{const selected=button.dataset.color.toLowerCase()===color.toLowerCase();button.classList.toggle('selected',selected);button.setAttribute('aria-pressed',String(selected))});
+      if(subjectPreview)subjectPreview.style.cssText=subjectCardStyle(color);
+      folderPreview?.style.setProperty('--dot',color);
+      swatches.forEach(button=>{const selected=button.dataset.color.toLowerCase()===color.toLowerCase();button.classList.toggle('selected',selected);button.setAttribute('aria-pressed',String(selected))});
     };
-    document.querySelectorAll('[data-color]').forEach(button=>button.onclick=()=>choose(button.dataset.color));
+    swatches.forEach(button=>button.onclick=()=>choose(button.dataset.color));
     picker.addEventListener('input',()=>choose(picker.value));hex.addEventListener('input',()=>choose(hex.value,true));
+    if(folderPreview){
+      const name=$('#f-name'),previewName=$('#folder-preview-name');
+      name.addEventListener('input',()=>{previewName.textContent=name.value.trim()||'Ordnername'});
+    }
   }
   function setDesignFields(themeId){
     const selected=cardThemes.themes.some(theme=>theme.id===themeId)?themeId:'';
@@ -633,15 +642,19 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
   function refreshCardRows(){const cards=setCards(activeSet),page=cardListPage(cards,cardListQuery,cardListLimit);$('#card-list-results').innerHTML=cardRows(page,new Map(cards.map((card,index)=>[card.id,index])),cards.length);$('.card-list-count').textContent=`${page.cards.length} von ${page.total} ${cardListQuery?(page.total===1?'Treffer':'Treffern'):(page.total===1?'Karte':'Karten')}`;bindCardList()}
   function openEntity(type){formContext={type};fillForm(type);$('#form-dialog').showModal()}
   function editEntity(type,key){formContext={type,key};fillForm(type, type==='subject'?subject(key):type==='folder'?folder(key):setById(key));$('#form-dialog').showModal()}
-  function fillForm(type,entity){$('#form-dialog').classList.toggle('has-set-design',type==='set');$('#form-dialog').classList.toggle('has-subject-appearance',type==='subject');$('#form-save-error').hidden=true;$('#form-save-error').textContent='';const title=entity?`Bearbeite ${{subject:'Fach',folder:'Ordner',set:'Lernstapel',card:'Lernkarte'}[type]}`:({subject:'Fach anlegen',folder:'Ordner anlegen',set:'Lernstapel erstellen',card:'Lernkarte erstellen'})[type];$('#form-title').textContent=title;$('#form-eyebrow').textContent=entity?'BEARBEITEN':'NEU IN DEINER BIBLIOTHEK';$('#form-submit').textContent=entity?'Speichern':'Erstellen';let fields='';const input=(name,label,value='',placeholder='',required=true)=>`<label class="field-label" for="f-${name}">${label}</label><input id="f-${name}" name="${name}" value="${esc(value)}" placeholder="${esc(placeholder)}" maxlength="100" ${required?'required':''}>`;
+  function fillForm(type,entity){const dialog=$('#form-dialog');dialog.classList.toggle('has-set-design',type==='set');dialog.classList.toggle('has-subject-appearance',type==='subject');dialog.classList.toggle('has-folder-appearance',type==='folder');$('#form-save-error').hidden=true;$('#form-save-error').textContent='';const title=entity?`Bearbeite ${{subject:'Fach',folder:'Ordner',set:'Lernstapel',card:'Lernkarte'}[type]}`:({subject:'Fach anlegen',folder:'Ordner anlegen',set:'Lernstapel erstellen',card:'Lernkarte erstellen'})[type];$('#form-title').textContent=title;$('#form-eyebrow').textContent=entity?'BEARBEITEN':'NEU IN DEINER BIBLIOTHEK';$('#form-submit').textContent=entity?'Speichern':'Erstellen';let fields='';const input=(name,label,value='',placeholder='',required=true)=>`<label class="field-label" for="f-${name}">${label}</label><input id="f-${name}" name="${name}" value="${esc(value)}" placeholder="${esc(placeholder)}" maxlength="100" ${required?'required':''}>`;
     if(type==='subject'){
       const subjectIndex=entity?data.subjects.indexOf(entity):data.subjects.length;
       const selectedEmoji=entity?.emoji||entity?.icon||(entity?icons[subjectIndex%icons.length]:'📚');
       const color=safeColor(entity?.color,subjectColors[subjectIndex%subjectColors.length]);
       const subjectPreview=`<div class="subject-colour-preview"><div class="subject-preview-label">Kachelvorschau</div><div id="subject-card-preview" class="subject-card subject-card-preview" style="${subjectCardStyle(color)}" aria-hidden="true">${subjectCardContents({id:entity?.id,name:entity?.name||'Fachname',emoji:selectedEmoji})}</div><small class="subject-preview-label">Sehr kräftige eigene Farben erscheinen auf der Kachel dezenter.</small></div>`;
-      fields=input('name','Fachname',entity?.name,'z. B. Französisch')+`<label class="field-label" for="f-description">Beschreibung <span class="optional-label">(optional)</span></label><input id="f-description" name="description" value="${esc(entity?.description||'')}" maxlength="160" placeholder="Was möchtest du in diesem Fach lernen?">`+appearanceFields(color,subjectPreview)+`<span class="field-label" id="emoji-label">Symbol</span><input type="hidden" id="f-emoji" name="emoji" value="${esc(selectedEmoji)}"><label class="emoji-entry-wrap"><span class="emoji-current" id="emoji-current" aria-hidden="true">${esc(selectedEmoji)}</span><input id="emoji-entry" type="text" value="${esc(selectedEmoji)}" maxlength="20" aria-label="Eigenes Emoji eingeben" autocomplete="off"></label><label class="emoji-search-label"><span class="sr-only">Emoji suchen</span><input id="emoji-search" type="search" placeholder="Emoji suchen …" autocomplete="off"></label><div class="emoji-grid" role="group" aria-labelledby="emoji-label">${emojiChoices.map(([emoji,keywords,category])=>`<button type="button" class="emoji-option ${emoji===selectedEmoji?'selected':''}" data-emoji="${esc(emoji)}" data-search="${esc((keywords+' '+category).toLocaleLowerCase('de'))}" aria-label="${esc(keywords.split(' ')[0])}" aria-pressed="${emoji===selectedEmoji}">${emoji}</button>`).join('')}</div>`;
+      fields=input('name','Fachname',entity?.name,'z. B. Französisch')+`<label class="field-label" for="f-description">Beschreibung <span class="optional-label">(optional)</span></label><input id="f-description" name="description" value="${esc(entity?.description||'')}" maxlength="160" placeholder="Was möchtest du in diesem Fach lernen?">`+appearanceFields(type,color,subjectPreview)+`<span class="field-label" id="emoji-label">Symbol</span><input type="hidden" id="f-emoji" name="emoji" value="${esc(selectedEmoji)}"><label class="emoji-entry-wrap"><span class="emoji-current" id="emoji-current" aria-hidden="true">${esc(selectedEmoji)}</span><input id="emoji-entry" type="text" value="${esc(selectedEmoji)}" maxlength="20" aria-label="Eigenes Emoji eingeben" autocomplete="off"></label><label class="emoji-search-label"><span class="sr-only">Emoji suchen</span><input id="emoji-search" type="search" placeholder="Emoji suchen …" autocomplete="off"></label><div class="emoji-grid" role="group" aria-labelledby="emoji-label">${emojiChoices.map(([emoji,keywords,category])=>`<button type="button" class="emoji-option ${emoji===selectedEmoji?'selected':''}" data-emoji="${esc(emoji)}" data-search="${esc((keywords+' '+category).toLocaleLowerCase('de'))}" aria-label="${esc(keywords.split(' ')[0])}" aria-pressed="${emoji===selectedEmoji}">${emoji}</button>`).join('')}</div>`;
     }
-    if(type==='folder')fields=input('name','Ordnername',entity?.name||'','z. B. Kapitel 1')+appearanceFields(entity?.color||defaultFolderColor)+`<div class="field-hint">Die Ordnerfarbe ist unabhängig vom Fach und den Designs deiner Lernstapel.</div>`;
+    if(type==='folder'){
+      const color=safeColor(entity?.color,defaultFolderColor);
+      const preview=`<div id="folder-colour-preview" class="folder-colour-preview" style="--dot:${color}" aria-hidden="true"><span class="folder-icon">${folderSymbol()}</span><span><small>Vorschau</small><strong id="folder-preview-name">${esc(entity?.name||'Ordnername')}</strong></span></div>`;
+      fields=input('name','Ordnername',entity?.name||'','z. B. Kapitel 1')+appearanceFields(type,color,preview)+`<div class="field-hint">Die Ordnerfarbe ist unabhängig vom Fach und den Designs deiner Lernstapel.</div>`;
+    }
     if(type==='set'){
       const contextSubject=formContext?.defaultSubjectId||activeSubject||data.subjects[0]?.id||'';
       const subjectId=entity?.subjectId||contextSubject;
