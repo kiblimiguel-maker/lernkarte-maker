@@ -9,6 +9,7 @@ let browserStorage;
 try { browserStorage = globalThis.localStorage; } catch { /* Browser storage can be disabled independently of network saves. */ }
 const recovery = createPendingRecovery({ storage: browserStorage });
 const loadGuard = createLibraryLoadGuard();
+const failedWrites = new Set();
 export function resetLibraryOwner() { loadGuard.reset(); }
 export function getPendingRecovery() { return recovery.get(loadGuard.activeUserId); }
 export function discardPendingRecovery() { recovery.discard(loadGuard.activeUserId); }
@@ -19,8 +20,12 @@ function emitSaveState(name, detail) {
 const writer = createLibraryWriter({
   client: supabase,
   onStart(detail) { emitSaveState('library-save-start', detail); },
-  onSuccess(detail) { emitSaveState('library-save-success', detail); },
+  onSuccess(detail) {
+    failedWrites.delete(detail.userId);
+    emitSaveState('library-save-success', detail);
+  },
   onError(error, state) {
+    if (state.userId) failedWrites.add(state.userId);
     console.error('Supabase-Speichern fehlgeschlagen.', error);
     emitSaveState('library-save-error', { ...state, error });
   }
@@ -53,6 +58,7 @@ export async function loadLibrary(normalize, { client = supabase, storage = brow
   const legacy = await claimLegacyCache({ legacyRaw: localRaw, migrationOwner, hasRemote, remote, normalize, persist, userId: user.id, storage, assertCurrent: () => loadGuard.assertCurrent(ticket) });
   await loadGuard.verifyOwner(ticket, client, user.id);
   loadGuard.commit(ticket, user.id);
+  failedWrites.delete(user.id);
   if (legacy.imported || (localRaw && !migrationOwner)) return legacy.library;
   return remote;
 }
@@ -61,4 +67,16 @@ export function saveLibrary(library, suppliedUserId) {
   const userId = suppliedUserId || loadGuard.activeUserId;
   const token = recovery.stage(userId, library);
   return writer.save(library, userId).then(() => { recovery.acknowledge(userId, token); });
+}
+
+export async function flushLibraryWrites() {
+  const userId = loadGuard.activeUserId;
+  await writer.flush();
+  if (!userId || loadGuard.activeUserId !== userId) {
+    throw new Error('Die aktive Sitzung hat sich geändert. Bitte versuche es erneut.');
+  }
+  if (failedWrites.has(userId) || recovery.get(userId)) {
+    throw new Error('In deiner Bibliothek sind Änderungen offen. Speichere sie zuerst oder kläre die Wiederherstellung.');
+  }
+  return userId;
 }

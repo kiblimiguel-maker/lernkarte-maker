@@ -71,6 +71,29 @@
     </section>
     <footer class="auth-footer">Lernkarten Maker <span>·</span> Dein persönlicher Lernraum</footer>
   </main>
+  <dialog id="shared-library-dialog" class="dialog shared-library-dialog" aria-labelledby="shared-library-title">
+    <form method="dialog">
+      <div class="dialog-head">
+        <div>
+          <div class="eyebrow" id="shared-library-kind">Freigabelink</div>
+          <h2 id="shared-library-title" tabindex="-1" autofocus>Geteilter Lerninhalt</h2>
+        </div>
+        <button type="button" class="icon-button" data-dismiss-shared-library aria-label="Schliessen">×</button>
+      </div>
+      <p class="shared-library-counts" id="shared-library-counts" hidden></p>
+      <p class="muted" id="shared-library-description" hidden>Du erhältst eine private, eigenständige Kopie in deiner Bibliothek.</p>
+      <div id="shared-library-destination" hidden>
+        <label class="field-label" for="shared-library-subject">Im Fach speichern</label>
+        <select id="shared-library-subject"></select>
+      </div>
+      <p class="field-hint" id="shared-library-status" role="status"></p>
+      <p class="auth-error" id="shared-library-error" role="alert" hidden></p>
+      <div class="dialog-actions">
+        <button type="button" class="quiet-button" data-dismiss-shared-library>Schliessen</button>
+        <button type="button" class="primary-button" id="shared-library-action" hidden></button>
+      </div>
+    </form>
+  </dialog>
   <div class="app-shell" id="app-shell" hidden>
     <a class="skip-link" href="#content">Zum Inhalt</a>
     <button class="navigation-scrim" id="navigation-scrim" aria-label="Navigation schliessen" hidden></button>
@@ -103,6 +126,26 @@
 
   <dialog id="form-dialog" class="dialog" aria-labelledby="form-title"><form method="dialog" id="entity-form"><div class="dialog-head"><div><div class="eyebrow" id="form-eyebrow">NEU</div><h2 id="form-title">Erstellen</h2></div><button type="button" class="icon-button" value="cancel" aria-label="Schliessen" title="Schliessen">×</button></div><div id="form-fields"></div><p id="form-save-error" class="form-save-error" role="alert" hidden></p><div class="dialog-actions"><button type="button" class="quiet-button" value="cancel">Abbrechen</button><button class="primary-button" id="form-submit" value="default">Erstellen</button></div></form></dialog>
   <dialog id="move-dialog" class="dialog move-dialog" aria-labelledby="move-title"><form id="move-form"><div class="dialog-head"><div><div class="eyebrow">BIBLIOTHEK ORGANISIEREN</div><h2 id="move-title">Verschieben</h2></div><button type="button" class="icon-button" data-cancel-move aria-label="Schliessen">×</button></div><p class="move-item-name" id="move-item-name"></p><p class="field-hint" id="move-origin"></p><label class="field-label" for="move-destination">Neuer Speicherort</label><select id="move-destination" aria-describedby="move-help"></select><p class="field-hint" id="move-help">Der Inhalt und dein Lernfortschritt bleiben erhalten.</p><div class="dialog-actions"><button type="button" class="quiet-button" data-cancel-move>Abbrechen</button><button type="submit" class="primary-button" id="move-submit">Hierher verschieben</button></div></form></dialog>
+  <dialog id="share-dialog" class="dialog share-dialog" aria-labelledby="share-title">
+    <form method="dialog">
+      <div class="dialog-head">
+        <div><h2 id="share-title">Teilen</h2><p id="share-item-name"></p></div>
+        <button type="button" class="icon-button" id="share-close" aria-label="Schliessen" title="Schliessen">×</button>
+      </div>
+      <p id="share-explanation" class="field-hint"></p>
+      <div id="share-link-field" hidden>
+        <label class="field-label" for="share-url">Freigabelink</label>
+        <input id="share-url" type="url" readonly spellcheck="false" autocomplete="off">
+      </div>
+      <p id="share-status" class="field-hint" role="status"></p>
+      <p id="share-error" class="form-save-error" role="alert" hidden></p>
+      <div class="dialog-actions">
+        <button type="button" id="share-native" class="quiet-button" hidden>Teilen …</button>
+        <button type="button" id="share-copy" class="primary-button" hidden>Link kopieren</button>
+        <button type="submit" id="share-create" class="primary-button">Link erstellen</button>
+      </div>
+    </form>
+  </dialog>
   <dialog id="import-dialog" class="dialog wide import-dialog" aria-labelledby="import-title"><form method="dialog" id="import-form"><div class="dialog-head"><div><div class="eyebrow">TEXTIMPORT</div><h2 id="import-title">Lernkarten aus Text erstellen</h2><p class="import-description">Eine Karte pro Zeile. Trenne Vorder- und Rückseite mit <code>=</code>. Einen Beispielsatz auf der Rückseite kannst du am Zeilenende in doppelte Klammern setzen: <code>((Beispielsatz.))</code>.</p></div><button type="button" class="icon-button" value="cancel" aria-label="Schliessen">×</button></div><div class="import-source"><label class="field-label" for="import-text">Lernmaterial</label><textarea id="import-text" rows="8" placeholder="das Haus = la maison&#10;der Hund = le chien&#10;die Katze = le chat"></textarea><div class="import-file-row"><label class="quiet-button file-button" for="import-file">＋ Textdatei wählen</label><input id="import-file" type="file" accept=".txt,text/plain"><span id="import-file-name" class="muted">TXT · UTF-8</span></div></div><div class="import-meta"><label class="field-label" for="import-set">Im Lernstapel speichern</label><select id="import-set"></select></div><div id="import-preview" class="import-preview" aria-live="polite"></div><div class="dialog-actions import-actions"><p class="import-action-hint" id="import-action-hint" role="status" aria-live="polite">Füge Lernmaterial ein oder wähle eine Textdatei.</p><div class="import-action-buttons"><button type="button" class="quiet-button" value="cancel">Abbrechen</button><button type="button" class="primary-button" id="import-submit" value="default" disabled>Import prüfen</button></div></div></form></dialog>
   <dialog id="reset-progress-dialog" class="dialog"><form method="dialog" id="reset-progress-form"><div class="dialog-head"><div><div class="eyebrow">LERNFORTSCHRITT</div><h2>Lernstapel zurücksetzen?</h2></div><button type="button" class="icon-button" id="reset-progress-close" aria-label="Schliessen">×</button></div><p class="muted" id="reset-progress-copy"></p><div class="dialog-actions"><button type="button" class="quiet-button" id="reset-progress-cancel">Abbrechen</button><button type="button" class="reset-confirm-button" id="reset-progress-confirm">Lernfortschritt zurücksetzen</button></div></form></dialog>
   <dialog id="settings-dialog" class="dialog settings-dialog" aria-labelledby="settings-title">

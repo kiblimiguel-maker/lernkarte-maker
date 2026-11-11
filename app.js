@@ -2,6 +2,7 @@ import { supabase } from './supabaseClient.js';
 import { cardListPage, libraryCardCounts, searchLibrary } from './library-view.mjs';
 import { studyKeyboardAction } from './study-keyboard.mjs';
 import { getAppAppearance } from './appearance.mjs';
+import { createLibraryShare, libraryShareUrl } from './library-sharing.mjs';
 import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown, parseDonationAmountCents, shouldShowDonationWelcome, setDonationReminderEnabled, isDonationReminderEnabled } from './donation-values.mjs';
 
 (() => {
@@ -322,7 +323,13 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
     }).join('');
   }
   function itemActions(type,item){
-    return `<details class="item-menu"><summary aria-label="Aktionen für ${esc(item.name)}" title="Aktionen">•••</summary><div class="item-menu-panel"><button data-move-item="${type}" data-item-id="${esc(item.id)}">Verschieben …</button><button data-item-edit="${type}" data-item-id="${esc(item.id)}">${type==='folder'?'Name & Farbe ändern':'Bearbeiten & Design'}</button><button class="danger-action" data-item-delete="${type}" data-item-id="${esc(item.id)}">${type==='folder'?'Ordner':'Lernstapel'} löschen</button></div></details>`;
+    return `<details class="item-menu"><summary aria-label="Aktionen für ${esc(item.name)}" title="Aktionen">•••</summary><div class="item-menu-panel"><button data-move-item="${type}" data-item-id="${esc(item.id)}">Verschieben …</button><button data-item-edit="${type}" data-item-id="${esc(item.id)}">${type==='folder'?'Name & Farbe ändern':'Bearbeiten & Design'}</button>${shareButton(type,item)}<button class="danger-action" data-item-delete="${type}" data-item-id="${esc(item.id)}">${type==='folder'?'Ordner':'Lernstapel'} löschen</button></div></details>`;
+  }
+  function shareButton(kind,item,detail=false){
+    return `<button type="button" class="library-share-button${detail?' quiet-button':''}" data-share-kind="${kind}" data-item-id="${esc(item.id)}" aria-haspopup="dialog"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15V3m-4 4 4-4 4 4M7 11H5a1 1 0 0 0-1 1v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7a1 1 0 0 0-1-1h-2"/></svg>Teilen</button>`;
+  }
+  function libraryDetailActions(kind,item,markup){
+    return `<div class="library-detail-actions">${shareButton(kind,item,true)}${managementActions(markup)}</div>`;
   }
   document.addEventListener('click',event=>{
     if(accountMenu.open&&!accountMenu.contains(event.target))accountMenu.open=false;
@@ -332,11 +339,129 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
     if(remove){event.preventDefault();remove.closest('details')?.removeAttribute('open');if(remove.dataset.itemDelete==='folder')deleteFolder(remove.dataset.itemId);else deleteSet(remove.dataset.itemId);return}
     const edit=event.target.closest('[data-item-edit]');
     if(edit){event.preventDefault();event.stopPropagation();edit.closest('details')?.removeAttribute('open');editEntity(edit.dataset.itemEdit,edit.dataset.itemId);return}
+    const share=event.target.closest('[data-share-kind]');
+    if(share){
+      const menu=share.closest('details');
+      const opener=menu?.querySelector('summary')||share;
+      if(menu)menu.open=false;
+      document.querySelectorAll('.item-menu[open]').forEach(item=>{item.open=false});
+      openShareDialog(share.dataset.shareKind,share.dataset.itemId,opener);
+      return;
+    }
     document.querySelectorAll('.item-menu[open]').forEach(menu=>{if(!menu.contains(event.target))menu.removeAttribute('open')});
   });
   $('#content').addEventListener('contextmenu',event=>{
     const tile=event.target.closest('.set-card,.folder-card'),menu=tile?.querySelector('.item-menu');
     if(menu&&!librarySortSaving){event.preventDefault();document.querySelectorAll('.item-menu[open]').forEach(item=>item.removeAttribute('open'));menu.open=true;menu.querySelector('button')?.focus()}
+  });
+
+  let shareContext=null;
+  const shareDialog=$('#share-dialog');
+  const shareCreate=$('#share-create');
+  const shareCopy=$('#share-copy');
+  const shareNative=$('#share-native');
+  const shareUrlField=$('#share-url');
+  const shareStatus=$('#share-status');
+  const shareError=$('#share-error');
+  function setShareError(message=''){
+    shareError.textContent=message;
+    shareError.hidden=!message;
+  }
+  function openShareDialog(kind,itemId,opener){
+    if(librarySortSaving||shareDialog.open)return;
+    const item=kind==='folder'?folder(itemId):setById(itemId);
+    if(!item)return;
+    shareContext={kind,itemId,name:item.name,owner:data,opener};
+    $('#share-title').textContent=kind==='folder'?'Ordner teilen':'Lernstapel teilen';
+    $('#share-item-name').textContent=item.name;
+    $('#share-explanation').textContent=kind==='folder'
+      ? 'Wer den Link hat, sieht eine Vorschau und kann den Ordner samt Unterordnern und Lernstapeln in die eigene Bibliothek kopieren.'
+      : 'Wer den Link hat, sieht eine Vorschau und kann den Lernstapel in die eigene Bibliothek kopieren.';
+    shareUrlField.value='';
+    $('#share-link-field').hidden=true;
+    shareCopy.hidden=true;
+    shareNative.hidden=true;
+    shareCreate.hidden=false;
+    shareCreate.disabled=false;
+    shareCreate.textContent='Link erstellen';
+    shareStatus.textContent='';
+    setShareError();
+    shareDialog.showModal();
+    shareCreate.focus();
+  }
+  function isCurrentShare(context){
+    return context&&shareDialog.open&&shareContext===context&&context.owner===data;
+  }
+  $('#share-close').addEventListener('click',()=>shareDialog.close());
+  shareDialog.addEventListener('close',()=>{
+    if(shareDialog.open)return;
+    const context=shareContext;
+    shareContext=null;
+    shareUrlField.value='';
+    $('#share-item-name').textContent='';
+    shareStatus.textContent='';
+    setShareError();
+    if(context?.owner===data&&context.opener?.isConnected)context.opener.focus();
+  });
+  shareDialog.querySelector('form').addEventListener('submit',async event=>{
+    event.preventDefault();
+    const context=shareContext;
+    if(!isCurrentShare(context)||shareCreate.disabled||shareCreate.hidden)return;
+    shareCreate.disabled=true;
+    shareCreate.textContent='Link wird vorbereitet …';
+    setShareError();
+    try{
+      let userId;
+      try{
+        userId=await window.WortwerkRepository.flushLibraryWrites();
+      }catch{
+        if(isCurrentShare(context))setShareError('Speichere deine Änderungen und versuche es erneut.');
+        return;
+      }
+      if(!isCurrentShare(context))return;
+      const token=await createLibraryShare(context.kind,context.itemId,userId);
+      if(!isCurrentShare(context))return;
+      shareUrlField.value=libraryShareUrl(token);
+      $('#share-link-field').hidden=false;
+      shareUrlField.setSelectionRange(0,0);
+      shareUrlField.scrollLeft=0;
+      shareCreate.hidden=true;
+      shareCopy.hidden=false;
+      shareNative.hidden=typeof navigator.share!=='function';
+      shareCopy.focus();
+    }catch(error){
+      if(!isCurrentShare(context))return;
+      if(error?.code==='P0002')setShareError('Dieser Inhalt ist in deiner Bibliothek nicht mehr verfügbar.');
+      else if(error?.code==='42501')setShareError('Melde dich erneut an, um diesen Inhalt zu teilen.');
+      else setShareError('Der Link konnte nicht erstellt werden. Prüfe deine Verbindung und versuche es erneut.');
+    }finally{
+      if(isCurrentShare(context)){
+        shareCreate.disabled=false;
+        shareCreate.textContent='Link erstellen';
+      }
+    }
+  });
+  shareCopy.addEventListener('click',async()=>{
+    const context=shareContext;
+    if(!isCurrentShare(context)||!shareUrlField.value)return;
+    try{
+      await navigator.clipboard.writeText(shareUrlField.value);
+      if(isCurrentShare(context))shareStatus.textContent='Link kopiert.';
+    }catch{
+      if(!isCurrentShare(context))return;
+      shareUrlField.focus();
+      shareUrlField.select();
+      shareStatus.textContent='Der Link ist markiert. Du kannst ihn manuell kopieren.';
+    }
+  });
+  shareNative.addEventListener('click',async()=>{
+    const context=shareContext;
+    if(!isCurrentShare(context)||!shareUrlField.value)return;
+    try{
+      await navigator.share({title:context.name,url:shareUrlField.value});
+    }catch(error){
+      if(isCurrentShare(context)&&error.name!=='AbortError')shareStatus.textContent='Verwende „Link kopieren“, um den Link weiterzugeben.';
+    }
   });
 
   let moveContext=null;
@@ -611,7 +736,7 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
     const sets=subjectSets(parent.id).filter(set=>set.folderId===item.id),children=subjectFolders(parent.id).filter(child=>child.parentId===item.id);crumbs(libraryCrumbs(item));
     const subfolders=children.length?`<section class="library-section"><div class="section-head"><h2>Unterordner <span class="count-label">${children.length}</span></h2></div><div class="folder-grid">${children.map(folderCard).join('')}</div></section>`:'';
     const stacks=sets.length?`<section class="library-section"><div class="section-head"><h2>Lernstapel <span class="count-label">${sets.length}</span></h2></div><div class="set-grid">${sets.map(setCard).join('')}</div></section>`:'';
-    $('#content').innerHTML=`<div class="subpage-heading">${backButton(folder(item.parentId)?.name||parent.name)}<div class="subject-heading library-folder-heading" style="--dot:${safeColor(item.color,defaultFolderColor)}"><span class="subject-icon" aria-hidden="true">${folderSymbol()}</span><div><div class="page-context">Ordner</div><h1 class="page-title">${esc(item.name)}</h1><p class="page-subtitle">${children.length} Unterordner · ${sets.length} Lernstapel</p></div></div>${managementActions(`<button id="edit-folder-current">Ordner bearbeiten</button><button data-move-item="folder" data-item-id="${esc(item.id)}">Ordner verschieben …</button><button class="danger-action" id="delete-folder-current">Ordner löschen</button>`)}</div><div class="section-actions library-folder-actions">${sortingButton()}<button class="quiet-button" id="add-subfolder">＋ Unterordner</button><button class="primary-button" id="folder-new-set">＋ Lernstapel erstellen</button></div>${subfolders}${stacks}${!children.length&&!sets.length?empty('Dieser Ordner ist leer','Lege einen Lernstapel oder einen Unterordner an.','▤'):''}`;
+    $('#content').innerHTML=`<div class="subpage-heading">${backButton(folder(item.parentId)?.name||parent.name)}<div class="subject-heading library-folder-heading" style="--dot:${safeColor(item.color,defaultFolderColor)}"><span class="subject-icon" aria-hidden="true">${folderSymbol()}</span><div><div class="page-context">Ordner</div><h1 class="page-title">${esc(item.name)}</h1><p class="page-subtitle">${children.length} Unterordner · ${sets.length} Lernstapel</p></div></div>${libraryDetailActions('folder',item,`<button id="edit-folder-current">Ordner bearbeiten</button><button data-move-item="folder" data-item-id="${esc(item.id)}">Ordner verschieben …</button><button class="danger-action" id="delete-folder-current">Ordner löschen</button>`)}</div><div class="section-actions library-folder-actions">${sortingButton()}<button class="quiet-button" id="add-subfolder">＋ Unterordner</button><button class="primary-button" id="folder-new-set">＋ Lernstapel erstellen</button></div>${subfolders}${stacks}${!children.length&&!sets.length?empty('Dieser Ordner ist leer','Lege einen Lernstapel oder einen Unterordner an.','▤'):''}`;
     $('#go-back').onclick=()=>{librarySorting=false;activeFolder=item.parentId||null;render()};$('#edit-folder-current').onclick=()=>editEntity('folder',item.id);$('#delete-folder-current').onclick=()=>deleteFolder(item.id);$('#folder-new-set').onclick=()=>openEntity('set');$('#add-subfolder').onclick=()=>openEntity('folder');bindFolderCards();bindSetCards();bindSubjectCards();
   }
   function renderSet(){
@@ -622,7 +747,7 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
     const previous=parentFolder?.name||parent?.name;
     const progress=window.WortwerkModel.getSetProgress(cards);
     const studyLabel=studyActionLabel(item.id);
-    $('#content').innerHTML=`<div class="subpage-heading">${backButton(previous)}<div><div class="page-context">${esc(parentFolder?.name||parent?.name||'Lernstapel')}</div><h1 class="page-title">${esc(item.name)}</h1><p class="page-subtitle">${esc(item.description||`${cards.length} ${cards.length===1?'Lernkarte':'Lernkarten'}`)}</p></div>${managementActions(`<button id="edit-set">Lernstapel bearbeiten</button><button data-move-item="set" data-item-id="${esc(item.id)}">Lernstapel verschieben …</button><button id="swap-card-sides" ${cards.length?'':'disabled'}>Vorder- und Rückseiten tauschen</button><button class="danger-action" id="delete-set">Lernstapel löschen</button>`)}</div>${cards.length?`<section class="study-banner" aria-labelledby="learning-progress-title"><div class="learning-progress-copy"><h2 id="learning-progress-title">Lernfortschritt</h2><p>${cards.length} ${cards.length===1?'Karte':'Karten'} · ${progress.secure} sicher · ${progress.practice} zu üben · ${progress.new} neu</p><div class="library-progress" role="progressbar" aria-label="Sicher beherrschte Karten" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${progress.percentage}"><span style="width:${progress.percentage}%"></span></div><small class="study-progress-caption">${progress.percentage}% sicher beherrscht · mindestens zwei richtige Antworten.</small></div><div class="study-banner-actions"><button class="primary-button" id="start-study">${studyLabel}</button><button class="quiet-button" id="reset-progress">Lernfortschritt zurücksetzen</button></div></section>`:''}<section class="library-section"><div class="section-head"><h2>Lernkarten <span class="count-label">${cards.length}</span></h2><div class="section-actions"><button class="quiet-button" id="import-this">Karten importieren</button><button class="quiet-button" id="add-card">＋ Karte erstellen</button></div></div>${cards.length?renderCardList(cards):empty('Noch keine Lernkarten','Erstelle deine erste Karte oder importiere mehrere Begriffe aus Text.','▤')}</section>`;
+    $('#content').innerHTML=`<div class="subpage-heading">${backButton(previous)}<div><div class="page-context">${esc(parentFolder?.name||parent?.name||'Lernstapel')}</div><h1 class="page-title">${esc(item.name)}</h1><p class="page-subtitle">${esc(item.description||`${cards.length} ${cards.length===1?'Lernkarte':'Lernkarten'}`)}</p></div>${libraryDetailActions('set',item,`<button id="edit-set">Lernstapel bearbeiten</button><button data-move-item="set" data-item-id="${esc(item.id)}">Lernstapel verschieben …</button><button id="swap-card-sides" ${cards.length?'':'disabled'}>Vorder- und Rückseiten tauschen</button><button class="danger-action" id="delete-set">Lernstapel löschen</button>`)}</div>${cards.length?`<section class="study-banner" aria-labelledby="learning-progress-title"><div class="learning-progress-copy"><h2 id="learning-progress-title">Lernfortschritt</h2><p>${cards.length} ${cards.length===1?'Karte':'Karten'} · ${progress.secure} sicher · ${progress.practice} zu üben · ${progress.new} neu</p><div class="library-progress" role="progressbar" aria-label="Sicher beherrschte Karten" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${progress.percentage}"><span style="width:${progress.percentage}%"></span></div><small class="study-progress-caption">${progress.percentage}% sicher beherrscht · mindestens zwei richtige Antworten.</small></div><div class="study-banner-actions"><button class="primary-button" id="start-study">${studyLabel}</button><button class="quiet-button" id="reset-progress">Lernfortschritt zurücksetzen</button></div></section>`:''}<section class="library-section"><div class="section-head"><h2>Lernkarten <span class="count-label">${cards.length}</span></h2><div class="section-actions"><button class="quiet-button" id="import-this">Karten importieren</button><button class="quiet-button" id="add-card">＋ Karte erstellen</button></div></div>${cards.length?renderCardList(cards):empty('Noch keine Lernkarten','Erstelle deine erste Karte oder importiere mehrere Begriffe aus Text.','▤')}</section>`;
     $('#go-back').onclick=()=>{librarySorting=false;activeSet=null;activeFolder=item.folderId||null;render()};$('#edit-set').onclick=()=>editEntity('set',item.id);$('#delete-set').onclick=()=>deleteSet(item.id);$('#start-study')?.addEventListener('click',()=>beginStudy(item.id));$('#reset-progress')?.addEventListener('click',()=>openResetProgress(item.id));$('#swap-card-sides').onclick=()=>swapSetSides(item.id);$('#add-card').onclick=()=>openEntity('card');$('#import-this').onclick=()=>openImport(item.id);
     bindCardList();bindSubjectCards();
   }
@@ -707,7 +832,7 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
       const rawName=fd.get('name').trim();
       const name=rawName||(existing?.name||window.WortwerkModel.nextSetName(data.sets,subjectId,folderId));
       const duplicate=data.sets.some(set=>set.id!==existing?.id&&set.subjectId===subjectId&&(set.folderId||null)===(folderId||null)&&set.name.trim().toLocaleLowerCase('de')===name.trim().toLocaleLowerCase('de'));
-      if(duplicate){toast('An diesem Speicherort gibt es bereits einen Lernstapel mit diesem Namen.');return}
+      if(duplicate&&(existing?.name!==name||(existing?.folderId||null)!==folderId)){toast('An diesem Speicherort gibt es bereits einen Lernstapel mit diesem Namen.');return}
       const selectedTheme=fd.get('cardThemeId')||null;const v={name,description:fd.get('description').trim(),folderId,cardThemeId:cardThemes.themes.some(theme=>theme.id===selectedTheme)?selectedTheme:null};
       if(existing){const moved=(existing.folderId||null)!==folderId;Object.assign(existing,v,{updatedAt:new Date().toISOString()});if(moved)existing.position=window.WortwerkModel.nextLibraryPosition(data,'set',existing)}
       else{
@@ -1120,6 +1245,51 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
     notice.querySelector('[data-recover]').onclick=async()=>{data=window.WortwerkModel.normalizeLibrary(window.WortwerkRepository.mergePendingLibrary(data,recovery.library));recoveryAwaitingChoice=false;notice.remove();render();try{await save();toast('Lokaler Lernstand wiederhergestellt.')}catch{toast('Der lokale Stand ist wieder geöffnet. Prüfe die Verbindung und speichere erneut.')}};
     notice.querySelector('[data-keep-server]').onclick=()=>{window.WortwerkRepository.discardPendingRecovery();recoveryAwaitingChoice=false;unsavedChanges=false;saveFailed=false;showSaveStatus('Serverstand geladen');notice.remove();render()};
   }
-  window.WortwerkReloadLibrary=async()=>{const version=++libraryLoadVersion;clearOrganisationPointer();moveDialog.close();try{const loaded=await window.WortwerkRepository.loadLibrary(window.WortwerkModel.normalizeLibrary);if(version!==libraryLoadVersion)return;data=loaded;render();offerPendingRecovery()}catch(error){if(version!==libraryLoadVersion)return;console.error('Lernbibliothek konnte nicht geladen werden.',error);$('#content').innerHTML='<section class="empty-state"><h2>Deine Bibliothek konnte nicht geladen werden.</h2><p>Bitte prüfe deine Verbindung und lade die Seite erneut.</p><button class="quiet-button" onclick="location.reload()">Erneut laden</button></section>'}};
+  window.WortwerkReloadLibrary=async()=>{
+    const version=++libraryLoadVersion;
+    clearOrganisationPointer();
+    moveDialog.close();
+    try{
+      const loaded=await window.WortwerkRepository.loadLibrary(window.WortwerkModel.normalizeLibrary);
+      if(version!==libraryLoadVersion)return false;
+      data=loaded;
+      render();
+      offerPendingRecovery();
+      return true;
+    }catch(error){
+      if(version!==libraryLoadVersion)return false;
+      console.error('Lernbibliothek konnte nicht geladen werden.',error);
+      $('#content').innerHTML='<section class="empty-state"><h2>Deine Bibliothek konnte nicht geladen werden.</h2><p>Bitte prüfe deine Verbindung und lade die Seite erneut.</p><button class="quiet-button" onclick="location.reload()">Erneut laden</button></section>';
+      return false;
+    }
+  };
+  window.WortwerkShareDestinations=()=>data.subjects.map(({id,name})=>({id,name}));
+  window.WortwerkSaveSharedCopy=async (expectedUserId,saveCopy,isCurrent)=>{
+    const version=libraryLoadVersion;
+    try{
+      const owner=await window.WortwerkRepository.flushLibraryWrites();
+      if(owner!==expectedUserId||version!==libraryLoadVersion)throw new Error('Die aktive Sitzung hat sich geändert. Bitte versuche es erneut.');
+    }catch(error){
+      throw Object.assign(error,{code:'SHARE_LIBRARY_NOT_READY'});
+    }
+    if(!isCurrent())return null;
+    const result=await saveCopy();
+    if(result&&!result.missing&&version===libraryLoadVersion&&isCurrent())await window.WortwerkReloadLibrary();
+    return result;
+  };
+  window.WortwerkOpenSharedCopy=async(kind,key)=>{
+    const find=kind==='folder'?folder:setById;
+    if(!find(key)&&!await window.WortwerkReloadLibrary())return false;
+    const item=find(key);
+    if(!item)return false;
+    activeSubject=item.subjectId;
+    activeFolder=kind==='folder'?item.id:item.folderId||null;
+    activeSet=kind==='set'?item.id:null;
+    expandedSidebarSubjects.add(activeSubject);
+    librarySorting=false;
+    view='library';
+    render();
+    return true;
+  };
   window.WortwerkAppReady=window.WortwerkReloadLibrary();
 })();

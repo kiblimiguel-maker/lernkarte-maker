@@ -295,6 +295,15 @@ button:disabled { opacity: .45; cursor: not-allowed; }
   border-color: var(--accent);
 }
 .dialog-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--divider); }
+.shared-library-dialog .dialog-head { margin-bottom: 12px; }
+#shared-library-title:focus { outline: none; }
+.shared-library-dialog p { margin: 0 0 12px; overflow-wrap: anywhere; }
+.shared-library-dialog .shared-library-counts { font-variant-numeric: tabular-nums; }
+#shared-library-destination { margin-block: 20px 14px; }
+#shared-library-status:empty { display: none; }
+@media (max-width: 480px) {
+  .shared-library-dialog .dialog-actions > button { flex: 1 0 auto; }
+}
 .settings-dialog { width: min(880px, calc(100vw - 24px)); }
 :is(.settings-dialog, .has-set-design, .has-subject-appearance, .has-folder-appearance, .import-dialog) { scroll-padding-bottom: 88px; }
 :is(.settings-dialog, .has-set-design, .has-subject-appearance, .has-folder-appearance, .import-dialog) .dialog-actions {
@@ -1208,6 +1217,18 @@ summary::-webkit-details-marker { display: none; }
 .move-item-name { margin: 0 0 7px; font-size: 18px; font-weight: 550; overflow-wrap: anywhere; }
 .move-dialog { width: min(500px,calc(100vw - 24px)); }
 .move-dialog select { width: 100%; }
+.library-detail-actions { display: flex; flex: none; align-items: center; gap: 8px; }
+.library-share-button { display: inline-flex; align-items: center; gap: 8px; }
+.library-share-button svg { flex: none; }
+.library-detail-actions .library-share-button { min-height: 44px; }
+.share-dialog .dialog-head { margin-bottom: 14px; }
+#share-item-name { margin: 5px 0 0; color: var(--muted); overflow-wrap: anywhere; }
+#share-status:empty { margin: 0; }
+@media (max-width: 560px) {
+  .subpage-heading:has(.library-detail-actions) { flex-wrap: wrap; }
+  .subpage-heading .library-detail-actions { flex-basis: 100%; justify-content: flex-end; }
+  .subpage-heading .library-detail-actions .management-menu { margin-left: 0; }
+}
 .appearance-field { padding: 0; margin: 24px 0 0; border: 0; min-width: 0; }
 .appearance-field legend { color: var(--soft); font-size: 12px; margin-bottom: 11px; }
 .appearance-field .color-palette { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 7px; }

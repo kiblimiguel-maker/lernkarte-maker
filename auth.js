@@ -2,6 +2,8 @@ import { inject } from '@vercel/analytics';
 import { isSupabaseConfigured, supabase } from './supabaseClient.js';
 import { createAuthLifecycle } from './auth-lifecycle.mjs';
 import { getAppAppearance } from './appearance.mjs';
+import { createLibraryShareReceiver } from './library-share-receiver.js';
+import { forgetShareForSignIn, rememberShareForSignIn } from './library-sharing.mjs';
 
 // Apply the same saved surface during authentication and in the library.
 getAppAppearance();
@@ -32,6 +34,8 @@ let authEventObserved = false;
 let signingIn = false;
 let signingOut = false;
 let reloadingApp = false;
+let accountUserId = null;
+const sharedLibrary = createLibraryShareReceiver({ signIn: startGoogleSignIn });
 
 // An open tab can still request chunks from the build preceding a deployment.
 // Reload at most once per build, and leave a manual action if that fails.
@@ -87,9 +91,11 @@ function showSignedOut(message = '') {
   googleButton.disabled = !isSupabaseConfigured || signingIn;
   googleButton.setAttribute('aria-busy', String(signingIn));
   googleButton.querySelector('span').textContent = signingIn ? 'Weiter zu Google …' : 'Mit Google anmelden';
-  setError(message || (!isSupabaseConfigured
+  const notice = message || (!isSupabaseConfigured
     ? 'Die Anmeldung ist noch nicht konfiguriert. Bitte ergänze die Supabase-Umgebungsvariablen.'
-    : ''));
+    : '');
+  setError(notice);
+  sharedLibrary.setAuth('signed-out', { message: notice });
 }
 
 async function loadExistingApp() {
@@ -107,10 +113,12 @@ const lifecycle = createAuthLifecycle({
   reloadApp: () => window.WortwerkReloadLibrary?.(),
   updateAccount(user) {
     setError('');
+    accountUserId = user.id;
     accountEmail.textContent = user.email || 'Angemeldet';
     signOutButton.disabled = signingOut;
   },
   showLoading() {
+    sharedLibrary.setAuth('loading', { id: accountUserId });
     authScreen.hidden = true;
     authLoading.hidden = true;
     bootScreen.hidden = false;
@@ -120,13 +128,16 @@ const lifecycle = createAuthLifecycle({
     bootScreen.hidden = true;
     appShell.hidden = false;
     authScreen.hidden = true;
+    sharedLibrary.setAuth('ready', { id: accountUserId });
   },
   showSignedOut,
   resetWorkspace: () => window.WortwerkResetWorkspace?.(),
   onError(error) {
     console.error(error);
     if (reloadingApp) return;
-    showSignedOut('Die Lernkarten-App konnte nicht geladen werden. Lade die App neu, um es erneut zu versuchen.');
+    const message = 'Die Lernkarten-App konnte nicht geladen werden. Lade die App neu, um es erneut zu versuchen.';
+    showSignedOut(message);
+    sharedLibrary.setAuth('app-error', { message });
     authRetry.hidden = false;
   }
 });
@@ -136,13 +147,19 @@ function applySession(session, message = '') {
   return lifecycle.apply(session, message);
 }
 
-googleButton.addEventListener('click', async () => {
+googleButton.addEventListener('click', startGoogleSignIn);
+async function startGoogleSignIn() {
   if (!supabase || signingIn) return;
+  if (!rememberShareForSignIn()) {
+    sharedLibrary.setAuth('signed-out', { message: 'Dieser Browser kann den Link während der Anmeldung nicht merken. Schliesse die Vorschau, melde dich an und öffne den Link erneut.' });
+    return;
+  }
   signingIn = true;
   setError('');
   googleButton.disabled = true;
   googleButton.setAttribute('aria-busy', 'true');
   googleButton.querySelector('span').textContent = 'Weiter zu Google …';
+  sharedLibrary.setAuth('signing-in');
 
   try {
     const redirectTo = new URL(window.location.pathname, window.location.origin).toString();
@@ -152,11 +169,12 @@ googleButton.addEventListener('click', async () => {
     });
     if (error) throw error;
   } catch (error) {
+    forgetShareForSignIn();
     signingIn = false;
     showSignedOut('Die Anmeldung konnte nicht gestartet werden. Bitte prüfe deine Verbindung und versuche es erneut.');
     console.error('Google OAuth konnte nicht gestartet werden.', error);
   }
-});
+}
 
 signOutButton.addEventListener('click', async () => {
   if (!supabase || signingOut) return;
