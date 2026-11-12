@@ -155,10 +155,6 @@
         <div><div class="eyebrow">TEXTIMPORT</div><h2 id="import-title">Lernkarten aus Text erstellen</h2></div>
         <button type="button" class="icon-button" value="cancel" aria-label="Schliessen">×</button>
       </div>
-      <div class="import-app-update" id="import-app-update" hidden>
-        <p id="import-app-update-status" role="status"></p>
-        <button type="button" class="quiet-button" id="import-app-reload">Seite neu laden</button>
-      </div>
       <div class="import-format">
         <fieldset id="import-mode">
           <legend class="field-label">Importformat</legend>
@@ -185,6 +181,10 @@
       <div class="import-meta"><label class="field-label" for="import-set">Im Lernstapel speichern</label><select id="import-set"></select></div>
       <div id="import-preview" class="import-preview" aria-live="polite"></div>
       <div class="dialog-actions import-actions">
+        <div class="import-app-update" id="import-app-update" hidden>
+          <p id="import-app-update-status" role="status"></p>
+          <button type="button" class="quiet-button" id="import-app-reload">Seite neu laden</button>
+        </div>
         <p class="import-action-hint" id="import-action-hint" role="status" aria-live="polite">Füge Lernmaterial ein oder wähle eine Textdatei.</p>
         <div class="import-action-buttons">
           <button type="button" class="quiet-button" value="cancel">Abbrechen</button>
