@@ -414,6 +414,8 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 /* Text import and editable preview */
 .import-description { max-width: 64ch; margin: 8px 0 0; }
 .import-description code { padding: 2px 4px; border-radius: 4px; background: var(--surface-subtle); color: var(--text); font-size: 11px; }
+.import-format { margin-bottom: 16px; }
+.import-format .field-label { margin-top: 0; }
 .import-source { padding-bottom: 15px; border-bottom: 1px solid var(--divider); }
 .import-source .field-label, .import-meta .field-label { margin-top: 0; }
 .import-source textarea { min-height: 142px; max-height: 45dvh; }
@@ -441,6 +443,11 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .row-remove { width: 38px; height: 44px; padding: 0; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--muted); font-size: 18px; }
 .row-remove:hover { background: var(--danger-surface); color: var(--danger); }
 #import-preview-more { margin-block: 8px; }
+.verb-edit { min-width: 0; margin: 20px 0 0; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius-control); }
+.verb-edit legend { padding-inline: 4px; color: var(--text); font-size: 13px; font-weight: 610; }
+.verb-edit-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.verb-edit-field { display: grid; gap: 4px; min-width: 0; color: var(--muted); font-size: 12px; }
+.verb-edit-forms { grid-template-rows: repeat(3, auto); grid-auto-flow: column; margin-top: 8px; }
 @media (max-width: 520px) {
   .import-dialog { scroll-padding-bottom: 148px; }
   .import-source textarea { height: clamp(142px, 24dvh, 205px); }

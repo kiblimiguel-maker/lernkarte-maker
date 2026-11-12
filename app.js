@@ -4,6 +4,8 @@ import { studyKeyboardAction } from './study-keyboard.mjs';
 import { getAppAppearance } from './appearance.mjs';
 import { createLibraryShare, libraryShareUrl } from './library-sharing.mjs';
 import { frenchImportPrompt, importGuideExamples } from './import-guide.mjs';
+import { formatFrenchVerbSide, frenchVerbExample, frenchVerbFormLabels, frenchVerbPrompt, parseFrenchVerbImport, parseFrenchVerbSide, validateFrenchVerbSide } from './french-verbs.mjs';
+import { frenchVerbCardMarkup } from './french-verb-card.mjs';
 import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown, parseDonationAmountCents, shouldShowDonationWelcome, setDonationReminderEnabled, isDonationReminderEnabled } from './donation-values.mjs';
 
 (() => {
@@ -78,22 +80,43 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
   function cardSideContent(card,side){
     const text=String(card?.[side]??'');
     const savedExample=String(card?.[`${side}ExampleSentence`]??'').trim();
+    const verb=parseFrenchVerbSide(text);
+    if(verb)return{term:verb.infinitive,exampleSentence:savedExample,verb};
     if(savedExample)return{term:text,exampleSentence:savedExample};
     return window.WortwerkParser.parseExampleSide(text)||{term:text,exampleSentence:''};
   }
+  function verbCardMarkup(card,side,verb){
+    return frenchVerbCardMarkup(verb,cardSideContent(card,side==='front'?'back':'front').term);
+  }
   function cardSideMarkup(card,side){
     const content=cardSideContent(card,side);
-    return `<span class="card-content-main">${genderMarkup(content.term)}</span>${content.exampleSentence?`<span class="card-example">(${esc(content.exampleSentence)})</span>`:''}`;
+    const main=content.verb?verbCardMarkup(card,side,content.verb):`<span class="card-content-main">${genderMarkup(content.term)}</span>`;
+    return main+(content.exampleSentence?`<span class="card-example">(${esc(content.exampleSentence)})</span>`:'');
   }
   function genderMarkup(value){return window.WortwerkPresentation.genderSegments(value).map(segment=>`<span${segment.gender?` class="gender-${segment.gender==='m'?'masculine':'feminine'}"`:''}>${esc(segment.text)}</span>`).join('')}
   function describeCardSide(card,side){
     const content=cardSideContent(card,side);
+    if(content.verb){
+      const {infinitive,stem,auxiliary,participle,forms}=content.verb;
+      const meaning=cardSideContent(card,side==='front'?'back':'front').term;
+      const description=[
+        meaning,infinitive,stem&&`Stamm ${stem}`,`Hilfsverb ${auxiliary}`,`Partizip ${participle}`,
+        ...forms.map(({pronoun,form,separator})=>pronoun+separator+form),
+        content.exampleSentence&&`Beispielsatz: ${content.exampleSentence}`,
+      ].filter(Boolean).join('. ');
+      return `${side==='back'?'Rückseite':'Vorderseite'}: ${description}`;
+    }
     return `${side==='back'?'Rückseite':'Vorderseite'}: ${content.term}${content.exampleSentence?`. Beispielsatz: ${content.exampleSentence}`:''}`;
   }
   function populateStudyCard(slot,card){
-    const front=cardSideContent(card,'front'),back=cardSideContent(card,'back');
-    slot.frontText.innerHTML=genderMarkup(front.term);slot.frontExampleText.textContent=front.exampleSentence?`(${front.exampleSentence})`:'';slot.frontExampleText.hidden=!front.exampleSentence;
-    slot.backText.innerHTML=genderMarkup(back.term);slot.backExampleText.textContent=back.exampleSentence?`(${back.exampleSentence})`:'';slot.backExampleText.hidden=!back.exampleSentence;
+    for(const side of ['front','back']){
+      const {term,exampleSentence,verb}=cardSideContent(card,side);
+      const copy=slot[`${side}Text`],example=slot[`${side}ExampleText`];
+      copy.classList.toggle('is-verb-card',Boolean(verb));
+      copy.innerHTML=verb?verbCardMarkup(card,side,verb):genderMarkup(term);
+      example.textContent=exampleSentence?`(${exampleSentence})`:'';
+      example.hidden=!exampleSentence;
+    }
   }
   function toast(message){const inline=$('#form-save-error');if($('#form-dialog')?.open&&inline){inline.textContent=message;inline.hidden=false;return}const el=document.createElement('div');el.className='toast';el.setAttribute('role','status');el.textContent=message;document.body.append(el);setTimeout(()=>el.remove(),2400)}
   function cardThemePreview(theme){
@@ -173,7 +196,7 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
         <header class="page-heading">
           <div>
             <h1 class="page-title" id="guide-title" tabindex="-1">Anleitung</h1>
-            <p class="page-subtitle">Lernkarten aus Text erstellen und französische Vokabeln für den Import vorbereiten.</p>
+            <p class="page-subtitle">Lernkarten aus Text erstellen und französische Vokabeln oder Verben für den Import vorbereiten.</p>
           </div>
         </header>
         <section class="guide-section" aria-labelledby="guide-format-title">
@@ -214,11 +237,31 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
             <pre class="guide-example"><code>${esc(importGuideExamples.join('\n'))}</code></pre>
           </details>
         </section>
+        <section class="guide-section" aria-labelledby="guide-verb-title">
+          <div class="guide-prompt-heading">
+            <div>
+              <h2 id="guide-verb-title">KI-Prompt für französische Verben</h2>
+              <p>Lade deine Verbenliste in der KI deiner Wahl hoch und sende ihr diesen Prompt. Füge ihre Antwort unter <strong>Karten importieren → Französische Verben</strong> ein.</p>
+            </div>
+            <div class="guide-copy-actions">
+              <button type="button" class="primary-button" id="guide-copy-verb-prompt">Prompt kopieren</button>
+              <p class="guide-copy-status" id="guide-verb-copy-status" role="status"></p>
+            </div>
+          </div>
+          <label class="sr-only" for="guide-verb-prompt">KI-Prompt für französische Verben</label>
+          <textarea id="guide-verb-prompt" class="guide-prompt" readonly spellcheck="false" rows="12"></textarea>
+          <details class="guide-examples">
+            <summary>Beispielausgabe ansehen</summary>
+            <pre class="guide-example"><code>${esc(frenchVerbExample)}</code></pre>
+          </details>
+        </section>
       </section>`;
-    const prompt=$('#guide-prompt');
-    const status=$('#guide-copy-status');
-    prompt.value=frenchImportPrompt;
-    $('#guide-copy-prompt').addEventListener('click',async()=>{
+    bindGuidePrompt($('#guide-prompt'),$('#guide-copy-prompt'),$('#guide-copy-status'),frenchImportPrompt);
+    bindGuidePrompt($('#guide-verb-prompt'),$('#guide-copy-verb-prompt'),$('#guide-verb-copy-status'),frenchVerbPrompt);
+  }
+  function bindGuidePrompt(prompt,button,status,value){
+    prompt.value=value;
+    button.addEventListener('click',async()=>{
       try{
         await navigator.clipboard.writeText(prompt.value);
         if(prompt.isConnected)showCopyConfirmation(status,'Prompt kopiert.');
@@ -864,6 +907,33 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
   function refreshCardRows(){const cards=setCards(activeSet),page=cardListPage(cards,cardListQuery,cardListLimit);$('#card-list-results').innerHTML=cardRows(page,new Map(cards.map((card,index)=>[card.id,index])),cards.length);$('.card-list-count').textContent=`${page.cards.length} von ${page.total} ${cardListQuery?(page.total===1?'Treffer':'Treffern'):(page.total===1?'Karte':'Karten')}`;bindCardList()}
   function openEntity(type){formContext={type};fillForm(type);$('#form-dialog').showModal()}
   function editEntity(type,key){formContext={type,key};fillForm(type, type==='subject'?subject(key):type==='folder'?folder(key):setById(key));$('#form-dialog').showModal()}
+  function verbSideFields(side,label,verb){
+    const field=(name,caption,value,required=true)=>`<label class="verb-edit-field" for="f-${side}-${name}">
+      <span>${caption}</span><input id="f-${side}-${name}" name="${side}-${name}" value="${esc(value)}" ${required?'required':''}>
+    </label>`;
+    return `<fieldset class="verb-edit">
+      <legend>${label} · Französisches Verb</legend>
+      <div class="verb-edit-grid">
+        ${field('infinitive','Infinitiv',verb.infinitive)}
+        ${field('stem','Verbstamm (optional)',verb.stem,false)}
+        <label class="verb-edit-field" for="f-${side}-auxiliary"><span>Hilfsverb</span>
+          <select id="f-${side}-auxiliary" name="${side}-auxiliary">
+            ${['avoir','être','avoir / être'].map(value=>`<option${verb.auxiliary===value?' selected':''}>${value}</option>`).join('')}
+          </select>
+        </label>
+        ${field('participle','Partizip Perfekt',verb.participle)}
+      </div>
+      <div class="field-hint">Schreibe die Präsensformen mit ihrem Pronomen, z. B. «je cours».</div>
+      <div class="verb-edit-grid verb-edit-forms">
+        ${verb.forms.map(({pronoun,separator,form},index)=>field(`form-${index}`,frenchVerbFormLabels[index],pronoun+separator+form)).join('')}
+      </div>
+    </fieldset>`;
+  }
+  function cardSideFields(card,side,label,placeholder){
+    const {term,exampleSentence,verb}=cardSideContent(card,side);
+    const fields=verb?verbSideFields(side,label,verb):`<label class="field-label" for="f-${side}">${label}</label><textarea id="f-${side}" name="${side}" rows="3" maxlength="${side==='front'?2000:3000}" required placeholder="${placeholder}">${esc(term)}</textarea>`;
+    return fields+`<label class="field-label" for="f-${side}-example">Beispielsatz auf der ${label} <span class="optional-label">(optional)</span></label><textarea id="f-${side}-example" name="${side}ExampleSentence" rows="2" maxlength="3000" placeholder="Ein Beispielsatz zur ${label}">${esc(exampleSentence)}</textarea>`;
+  }
   function fillForm(type,entity){const dialog=$('#form-dialog');dialog.classList.toggle('has-set-design',type==='set');dialog.classList.toggle('has-subject-appearance',type==='subject');dialog.classList.toggle('has-folder-appearance',type==='folder');$('#form-save-error').hidden=true;$('#form-save-error').textContent='';const title=entity?`Bearbeite ${{subject:'Fach',folder:'Ordner',set:'Lernstapel',card:'Lernkarte'}[type]}`:({subject:'Fach anlegen',folder:'Ordner anlegen',set:'Lernstapel erstellen',card:'Lernkarte erstellen'})[type];$('#form-title').textContent=title;$('#form-eyebrow').textContent=entity?'BEARBEITEN':'NEU IN DEINER BIBLIOTHEK';$('#form-submit').textContent=entity?'Speichern':'Erstellen';let fields='';const input=(name,label,value='',placeholder='',required=true)=>`<label class="field-label" for="f-${name}">${label}</label><input id="f-${name}" name="${name}" value="${esc(value)}" placeholder="${esc(placeholder)}" maxlength="100" ${required?'required':''}>`;
     if(type==='subject'){
       const subjectIndex=entity?data.subjects.indexOf(entity):data.subjects.length;
@@ -886,8 +956,9 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
     }
     if(type==='set')fields+=setDesignFields(entity?.cardThemeId||'');
     if(type==='card'){
-      const c=entity,front=cardSideContent(c,'front'),back=cardSideContent(c,'back');
-      fields=`<label class="field-label" for="f-front">Vorderseite</label><textarea id="f-front" name="front" rows="3" maxlength="2000" required placeholder="Begriff, Frage oder Wort">${esc(c?front.term:'')}</textarea><label class="field-label" for="f-front-example">Beispielsatz auf der Vorderseite <span class="optional-label">(optional)</span></label><textarea id="f-front-example" name="frontExampleSentence" rows="2" maxlength="3000" placeholder="Ein Beispielsatz zur Vorderseite">${esc(front.exampleSentence)}</textarea><label class="field-label" for="f-back">Rückseite</label><textarea id="f-back" name="back" rows="3" maxlength="3000" required placeholder="Übersetzung, Antwort oder Erklärung">${esc(c?back.term:'')}</textarea><label class="field-label" for="f-back-example">Beispielsatz auf der Rückseite <span class="optional-label">(optional)</span></label><textarea id="f-back-example" name="backExampleSentence" rows="2" maxlength="3000" placeholder="Ein Beispielsatz zur Rückseite">${esc(back.exampleSentence)}</textarea><div class="field-hint">Beispielsätze werden beim Lernen kleiner unter dem Begriff angezeigt.</div>`;
+      fields=cardSideFields(entity,'front','Vorderseite','Begriff, Frage oder Wort')+
+        cardSideFields(entity,'back','Rückseite','Übersetzung, Antwort oder Erklärung')+
+        '<div class="field-hint">Beispielsätze werden beim Lernen kleiner unter dem Begriff angezeigt.</div>';
     }
     $('#form-fields').innerHTML=fields;if(type==='subject'||type==='folder')bindColourPicker();if(type==='subject')bindSubjectAppearance();if(type==='set'){bindSetSubject();bindSetDesign()}$('#form-submit').onclick=e=>{e.preventDefault();submitEntity()};$('#entity-form').onsubmit=e=>{e.preventDefault();submitEntity()}}
   function bindSetSubject(){const selector=$('#f-subject');if(!selector)return;selector.addEventListener('change',()=>{$('#f-folder').innerHTML=`<option value="">Ohne Ordner</option>${subjectFolders(selector.value).map(item=>`<option value="${esc(item.id)}">${esc(folderLabel(item))}</option>`).join('')}`})}
@@ -951,9 +1022,16 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
       updateMissedSetActions();
     }
     if(type==='card'){
-      const v={front:fd.get('front').trim(),back:fd.get('back').trim()},examples={frontExampleSentence:fd.get('frontExampleSentence').trim(),backExampleSentence:fd.get('backExampleSentence').trim()},timestamp=new Date().toISOString();
-      if(!v.front||!v.back){toast('Vorder- und Rückseite dürfen nicht leer sein.');return}
       const card=formContext.key?data.cards.find(c=>c.id===formContext.key):null;
+      const v={},examples={frontExampleSentence:fd.get('frontExampleSentence').trim(),backExampleSentence:fd.get('backExampleSentence').trim()},timestamp=new Date().toISOString();
+      for(const side of ['front','back']){
+        if(fd.has(side)){v[side]=fd.get(side).trim();continue}
+        const names=['infinitive','stem','auxiliary','participle',...frenchVerbFormLabels.map((_,index)=>`form-${index}`)];
+        const {verb,reason}=validateFrenchVerbSide(names.map(name=>fd.get(`${side}-${name}`)).join(' | '));
+        if(!verb){toast(reason);return}
+        v[side]=formatFrenchVerbSide(verb);
+      }
+      if(!v.front||!v.back){toast('Vorder- und Rückseite dürfen nicht leer sein.');return}
       if(card){Object.assign(card,v,{updatedAt:timestamp});for(const [key,value] of Object.entries(examples)){if(value)card[key]=value;else delete card[key]}}
       else data.cards.push({id:id(),setId:activeSet,...v,...Object.fromEntries(Object.entries(examples).filter(([,value])=>value)),position:setCards(activeSet).length,correctCount:0,incorrectCount:0,attemptCount:0,lastReviewedAt:null,nextReviewAt:null,createdAt:timestamp,updatedAt:timestamp});
       const s=setById(activeSet);if(s)s.updatedAt=timestamp;
@@ -975,7 +1053,20 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
   function deleteFolder(key){const f=folder(key);if(!f||!confirm(`Ordner „${f.name}“ löschen? Lernstapel und Unterordner bleiben erhalten und werden eine Ebene nach oben verschoben.`))return;data.folders=data.folders.filter(x=>x.id!==key);data.sets.forEach(s=>{if(s.folderId===key){s.folderId=f.parentId||null;s.position=window.WortwerkModel.nextLibraryPosition(data,'set',s)}});data.folders.forEach(child=>{if(child.parentId===key){child.parentId=f.parentId||null;child.position=window.WortwerkModel.nextLibraryPosition(data,'folder',child)}});if(activeFolder===key)activeFolder=f.parentId||null;refreshLibraryOrder();save();render();toast('Ordner gelöscht')}
   function deleteSet(key){const s=setById(key);if(!s||!confirm(`„${s.name}“ und alle zugehörigen Karten löschen?`))return;data.sets=data.sets.filter(x=>x.id!==key);data.cards=data.cards.filter(c=>c.setId!==key);data.recent=data.recent.filter(r=>r.setId!==key);delete data.studySessions[key];data.studyHistory=data.studyHistory.filter(entry=>entry.setId!==key);activeSet=null;save();render();toast('Set gelöscht')}
   function swapSetSides(key){const item=setById(key),cards=setCards(key);if(!item)return;if(!cards.length){toast('In diesem Lernstapel gibt es keine Karten.');return}if(session?.setId===key){toast('Beende zuerst die laufende Lerneinheit, damit die Karten konsistent bleiben.');return}if(!confirm(`Vorder- und Rückseiten aller ${cards.length} Karten im Lernstapel „${item.name}“ vertauschen?`))return;const count=window.WortwerkModel.swapSetCardSides(data.cards,key,new Date().toISOString());if(!count)return;save();render();toast(`Vorder- und Rückseiten von ${count} Karten getauscht`)}
-  function parseImport(text){return window.WortwerkParser.parseImport(text)}
+  const isVerbImport=()=>$('#import-mode').value==='french-verbs';
+  function updateImportFormat(){
+    const verbs=isVerbImport();
+    $('#import-vocabulary-description').hidden=verbs;
+    $('#import-verb-description').hidden=!verbs;
+    const input=$('#import-text');
+    input.placeholder=verbs?frenchVerbExample:'das Haus = la maison\nder Hund = le chien\ndie Katze = le chat';
+    input.setAttribute('aria-describedby',verbs?'import-verb-description':'import-vocabulary-description');
+  }
+  function resetImportPreview(message=''){
+    importRows=[];importErrors=[];importChecked=false;importHasErrors=false;
+    $('#import-preview').innerHTML=message?`<p class="field-hint">${esc(message)}</p>`:'';
+    updateImportActionState();
+  }
   function updateImportActionState(){
     const button=$('#import-submit'),hint=$('#import-action-hint');
     const previewCount=$('#import-preview .preview-head span:last-child');
@@ -986,11 +1077,24 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
     if(importRows.some(row=>!row.front.trim()||!row.back.trim())){button.textContent='Leere Seiten beheben';button.disabled=true;hint.textContent='Ergänze Vorder- und Rückseite in der Vorschau.';return}
     button.textContent='Lernkarten erstellen';button.disabled=false;hint.textContent=`Vorschau geprüft · ${importRows.length} ${importRows.length===1?'Karte':'Karten'} bereit.`;
   }
-  function openImport(targetSet){if(!data.sets.length){toast('Erstelle zuerst ein Set für den Import.');return}$('#import-text').value='';$('#import-file').value='';$('#import-file-name').textContent='TXT · UTF-8';const select=$('#import-set');select.innerHTML=data.sets.map(s=>`<option value="${esc(s.id)}" ${targetSet===s.id?'selected':''}>${esc(subject(s.subjectId)?.name||'Fach')} · ${esc(s.name)}</option>`).join('');importRows=[];importChecked=false;importHasErrors=false;$('#import-preview').innerHTML='';updateImportActionState();$('#import-dialog').showModal()}
-  function updateImportPreview(){const result=parseImport($('#import-text').value);importRows=result.rows.map(row=>({...row}));importErrors=result.errors;importChecked=true;importHasErrors=result.errors.length>0;importPreviewLimit=100;renderImportPreview()}
+  function openImport(targetSet){if(!data.sets.length){toast('Erstelle zuerst ein Set für den Import.');return}$('#import-text').value='';$('#import-file').value='';$('#import-file-name').textContent='TXT · UTF-8';$('#import-mode').value='vocabulary';updateImportFormat();const select=$('#import-set');select.innerHTML=data.sets.map(s=>`<option value="${esc(s.id)}" ${targetSet===s.id?'selected':''}>${esc(subject(s.subjectId)?.name||'Fach')} · ${esc(s.name)}</option>`).join('');resetImportPreview();$('#import-dialog').showModal()}
+  function updateImportPreview(){
+    const text=$('#import-text').value;
+    const result=isVerbImport()?parseFrenchVerbImport(text):window.WortwerkParser.parseImport(text);
+    importRows=result.rows.map(row=>({...row}));importErrors=result.errors;importChecked=true;importHasErrors=result.errors.length>0;importPreviewLimit=100;
+    renderImportPreview();
+  }
+  function importVerbPreview(row,index){
+    return `<div class="preview-line verb-preview">
+      <span class="preview-index">${row.line}</span>
+      <div class="preview-front"><span class="muted">Vorderseite</span> <strong>${esc(row.front)}</strong></div>
+      <div class="preview-back"><span class="sr-only">Rückseite</span>${cardSideMarkup(row,'back')}</div>
+      <button type="button" class="row-remove" data-import-remove="${index}" aria-label="Karte aus Vorschau entfernen">×</button>
+    </div>`;
+  }
   function renderImportPreview(){
-    const preview=$('#import-preview');
-    const rows=importRows.slice(0,importPreviewLimit).map((row,index)=>`
+    const preview=$('#import-preview'),verbs=isVerbImport();
+    const rows=importRows.slice(0,importPreviewLimit).map((row,index)=>verbs?importVerbPreview(row,index):`
       <div class="preview-line editable-preview">
         <span class="preview-index">${row.line}</span>
         <div class="preview-side preview-front">
@@ -1013,7 +1117,8 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
     $('#import-preview-more')?.addEventListener('click',()=>{importPreviewLimit+=100;renderImportPreview()});
     updateImportActionState();
   }
-  $('#import-text').addEventListener('input',()=>{importRows=[];importChecked=false;importHasErrors=false;$('#import-preview').innerHTML=$('#import-text').value.trim()?'<p class="field-hint">Text geändert. Prüfe den Import erneut, um die Vorschau zu aktualisieren.</p>':'';updateImportActionState()});
+  $('#import-mode').addEventListener('change',()=>{updateImportFormat();resetImportPreview()});
+  $('#import-text').addEventListener('input',()=>resetImportPreview($('#import-text').value.trim()?'Text geändert. Prüfe den Import erneut, um die Vorschau zu aktualisieren.':''));
   $('#import-preview').addEventListener('input',event=>{
     const {importFront,importBack,importFrontExample,importBackExample}=event.target.dataset;
     const value=event.target.value;
@@ -1159,7 +1264,7 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
     if(hasNext){
       const nextCard=window.WortwerkModel.getStudyCard(session,nextCardId);
       populateStudyCard(stack,nextCard);
-      stack.button.setAttribute('aria-label','Nächste Karte: '+nextCard.front);
+      stack.button.setAttribute('aria-label','Nächste Karte. '+describeCardSide(nextCard,'front'));
       stack.button.disabled=true;
       stack.button.tabIndex=-1;
       resetSlotOrientation(stack);

@@ -24,6 +24,7 @@
   <link rel="icon" type="image/png" sizes="1024x1024" href="assets/app-icon.png">
   <link rel="apple-touch-icon" sizes="1024x1024" href="assets/app-icon.png">
   <link rel="stylesheet" href="app.css">
+  <link rel="stylesheet" href="french-verb-card.css">
 </head>
 <body>
   <main class="auth-screen" id="boot-screen" aria-live="polite">
@@ -148,7 +149,41 @@
       </div>
     </form>
   </dialog>
-  <dialog id="import-dialog" class="dialog wide import-dialog" aria-labelledby="import-title"><form method="dialog" id="import-form"><div class="dialog-head"><div><div class="eyebrow">TEXTIMPORT</div><h2 id="import-title">Lernkarten aus Text erstellen</h2><p class="import-description">Eine Karte pro Zeile. Trenne Vorder- und Rückseite mit <code>=</code>. Einen Beispielsatz kannst du ans Ende der jeweiligen Seite setzen, z. B. <code>((Beispielsatz.))</code>.</p></div><button type="button" class="icon-button" value="cancel" aria-label="Schliessen">×</button></div><div class="import-source"><label class="field-label" for="import-text">Lernmaterial</label><textarea id="import-text" rows="8" placeholder="das Haus = la maison&#10;der Hund = le chien&#10;die Katze = le chat"></textarea><div class="import-file-row"><label class="quiet-button file-button" for="import-file">＋ Textdatei wählen</label><input id="import-file" type="file" accept=".txt,text/plain"><span id="import-file-name" class="muted">TXT · UTF-8</span></div></div><div class="import-meta"><label class="field-label" for="import-set">Im Lernstapel speichern</label><select id="import-set"></select></div><div id="import-preview" class="import-preview" aria-live="polite"></div><div class="dialog-actions import-actions"><p class="import-action-hint" id="import-action-hint" role="status" aria-live="polite">Füge Lernmaterial ein oder wähle eine Textdatei.</p><div class="import-action-buttons"><button type="button" class="quiet-button" value="cancel">Abbrechen</button><button type="button" class="primary-button" id="import-submit" value="default" disabled>Import prüfen</button></div></div></form></dialog>
+  <dialog id="import-dialog" class="dialog wide import-dialog" aria-labelledby="import-title">
+    <form method="dialog" id="import-form">
+      <div class="dialog-head">
+        <div><div class="eyebrow">TEXTIMPORT</div><h2 id="import-title">Lernkarten aus Text erstellen</h2></div>
+        <button type="button" class="icon-button" value="cancel" aria-label="Schliessen">×</button>
+      </div>
+      <div class="import-format">
+        <label class="field-label" for="import-mode">Format</label>
+        <select id="import-mode">
+          <option value="vocabulary">Vorderseite = Rückseite</option>
+          <option value="french-verbs">Französische Verben</option>
+        </select>
+        <p class="import-description" id="import-vocabulary-description">Eine Karte pro Zeile. Trenne Vorder- und Rückseite mit <code>=</code>. Einen Beispielsatz kannst du ans Ende der jeweiligen Seite setzen, z. B. <code>((Beispielsatz.))</code>.</p>
+        <p class="import-description" id="import-verb-description" hidden>Ein Verb pro Zeile. Trenne Bedeutung, Infinitiv, Stamm, Hilfsverb, Partizip und die sechs Präsensformen mit <code>|</code>. Den KI-Prompt für dieses Format findest du unter «Anleitung».</p>
+      </div>
+      <div class="import-source">
+        <label class="field-label" for="import-text">Lernmaterial</label>
+        <textarea id="import-text" rows="8" aria-describedby="import-vocabulary-description" placeholder="das Haus = la maison&#10;der Hund = le chien&#10;die Katze = le chat"></textarea>
+        <div class="import-file-row">
+          <label class="quiet-button file-button" for="import-file">＋ Textdatei wählen</label>
+          <input id="import-file" type="file" accept=".txt,text/plain">
+          <span id="import-file-name" class="muted">TXT · UTF-8</span>
+        </div>
+      </div>
+      <div class="import-meta"><label class="field-label" for="import-set">Im Lernstapel speichern</label><select id="import-set"></select></div>
+      <div id="import-preview" class="import-preview" aria-live="polite"></div>
+      <div class="dialog-actions import-actions">
+        <p class="import-action-hint" id="import-action-hint" role="status" aria-live="polite">Füge Lernmaterial ein oder wähle eine Textdatei.</p>
+        <div class="import-action-buttons">
+          <button type="button" class="quiet-button" value="cancel">Abbrechen</button>
+          <button type="button" class="primary-button" id="import-submit" value="default" disabled>Import prüfen</button>
+        </div>
+      </div>
+    </form>
+  </dialog>
   <dialog id="reset-progress-dialog" class="dialog"><form method="dialog" id="reset-progress-form"><div class="dialog-head"><div><div class="eyebrow">LERNFORTSCHRITT</div><h2>Lernstapel zurücksetzen?</h2></div><button type="button" class="icon-button" id="reset-progress-close" aria-label="Schliessen">×</button></div><p class="muted" id="reset-progress-copy"></p><div class="dialog-actions"><button type="button" class="quiet-button" id="reset-progress-cancel">Abbrechen</button><button type="button" class="reset-confirm-button" id="reset-progress-confirm">Lernfortschritt zurücksetzen</button></div></form></dialog>
   <dialog id="settings-dialog" class="dialog settings-dialog" aria-labelledby="settings-title">
     <form method="dialog">

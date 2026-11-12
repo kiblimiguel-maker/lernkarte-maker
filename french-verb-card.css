@@ -1,0 +1,106 @@
+.french-verb-card {
+  --verb-divider: color-mix(in srgb, currentColor 30%, transparent);
+  --verb-inset: 10px;
+  --verb-spacing: 7px;
+  display: block;
+  min-width: 0;
+  width: 100%;
+  border: 1px solid var(--verb-divider);
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 450;
+  line-height: 1.35;
+  letter-spacing: normal;
+  text-align: start;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.french-verb-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.french-verb-heading, .french-verb-meta {
+  border-bottom: 1px solid var(--verb-divider);
+}
+
+.french-verb-heading {
+  font-size: 1.16em;
+}
+
+.french-verb-row > :first-child {
+  border-inline-end: 1px solid var(--verb-divider);
+}
+
+.french-verb-row > :not(.french-verb-past), .french-verb-past > * {
+  padding: var(--verb-spacing) var(--verb-inset);
+}
+
+.french-verb-past {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: stretch;
+}
+
+.french-verb-past strong {
+  border-inline-end: 1px solid var(--verb-divider);
+  text-transform: uppercase;
+}
+
+.study-face > .study-copy:has(> .is-verb-card) {
+  width: min(100%, 620px);
+}
+
+.study-copy-main.is-verb-card {
+  display: block;
+  width: 100%;
+  min-width: 0;
+}
+
+.study-copy-main.is-verb-card .french-verb-card {
+  --verb-inset: clamp(8px, 1.6vw, 21px);
+  --verb-spacing: clamp(8px, 1.6vh, 17px);
+  font-size: clamp(14px, 2vw, 22px);
+}
+
+.flash-row:has(.french-verb-card) {
+  align-items: start;
+}
+
+.preview-line.verb-preview {
+  grid-template-columns: 28px minmax(0, 1fr) 38px;
+  grid-template-areas: "line front remove" ". back back";
+  align-items: start;
+}
+
+.verb-preview .preview-index { grid-area: line; }
+.verb-preview .preview-front { grid-area: front; min-width: 0; overflow-wrap: anywhere; }
+.verb-preview .preview-back { grid-area: back; min-width: 0; }
+.verb-preview .row-remove { grid-area: remove; }
+.verb-preview .preview-index, .verb-preview .preview-front { padding-block: 11px; }
+
+@media (max-width: 480px) {
+  .study-face:has(.is-verb-card) { padding: 37px 10px 30px; }
+  .flash-row:has(.french-verb-card) > :is(.term, .definition):has(.french-verb-card) { grid-column: 1 / -1; }
+  .preview-line.verb-preview { grid-template-areas: "line front remove" "back back back"; }
+}
+
+@media (max-height: 640px) {
+  .study-copy-main.is-verb-card .french-verb-card { --verb-spacing: 6px; }
+}
+
+@media (max-width: 480px) and (max-height: 640px) {
+  .study-face:has(.is-verb-card) { padding-block: 31px 26px; }
+}
+
+@media (max-width: 360px) {
+  .french-verb-card, .study-copy-main.is-verb-card .french-verb-card { --verb-inset: 5px; }
+}
+
+@media (max-width: 360px) and (max-height: 640px) {
+  .study-copy-main.is-verb-card .french-verb-card {
+    --verb-spacing: 4px;
+    font-size: 12px;
+  }
+}
