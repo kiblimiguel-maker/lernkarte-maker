@@ -335,6 +335,9 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
   }
   document.addEventListener('click',event=>{
     if(accountMenu.open&&!accountMenu.contains(event.target))accountMenu.open=false;
+    document.querySelectorAll(':is(.management-menu,.item-menu)[open]').forEach(menu=>{
+      if(!menu.contains(event.target))menu.open=false;
+    });
     const move=event.target.closest('[data-move-item]');
     if(move){event.preventDefault();event.stopPropagation();move.closest('details')?.removeAttribute('open');openMoveDialog(move.dataset.moveItem,move.dataset.itemId);return}
     const remove=event.target.closest('[data-item-delete]');
@@ -346,11 +349,25 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
       const menu=share.closest('details');
       const opener=menu?.querySelector('summary')||share;
       if(menu)menu.open=false;
-      document.querySelectorAll('.item-menu[open]').forEach(item=>{item.open=false});
       openShareDialog(share.dataset.shareKind,share.dataset.itemId,opener);
       return;
     }
-    document.querySelectorAll('.item-menu[open]').forEach(menu=>{if(!menu.contains(event.target))menu.removeAttribute('open')});
+  });
+  function closeManagementMenu(menu){
+    menu.open=false;
+    menu.querySelector('summary').focus({preventScroll:true});
+  }
+  $('#content').addEventListener('click',event=>{
+    const action=event.target.closest('.management-menu-panel button:not(:disabled)');
+    // Restore the trigger's focus before the action opens a modal.
+    if(action)closeManagementMenu(action.closest('.management-menu'));
+  },{capture:true});
+  $('#content').addEventListener('keydown',event=>{
+    if(event.key!=='Escape')return;
+    const menu=event.target.closest('.management-menu[open]');
+    if(!menu)return;
+    event.preventDefault();
+    closeManagementMenu(menu);
   });
   $('#content').addEventListener('contextmenu',event=>{
     const tile=event.target.closest('.set-card,.folder-card'),menu=tile?.querySelector('.item-menu');
@@ -614,7 +631,7 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
     $('#breadcrumbs').querySelectorAll('[data-crumb]').forEach(button=>button.onclick=()=>{const part=entries[Number(button.dataset.crumb)];librarySorting=false;activeSet=null;view='library';if(part.level==='library'){activeSubject=null;activeFolder=null}else if(part.level==='subject'){activeSubject=part.id;activeFolder=null}else if(part.level==='folder'){activeFolder=part.id;activeSubject=folder(part.id)?.subjectId||activeSubject}render()});
   }
   function libraryCrumbs(item,tail){return [{label:'Bibliothek',level:'library'},{label:subject(item.subjectId)?.name||'Fach',level:'subject',id:item.subjectId},...folderPath(item.folderId||item.parentId).map(part=>({label:part.name,level:'folder',id:part.id})),{label:item.name,...(tail?{}:{level:'folder',id:item.id})}]}
-  function managementActions(markup){return `<details class="management-menu"><summary>Verwalten <span aria-hidden="true">⌄</span></summary><div class="management-menu-panel">${markup}</div></details>`}
+  function managementActions(markup){return `<details class="management-menu"><summary>Verwalten <span class="management-chevron" aria-hidden="true"></span></summary><div class="management-menu-panel">${markup}</div></details>`}
   function sortingButton(){return `<button class="quiet-button sort-toggle" data-toggle-sort aria-pressed="${librarySorting}" ${librarySortSaving?'disabled':''}>${librarySorting?'✓ Fertig':'⇅ Reihenfolge'}</button>`}
   function sortControls(type,item){if(!librarySorting)return '';const siblings=window.WortwerkModel.getLibrarySiblings(data,type,item.id),index=siblings.findIndex(record=>record.id===item.id);return `<div class="sort-controls"><button type="button" class="sort-handle" data-sort-handle aria-label="${esc(item.name)} ziehen zum Sortieren" title="Ziehen zum Sortieren" ${librarySortSaving?'disabled':''}>⠿</button><span class="sort-position">${index+1} / ${siblings.length}</span><button type="button" data-sort-step="-1" aria-label="${esc(item.name)} früher anordnen" title="Früher anordnen" ${index===0||librarySortSaving?'disabled':''}>←</button><button type="button" data-sort-step="1" aria-label="${esc(item.name)} später anordnen" title="Später anordnen" ${index===siblings.length-1||librarySortSaving?'disabled':''}>→</button></div>`}
   function sortAttributes(type,item){return `data-sort-type="${type}" data-sort-id="${esc(item.id)}"`}

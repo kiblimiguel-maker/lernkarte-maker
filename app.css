@@ -268,6 +268,18 @@ button:disabled { opacity: .45; cursor: not-allowed; }
   box-shadow: var(--shadow);
 }
 .dialog.wide { width: min(720px, calc(100vw - 24px)); }
+@media (prefers-reduced-motion: no-preference) {
+  #form-dialog[open] { animation: entity-dialog-in 180ms cubic-bezier(.2,.7,.3,1); }
+  #form-dialog[open]::backdrop { animation: entity-backdrop-in 160ms ease-out; }
+}
+@keyframes entity-dialog-in {
+  from { opacity: 0; transform: translateY(5px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes entity-backdrop-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
 .dialog form { padding: var(--dialog-padding); }
 .dialog-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 20px; }
 .dialog-head > div { min-width: 0; }
@@ -978,6 +990,16 @@ button { touch-action: manipulation; }
 .sidebar-toggle, .navigation-close { display: none; }
 .account-menu, .management-menu { position: relative; flex: none; }
 .account-menu summary, .management-menu summary { min-height: 44px; display: flex; align-items: center; justify-content: center; gap: 8px; padding: 8px 12px; border: 1px solid var(--line-strong); border-radius: var(--radius-control); background: var(--surface); color: var(--text); font-size: 12px; cursor: pointer; list-style: none; }
+.management-menu summary { touch-action: manipulation; }
+.management-chevron {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border: solid currentColor;
+  border-width: 0 1.5px 1.5px 0;
+  transform: translateY(-1px) rotate(45deg);
+}
+.management-menu[open] .management-chevron { transform: translateY(1px) rotate(225deg); }
 summary::-webkit-details-marker { display: none; }
 :is(.account-menu, .management-menu, .item-menu) summary:hover { background: var(--surface-hover); }
 :is(.account-menu, .management-menu, .item-menu)[open] summary { border-color: var(--accent-border); background: var(--accent-subtle); color: var(--accent-text); }
@@ -1023,10 +1045,43 @@ summary::-webkit-details-marker { display: none; }
 .account-menu-panel .sign-out-button { justify-content: flex-start; gap: 9px; margin-top: 2px; padding-inline: 9px; border-color: transparent; background: transparent; }
 .account-menu-panel .sign-out-button svg { flex: none; }
 .account-menu-panel .sign-out-button:hover:not(:disabled) { background: var(--danger-surface); color: var(--danger); }
-.management-menu-panel button, .item-menu-panel button { width: 100%; min-height: 44px; padding: 9px 10px; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--text); font-size: 13px; text-align: left; overflow-wrap: anywhere; }
-.management-menu-panel button:hover:not(:disabled),
-.management-menu-panel .danger-action, .item-menu-panel .danger-action { color: var(--danger); }
-.management-menu-panel .danger-action:hover:not(:disabled), .item-menu-panel .danger-action:hover:not(:disabled) { background: var(--danger-surface); }
+:is(.management-menu-panel, .item-menu-panel) button {
+  --menu-hover: var(--surface-hover);
+  --menu-pressed: color-mix(in srgb, var(--text) 12%, var(--surface-menu));
+  width: 100%;
+  min-height: 44px;
+  padding: 9px 10px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  text-align: left;
+  overflow-wrap: anywhere;
+  touch-action: manipulation;
+}
+:is(.management-menu-panel, .item-menu-panel) .danger-action {
+  --menu-hover: var(--danger-surface);
+  --menu-pressed: var(--danger-hover);
+  color: var(--danger);
+}
+:is(.management-menu-panel, .item-menu-panel) button:disabled { color: var(--disabled-text); }
+:is(.management-menu-panel, .item-menu-panel) button:focus-visible { outline-offset: -2px; }
+@media (hover: hover) {
+  :is(.management-menu-panel, .item-menu-panel) button:hover:not(:disabled) { background: var(--menu-hover); }
+}
+:is(.management-menu-panel, .item-menu-panel) button:active:not(:disabled) { background: var(--menu-pressed); }
+@media (prefers-reduced-motion: no-preference) {
+  .management-menu summary { transition: background-color 140ms ease, border-color 140ms ease, color 140ms ease; }
+  .management-chevron { transition: transform 150ms ease; }
+  .management-menu[open] .management-menu-panel,
+  .item-menu[open] .item-menu-panel { animation: library-menu-in 140ms cubic-bezier(.2,.7,.3,1); }
+  :is(.management-menu-panel, .item-menu-panel) button { transition: background-color 120ms ease; }
+}
+@keyframes library-menu-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
 .navigation-scrim { display: none; }
 .content { width: min(100%,1280px); margin: auto; padding: 34px var(--workspace-gutter) 64px; }
 .content:focus { outline: none; }
