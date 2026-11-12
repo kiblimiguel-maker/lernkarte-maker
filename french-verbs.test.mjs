@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import model from './model.js';
 import { frenchVerbCardMarkup } from './french-verb-card.mjs';
 import {
+  detectImportFormat,
   formatFrenchVerbSide,
   frenchVerbExample,
   parseFrenchVerbImport,
@@ -33,6 +34,29 @@ assert.deepEqual(validateFrenchVerbSide(courirFields).verb, courir);
 const irregular = 'ausgehen | sortir || ÊTRE/AVOIR | sorti | je\u00a0sors | tu sors | il/elle/on sort | nous sortons | vous sortez | ils/elles sortent';
 const reflexive = 'sich anziehen | s’habiller | habill- | ÊTRE | habillé | je m’habille | tu t’habilles | elle s’habille | nous nous habillons | vous vous habillez | elles s’habillent';
 const vowel = 'lieben | aimer | aim- | avoir | aimé | j’aime | tu aimes | il aime | nous aimons | vous aimez | ils aiment';
+assert.equal(detectImportFormat(`\uFEFF\r\n${frenchVerbExample}\u2028${vowel}`), 'french-verbs');
+assert.equal(detectImportFormat(irregular), 'french-verbs');
+assert.equal(detectImportFormat(frenchVerbExample.replace(' | couru', '')), 'french-verbs');
+assert.equal(detectImportFormat(frenchVerbExample.replace(' | avoir | ', ' | aller | ')), 'french-verbs');
+assert.equal(detectImportFormat(frenchVerbExample.replace(' | ils / elles courent', '')), 'french-verbs');
+assert.equal(detectImportFormat('rennen | courir | cour- | avoir'), 'french-verbs');
+assert.equal(detectImportFormat('viele Wörter = plusieurs mots ((mot | mots))'), 'vocabulary');
+assert.equal(detectImportFormat(`Pipe-Syntax = ${frenchVerbExample}`), 'vocabulary');
+assert.equal(detectImportFormat(frenchVerbExample.replace('je cours', 'je cours = ich renne')), 'french-verbs');
+assert.equal(detectImportFormat('eins | zwei | drei | vier | fünf | sechs | sieben | acht | neun | zehn | elf'), null);
+assert.equal(detectImportFormat('   \n'), null);
+const mixedImport = `der Hund = le chien\n${frenchVerbExample}`;
+assert.equal(detectImportFormat(mixedImport), 'french-verbs');
+assert.equal(parseFrenchVerbImport(mixedImport).errors[0].line, 1);
+const fence = '\x60'.repeat(3);
+const fencedImport = `\n${fence}text\n${frenchVerbExample}\nfalsche Zeile\n${fence}\n`;
+assert.equal(detectImportFormat(fencedImport), 'french-verbs');
+assert.deepEqual(parseFrenchVerbImport(fencedImport), {
+  rows: [{ ...rows[0], line: 3 }],
+  errors: [{ line: 4, text: 'falsche Zeile', reason: 'Eine Verbzeile braucht elf Felder, getrennt durch |.' }],
+});
+assert.equal(parseFrenchVerbImport(`${fence}text\n${frenchVerbExample}`).errors[0].line, 1);
+
 const multiple = parseFrenchVerbImport(`\uFEFF${irregular}\r\n\u2028${reflexive}\u2029${vowel}`);
 assert.deepEqual(multiple.errors, []);
 assert.deepEqual(multiple.rows.map(row => [row.line, row.front]), [[1, 'ausgehen'], [3, 'sich anziehen'], [4, 'lieben']]);

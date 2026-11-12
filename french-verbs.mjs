@@ -1,5 +1,6 @@
 const fieldSeparator = ' | ';
 const verbSidePrefix = '@fr-verb:1 ';
+const importLineSeparator = /\r\n?|\n|\u2028|\u2029/u;
 const emptyStem = /^(?:[-–—])?$/u;
 const presentForms = [
   ['je / j’', /^(je(?=\s)|j['’])\s*(.+)$/iu],
@@ -29,6 +30,37 @@ function readAuxiliary(value) {
   const auxiliary = value.toLowerCase().replace(/\s*\/\s*/gu, '/');
   if (auxiliary === 'avoir/être' || auxiliary === 'être/avoir') return 'avoir / être';
   return auxiliary === 'avoir' || auxiliary === 'être' ? auxiliary : null;
+}
+
+export function detectImportFormat(text) {
+  const lines = String(text ?? '').replace(/^\uFEFF/u, '').split(importLineSeparator);
+  let vocabulary = false;
+
+  for (const line of lines) {
+    const hasEquals = line.includes('=');
+    vocabulary ||= hasEquals;
+    if (!line.includes('|')) continue;
+
+    const fields = line.split('|').map(field => field.trim());
+    if (hasEquals) {
+      if (fields.length === 11 && !fields[0].includes('=') && readVerbFields(fields.slice(1)).verb) return 'french-verbs';
+      continue;
+    }
+    if (fields.length < 7) {
+      if (fields[0] && fields[1] && readAuxiliary(fields[3] || '')) return 'french-verbs';
+      continue;
+    }
+    const forms = fields.slice(4);
+    const matchingForms = presentForms.filter(([, pattern]) => forms.some(form => pattern.test(form))).length;
+    const hasAuxiliary = fields.slice(2, 5).some(readAuxiliary);
+
+    // An incomplete verb row should still get verb-specific validation.
+    if (matchingForms >= 4 || (hasAuxiliary && (fields.length === 11 || matchingForms >= 2))) {
+      return 'french-verbs';
+    }
+  }
+
+  return vocabulary ? 'vocabulary' : null;
 }
 
 function readVerbFields(fields) {
@@ -80,7 +112,14 @@ export function formatFrenchVerbSide({ infinitive, stem, auxiliary, participle, 
 export function parseFrenchVerbImport(text) {
   const rows = [];
   const errors = [];
-  const lines = String(text ?? '').replace(/^\uFEFF/u, '').split(/\r\n?|\n|\u2028|\u2029/u);
+  const lines = String(text ?? '').replace(/^\uFEFF/u, '').split(importLineSeparator);
+  const start = lines.findIndex(line => line.trim());
+  const end = lines.findLastIndex(line => line.trim());
+  const fence = lines[start]?.trim().match(/^([\x60~])\1{2,}(?=\s|[\w-]|$)/u)?.[0];
+  if (fence && end > start && lines[end].trim() === fence) {
+    lines[start] = '';
+    lines[end] = '';
+  }
 
   for (const [index, raw] of lines.entries()) {
     if (!raw.trim()) continue;

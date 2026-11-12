@@ -415,7 +415,29 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .import-description { max-width: 64ch; margin: 8px 0 0; }
 .import-description code { padding: 2px 4px; border-radius: 4px; background: var(--surface-subtle); color: var(--text); font-size: 11px; }
 .import-format { margin-bottom: 16px; }
-.import-format .field-label { margin-top: 0; }
+.import-format fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
+.import-format legend { margin-top: 0; padding: 0; }
+.import-format-options { display: flex; flex-wrap: wrap; gap: 6px; }
+.import-format-options label { display: flex; flex: 1 1 auto; min-width: 0; cursor: pointer; }
+.import-format-options label > span {
+  display: grid;
+  flex: 1;
+  place-items: center;
+  min-height: 44px;
+  padding: 6px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-control);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.35;
+  text-align: center;
+}
+.import-format-options label:hover > span { background: var(--surface-subtle); }
+.import-format-options input:checked + span { border-color: var(--accent); background: var(--accent-subtle); color: var(--accent-text); font-weight: 610; }
+.import-format-options input:focus-visible + span { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.import-format-status { margin: 8px 0 0; color: var(--accent-text); font-size: 12px; font-weight: 610; }
+.import-format-status:empty { margin: 0; }
+.import-format-status:not(:empty) ~ .import-description { margin-top: 4px; }
 .import-source { padding-bottom: 15px; border-bottom: 1px solid var(--divider); }
 .import-source .field-label, .import-meta .field-label { margin-top: 0; }
 .import-source textarea { min-height: 142px; max-height: 45dvh; }

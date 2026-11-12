@@ -4,7 +4,7 @@ import { studyKeyboardAction } from './study-keyboard.mjs';
 import { getAppAppearance } from './appearance.mjs';
 import { createLibraryShare, libraryShareUrl } from './library-sharing.mjs';
 import { frenchImportPrompt, importGuideExamples } from './import-guide.mjs';
-import { formatFrenchVerbSide, frenchVerbExample, frenchVerbFormLabels, frenchVerbPrompt, parseFrenchVerbImport, parseFrenchVerbSide, validateFrenchVerbSide } from './french-verbs.mjs';
+import { detectImportFormat, formatFrenchVerbSide, frenchVerbExample, frenchVerbFormLabels, frenchVerbPrompt, parseFrenchVerbImport, parseFrenchVerbSide, validateFrenchVerbSide } from './french-verbs.mjs';
 import { frenchVerbCardMarkup } from './french-verb-card.mjs';
 import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown, parseDonationAmountCents, shouldShowDonationWelcome, setDonationReminderEnabled, isDonationReminderEnabled } from './donation-values.mjs';
 
@@ -241,7 +241,7 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
           <div class="guide-prompt-heading">
             <div>
               <h2 id="guide-verb-title">KI-Prompt für französische Verben</h2>
-              <p>Lade deine Verbenliste in der KI deiner Wahl hoch und sende ihr diesen Prompt. Füge ihre Antwort unter <strong>Karten importieren → Französische Verben</strong> ein.</p>
+              <p>Lade deine Verbenliste in der KI deiner Wahl hoch und sende ihr diesen Prompt. Füge die Antwort unter <strong>Karten importieren</strong> ein. Das Verbformat wird automatisch erkannt.</p>
             </div>
             <div class="guide-copy-actions">
               <button type="button" class="primary-button" id="guide-copy-verb-prompt">Prompt kopieren</button>
@@ -1053,34 +1053,51 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
   function deleteFolder(key){const f=folder(key);if(!f||!confirm(`Ordner „${f.name}“ löschen? Lernstapel und Unterordner bleiben erhalten und werden eine Ebene nach oben verschoben.`))return;data.folders=data.folders.filter(x=>x.id!==key);data.sets.forEach(s=>{if(s.folderId===key){s.folderId=f.parentId||null;s.position=window.WortwerkModel.nextLibraryPosition(data,'set',s)}});data.folders.forEach(child=>{if(child.parentId===key){child.parentId=f.parentId||null;child.position=window.WortwerkModel.nextLibraryPosition(data,'folder',child)}});if(activeFolder===key)activeFolder=f.parentId||null;refreshLibraryOrder();save();render();toast('Ordner gelöscht')}
   function deleteSet(key){const s=setById(key);if(!s||!confirm(`„${s.name}“ und alle zugehörigen Karten löschen?`))return;data.sets=data.sets.filter(x=>x.id!==key);data.cards=data.cards.filter(c=>c.setId!==key);data.recent=data.recent.filter(r=>r.setId!==key);delete data.studySessions[key];data.studyHistory=data.studyHistory.filter(entry=>entry.setId!==key);activeSet=null;save();render();toast('Set gelöscht')}
   function swapSetSides(key){const item=setById(key),cards=setCards(key);if(!item)return;if(!cards.length){toast('In diesem Lernstapel gibt es keine Karten.');return}if(session?.setId===key){toast('Beende zuerst die laufende Lerneinheit, damit die Karten konsistent bleiben.');return}if(!confirm(`Vorder- und Rückseiten aller ${cards.length} Karten im Lernstapel „${item.name}“ vertauschen?`))return;const count=window.WortwerkModel.swapSetCardSides(data.cards,key,new Date().toISOString());if(!count)return;save();render();toast(`Vorder- und Rückseiten von ${count} Karten getauscht`)}
-  const isVerbImport=()=>$('#import-mode').value==='french-verbs';
+  let importPreviewFormat=null;
   function updateImportFormat(){
-    const verbs=isVerbImport();
-    $('#import-vocabulary-description').hidden=verbs;
-    $('#import-verb-description').hidden=!verbs;
     const input=$('#import-text');
-    input.placeholder=verbs?frenchVerbExample:'das Haus = la maison\nder Hund = le chien\ndie Katze = le chat';
-    input.setAttribute('aria-describedby',verbs?'import-verb-description':'import-vocabulary-description');
+    const mode=$('#import-mode input:checked').value;
+    const format=mode==='auto'?detectImportFormat(input.value):mode;
+    const descriptions={vocabulary:'import-vocabulary-description','french-verbs':'import-verb-description'};
+    const description=descriptions[format]||'import-auto-description';
+    for(const id of ['import-auto-description',...Object.values(descriptions)])$('#'+id).hidden=id!==description;
+    input.setAttribute('aria-describedby',description);
+    input.placeholder=mode==='french-verbs'?frenchVerbExample:mode==='vocabulary'?'das Haus = la maison\nder Hund = le chien':'Liste einfügen oder eine Textdatei wählen';
+    const status=$('#import-format-status');
+    const message=mode!=='auto'||!format?'':format==='french-verbs'?'Französische Verben erkannt.':'Vokabelformat erkannt.';
+    if(status.textContent!==message)status.textContent=message;
+    return format;
   }
-  function resetImportPreview(message=''){
-    importRows=[];importErrors=[];importChecked=false;importHasErrors=false;
-    $('#import-preview').innerHTML=message?`<p class="field-hint">${esc(message)}</p>`:'';
+  function resetImportPreview(){
+    importRows=[];importErrors=[];importChecked=false;importHasErrors=false;importPreviewFormat=null;
+    $('#import-preview').replaceChildren();
     updateImportActionState();
   }
   function updateImportActionState(){
     const button=$('#import-submit'),hint=$('#import-action-hint');
     const previewCount=$('#import-preview .preview-head span:last-child');
     if(previewCount)previewCount.textContent=`${importRows.length} ${importRows.length===1?'Karte':'Karten'} · ${importErrors.length} Fehler`;
-    if(!importChecked){button.textContent='Import prüfen';button.disabled=!$('#import-text').value.trim();hint.textContent=$('#import-text').value.trim()?'Prüfe zuerst die Vorschau. Danach kannst du die Karten erstellen.':'Füge Lernmaterial ein oder wähle eine Textdatei.';return}
-    if(importHasErrors){button.textContent='Eingaben korrigieren';button.disabled=true;hint.textContent='Einige Zeilen sind ungültig. Korrigiere den Text oben und prüfe ihn erneut.';return}
+    if(!importChecked){button.textContent='Import prüfen';button.disabled=!$('#import-text').value.trim();hint.textContent=button.disabled?'Füge Lernmaterial ein oder wähle eine Textdatei.':'Mit «Import prüfen» öffnest du die Vorschau.';return}
+    if(importHasErrors){button.textContent='Eingaben korrigieren';button.disabled=true;hint.textContent=importPreviewFormat?'Einige Zeilen sind ungültig. Korrigiere den Text oben und prüfe ihn erneut.':'Format konnte nicht erkannt werden. Wähle oben ein Format oder korrigiere die Zeilen.';return}
     if(!importRows.length){button.textContent='Keine Karten zum Erstellen';button.disabled=true;hint.textContent='Es sind keine gültigen Karten in der Vorschau.';return}
     if(importRows.some(row=>!row.front.trim()||!row.back.trim())){button.textContent='Leere Seiten beheben';button.disabled=true;hint.textContent='Ergänze Vorder- und Rückseite in der Vorschau.';return}
     button.textContent='Lernkarten erstellen';button.disabled=false;hint.textContent=`Vorschau geprüft · ${importRows.length} ${importRows.length===1?'Karte':'Karten'} bereit.`;
   }
-  function openImport(targetSet){if(!data.sets.length){toast('Erstelle zuerst ein Set für den Import.');return}$('#import-text').value='';$('#import-file').value='';$('#import-file-name').textContent='TXT · UTF-8';$('#import-mode').value='vocabulary';updateImportFormat();const select=$('#import-set');select.innerHTML=data.sets.map(s=>`<option value="${esc(s.id)}" ${targetSet===s.id?'selected':''}>${esc(subject(s.subjectId)?.name||'Fach')} · ${esc(s.name)}</option>`).join('');resetImportPreview();$('#import-dialog').showModal()}
+  function openImport(targetSet){
+    if(!data.sets.length){toast('Erstelle zuerst einen Lernstapel für den Import.');return}
+    $('#import-text').value='';
+    $('#import-file').value='';
+    $('#import-file-name').textContent='TXT · UTF-8';
+    $('#import-mode input[value="auto"]').checked=true;
+    $('#import-set').innerHTML=data.sets.map(s=>`<option value="${esc(s.id)}" ${targetSet===s.id?'selected':''}>${esc(subject(s.subjectId)?.name||'Fach')} · ${esc(s.name)}</option>`).join('');
+    updateImportFormat();
+    resetImportPreview();
+    $('#import-dialog').showModal();
+  }
   function updateImportPreview(){
     const text=$('#import-text').value;
-    const result=isVerbImport()?parseFrenchVerbImport(text):window.WortwerkParser.parseImport(text);
+    importPreviewFormat=updateImportFormat();
+    const result=importPreviewFormat==='french-verbs'?parseFrenchVerbImport(text):window.WortwerkParser.parseImport(text);
     importRows=result.rows.map(row=>({...row}));importErrors=result.errors;importChecked=true;importHasErrors=result.errors.length>0;importPreviewLimit=100;
     renderImportPreview();
   }
@@ -1093,7 +1110,7 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
     </div>`;
   }
   function renderImportPreview(){
-    const preview=$('#import-preview'),verbs=isVerbImport();
+    const preview=$('#import-preview'),verbs=importPreviewFormat==='french-verbs';
     const rows=importRows.slice(0,importPreviewLimit).map((row,index)=>verbs?importVerbPreview(row,index):`
       <div class="preview-line editable-preview">
         <span class="preview-index">${row.line}</span>
@@ -1118,7 +1135,7 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
     updateImportActionState();
   }
   $('#import-mode').addEventListener('change',()=>{updateImportFormat();resetImportPreview()});
-  $('#import-text').addEventListener('input',()=>resetImportPreview($('#import-text').value.trim()?'Text geändert. Prüfe den Import erneut, um die Vorschau zu aktualisieren.':''));
+  $('#import-text').addEventListener('input',()=>{updateImportFormat();resetImportPreview()});
   $('#import-preview').addEventListener('input',event=>{
     const {importFront,importBack,importFrontExample,importBackExample}=event.target.dataset;
     const value=event.target.value;

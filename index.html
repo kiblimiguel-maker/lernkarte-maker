@@ -156,17 +156,22 @@
         <button type="button" class="icon-button" value="cancel" aria-label="Schliessen">×</button>
       </div>
       <div class="import-format">
-        <label class="field-label" for="import-mode">Format</label>
-        <select id="import-mode">
-          <option value="vocabulary">Vorderseite = Rückseite</option>
-          <option value="french-verbs">Französische Verben</option>
-        </select>
-        <p class="import-description" id="import-vocabulary-description">Eine Karte pro Zeile. Trenne Vorder- und Rückseite mit <code>=</code>. Einen Beispielsatz kannst du ans Ende der jeweiligen Seite setzen, z. B. <code>((Beispielsatz.))</code>.</p>
+        <fieldset id="import-mode">
+          <legend class="field-label">Importformat</legend>
+          <div class="import-format-options">
+            <label><input class="sr-only" type="radio" name="import-mode" value="auto" checked><span>Automatisch erkennen</span></label>
+            <label><input class="sr-only" type="radio" name="import-mode" value="vocabulary"><span>Vokabeln</span></label>
+            <label><input class="sr-only" type="radio" name="import-mode" value="french-verbs"><span>Französische Verben</span></label>
+          </div>
+        </fieldset>
+        <p class="import-format-status" id="import-format-status" role="status"></p>
+        <p class="import-description" id="import-auto-description">Die App erkennt Vokabeln mit <code>=</code> und französische Verben mit <code>|</code>.</p>
+        <p class="import-description" id="import-vocabulary-description" hidden>Eine Karte pro Zeile. Trenne Vorder- und Rückseite mit <code>=</code>. Einen Beispielsatz kannst du ans Ende der jeweiligen Seite setzen, z. B. <code>((Beispielsatz.))</code>.</p>
         <p class="import-description" id="import-verb-description" hidden>Ein Verb pro Zeile. Trenne Bedeutung, Infinitiv, Stamm, Hilfsverb, Partizip und die sechs Präsensformen mit <code>|</code>. Den KI-Prompt für dieses Format findest du unter «Anleitung».</p>
       </div>
       <div class="import-source">
         <label class="field-label" for="import-text">Lernmaterial</label>
-        <textarea id="import-text" rows="8" aria-describedby="import-vocabulary-description" placeholder="das Haus = la maison&#10;der Hund = le chien&#10;die Katze = le chat"></textarea>
+        <textarea id="import-text" rows="8" aria-describedby="import-auto-description" placeholder="Liste einfügen oder eine Textdatei wählen"></textarea>
         <div class="import-file-row">
           <label class="quiet-button file-button" for="import-file">＋ Textdatei wählen</label>
           <input id="import-file" type="file" accept=".txt,text/plain">
