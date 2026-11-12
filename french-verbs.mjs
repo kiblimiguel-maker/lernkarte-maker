@@ -1,7 +1,7 @@
 const fieldSeparator = ' | ';
 const verbSidePrefix = '@fr-verb:1 ';
 const importLineSeparator = /\r\n?|\n|\u2028|\u2029/u;
-const unavailableForm = /^[-–—]$/u;
+const unavailableForm = /^[-‐‑‒–—―−]$/u;
 const presentForms = [
   ['je / j’', /^(je(?=\s)|j['’])\s*(.+)$/iu],
   ['tu', /^(tu)\s+(.+)$/iu],
@@ -16,6 +16,7 @@ export const frenchVerbFormLabels = presentForms.map(([label]) => label);
 export const frenchVerbExample = 'rennen / laufen | courir | cour- | avoir | couru | je cours | tu cours | il / elle / on court | nous courons | vous courez | ils / elles courent';
 const reflexiveExample = 'sich Sorgen machen | s’inquiéter | inquiét- | être | inquiété | je m’inquiète | tu t’inquiètes | il / elle / on s’inquiète | nous nous inquiétons | vous vous inquiétez | ils / elles s’inquiètent';
 const impersonalExample = 'man muss | falloir | — | avoir | fallu | — | — | il faut | — | — | —';
+const weatherExample = 'regnen | pleuvoir | — | avoir | plu | — | — | il pleut | — | — | —';
 
 export const frenchVerbPrompt = `Erstelle aus dem hochgeladenen Vokabular eine Liste französischer Verbkarten für Lernkarten Maker. Übernimm die Verben in der Reihenfolge der Vorlage und schreibe eine Zeile pro Verb.
 
@@ -26,13 +27,14 @@ Deutsche Bedeutung | französischer Infinitiv | Verbstamm | Hilfsverb | Partizip
 
 Schreibe in jedes Präsensfeld das Subjekt und die vollständige Form, z. B. «je lance», «j’aime» oder «je m’inquiète». Stimme Übersetzung, Infinitiv, Hilfsverb und Formen aufeinander ab. Verwende bei «beunruhigen» inquiéter mit avoir und j’inquiète. Verwende bei «sich Sorgen machen» s’inquiéter mit être und je m’inquiète.
 
-Schreibe bei unpersönlichen Verben wie falloir die Form mit «il» ins dritte Präsensfeld und «—» in die fünf übrigen Präsensfelder. Behalte alle elf Felder und alle zehn senkrechten Striche bei.
+Schreibe bei unpersönlichen Verben wie falloir und pleuvoir die Form mit «il» ins dritte Präsensfeld und «—» in die fünf übrigen Präsensfelder. Behalte alle elf Felder und alle zehn senkrechten Striche bei.
 
 Prüfe jede Zeile vor der Ausgabe auf Feldanzahl, vollständige Pronomen und Übereinstimmung von Bedeutung und Verbform. Gib nur die fertigen Zeilen aus, ohne Überschrift, Aufzählung, Markdown-Tabelle oder Codeblock. Nutze die folgenden Zeilen als Formatbeispiele und übernimm für deine Ausgabe die Verben aus meiner Vorlage.
 
 ${frenchVerbExample}
 ${reflexiveExample}
-${impersonalExample}`;
+${impersonalExample}
+${weatherExample}`;
 
 function readAuxiliary(value) {
   const auxiliary = value.toLowerCase().replace(/\s*\/\s*/gu, '/');

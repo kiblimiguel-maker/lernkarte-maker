@@ -412,6 +412,8 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 }
 
 /* Text import and editable preview */
+.import-app-update:not([hidden]) { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 16px; padding: 8px 10px; border-radius: var(--radius-control); background: var(--accent-subtle); }
+.import-app-update p { flex: 1 1 220px; margin: 0; color: var(--accent-text); font-size: 13px; }
 .import-description { max-width: 64ch; margin: 8px 0 0; }
 .import-description code { padding: 2px 4px; border-radius: 4px; background: var(--surface-subtle); color: var(--text); font-size: 11px; }
 .import-format { margin-bottom: 16px; }

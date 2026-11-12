@@ -104,6 +104,16 @@ assert.match(parseFrenchVerbImport(vowel.replace('j’aime', 'aime')).rows[0].ba
 assert.match(parseFrenchVerbImport(reflexive.replace('je m’habille', 'm’habille')).rows[0].back, /je m’habille/);
 assert.match(parseFrenchVerbImport(reflexive.replace('ÊTRE', 'avoir')).errors[0].correction, /s’habiller \| habill- \| être/);
 assert.ok(frenchVerbPrompt.includes(falloir));
+const pleuvoir = 'regnen | pleuvoir | — | avoir | plu | — | — | il pleut | — | — | —';
+const listWithWeatherVerb = parseFrenchVerbImport([...Array(107).fill(frenchVerbExample), falloir, pleuvoir].join('\n'));
+assert.equal(listWithWeatherVerb.rows.length, 109);
+assert.deepEqual(listWithWeatherVerb.errors, []);
+const weatherCard = listWithWeatherVerb.rows[108];
+assert.equal(weatherCard.line, 109);
+assert.equal(weatherCard.front, 'regnen');
+assert.match(frenchVerbCardMarkup(parseFrenchVerbSide(weatherCard.back), 'regnen'), /il <strong>pleut<\/strong>/);
+assert.deepEqual(parseFrenchVerbImport(pleuvoir.replaceAll('—', '−')).rows[0], { ...weatherCard, line: 1 });
+assert.ok(frenchVerbPrompt.includes(pleuvoir));
 
 const invalid = parseFrenchVerbImport([
   '  der Hund = le chien  ',

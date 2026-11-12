@@ -1055,8 +1055,32 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
   function swapSetSides(key){const item=setById(key),cards=setCards(key);if(!item)return;if(!cards.length){toast('In diesem Lernstapel gibt es keine Karten.');return}if(session?.setId===key){toast('Beende zuerst die laufende Lerneinheit, damit die Karten konsistent bleiben.');return}if(!confirm(`Vorder- und Rückseiten aller ${cards.length} Karten im Lernstapel „${item.name}“ vertauschen?`))return;const count=window.WortwerkModel.swapSetCardSides(data.cards,key,new Date().toISOString());if(!count)return;save();render();toast(`Vorder- und Rückseiten von ${count} Karten getauscht`)}
   let importPreviewFormat=null;
   const importRemovedLines=new Set();
+  let importUpdateCheck=null;
+  function checkImportAppVersion(){
+    const notice=$('#import-app-update');
+    if(!import.meta.env.PROD||!notice.hidden||importUpdateCheck)return;
+    const selector='script[type="module"][src]';
+    const currentEntry=$(selector)?.getAttribute('src');
+    if(!currentEntry)return;
+    importUpdateCheck=fetch('/',{cache:'no-store'})
+      .then(async response=>{
+        if(!response.ok)return;
+        const latestDocument=new DOMParser().parseFromString(await response.text(),'text/html');
+        const latestEntry=$(selector,latestDocument)?.getAttribute('src');
+        if(!latestEntry||latestEntry===currentEntry)return;
+        notice.hidden=false;
+        $('#import-app-update-status').textContent='Eine neuere App-Version ist verfügbar.';
+        updateImportReloadLabel();
+      })
+      .catch(()=>{})
+      .finally(()=>{importUpdateCheck=null});
+  }
+  function updateImportReloadLabel(){
+    $('#import-app-reload').textContent=$('#import-text').value.trim()?'Liste kopieren und neu laden':'Seite neu laden';
+  }
   function updateImportFormat(){
     const input=$('#import-text');
+    updateImportReloadLabel();
     const mode=$('#import-mode input:checked').value;
     const format=mode==='auto'?detectImportFormat(input.value):mode;
     const descriptions={vocabulary:'import-vocabulary-description','french-verbs':'import-verb-description'};
@@ -1100,6 +1124,7 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
     updateImportFormat();
     resetImportPreview();
     $('#import-dialog').showModal();
+    checkImportAppVersion();
   }
   function updateImportPreview({preserveRemovals=false}={}){
     const text=$('#import-text').value;
@@ -1108,6 +1133,7 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
     if(!preserveRemovals)importRemovedLines.clear();
     importRows=result.rows.filter(row=>!importRemovedLines.has(row.line));importErrors=result.errors;importChecked=true;importHasErrors=result.errors.length>0;importPreviewLimit=100;
     renderImportPreview();
+    if(importHasErrors)checkImportAppVersion();
   }
   function importVerbPreview(row,index){
     return `<div class="preview-line verb-preview">
@@ -1149,6 +1175,17 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
   }
   $('#import-mode').addEventListener('change',()=>{updateImportFormat();resetImportPreview()});
   $('#import-text').addEventListener('input',()=>{updateImportFormat();resetImportPreview()});
+  $('#import-app-reload').addEventListener('click',async()=>{
+    const input=$('#import-text');
+    try{
+      if(input.value.trim())await navigator.clipboard.writeText(input.value);
+      window.location.reload();
+    }catch{
+      input.focus();
+      input.select();
+      $('#import-app-update-status').textContent='Die Liste ist markiert. Kopiere sie, bevor du die Seite neu lädst.';
+    }
+  });
   $('#import-preview').addEventListener('input',event=>{
     const {importFront,importBack,importFrontExample,importBackExample}=event.target.dataset;
     const value=event.target.value;
