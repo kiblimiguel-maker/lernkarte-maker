@@ -159,14 +159,13 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .subject-card:focus-visible, .set-card:focus-visible, .folder-card:focus-visible { outline-offset: 3px; }
 .subject-card-top { display: flex; align-items: center; justify-content: space-between; }
 .subject-icon { display: grid; place-items: center; }
-.subject-card p, .set-card p, .folder-card p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.subject-card p, .folder-card p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
 .folder-card { display: flex; align-items: center; cursor: pointer; }
 .folder-icon { display: grid; flex: none; place-items: center; border-radius: 8px; }
 .folder-card-copy { min-width: 0; flex: 1; }
 .folder-card h3 { margin: 0 0 4px; overflow-wrap: anywhere; }
 .folder-actions { display: flex; gap: 2px; }
 .set-card { display: flex; flex-direction: column; cursor: pointer; }
-.set-card > p { margin-bottom: 8px; }
 .set-card-bottom { display: flex; align-items: center; justify-content: space-between; margin-top: auto; color: var(--muted); }
 .set-actions { display: flex; gap: 4px; margin-left: auto; }
 .set-actions button { border: 1px solid var(--line); color: var(--soft); }
@@ -392,15 +391,23 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .guide-steps li + li { margin-top: 5px; }
 .guide-prompt-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px 20px; margin-bottom: 12px; }
 .guide-prompt-heading p { margin-bottom: 0; }
-.guide-prompt-heading button { flex: none; }
+.guide-copy-actions { display: flex; flex: 0 0 156px; flex-direction: column; align-items: flex-end; gap: 6px; }
 .guide-prompt { display: block; min-height: 180px; max-height: min(70dvh, 520px); resize: vertical; font: inherit; line-height: 1.6; }
-.guide-section .guide-copy-status { min-height: 1.6em; margin: 6px 0; font-size: 13px; }
+.guide-section .guide-copy-status {
+  --copy-confirmation-surface: var(--background);
+  display: flex;
+  align-items: center;
+  min-block-size: 32px;
+  margin: 0;
+  font-size: 13px;
+}
 .guide-examples summary { padding-block: 8px; color: var(--accent-text); cursor: pointer; }
 .guide-examples .guide-example { margin-top: 8px; }
 @media (max-width: 520px) {
   .guide-format { grid-template-columns: minmax(0,1fr); row-gap: 2px; }
   .guide-format dd + dt { margin-top: 8px; }
   .guide-prompt-heading { flex-wrap: wrap; }
+  .guide-copy-actions { flex-basis: 100%; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 8px; }
   .guide-prompt { font-size: 16px; }
 }
 
@@ -1324,21 +1331,21 @@ summary::-webkit-details-marker { display: none; }
   margin: 0;
   padding-block-start: 8px;
 }
-.share-copy-confirmation {
+.copy-confirmation {
   display: inline-flex;
   align-items: center;
   gap: 8px;
   padding: 5px 10px;
-  border: 1px solid color-mix(in srgb, var(--success) 30%, var(--surface-dialog));
+  border: 1px solid color-mix(in srgb, var(--success) 30%, var(--copy-confirmation-surface, var(--surface-dialog)));
   border-radius: var(--radius-control);
-  background: color-mix(in srgb, var(--success) 12%, var(--surface-dialog));
+  background: color-mix(in srgb, var(--success) 12%, var(--copy-confirmation-surface, var(--surface-dialog)));
   color: var(--success);
   font-size: 13px;
   font-weight: 600;
   line-height: 20px;
-  animation: share-copy-in 240ms cubic-bezier(.22,.65,.3,1) both;
+  animation: copy-confirmation-in 240ms cubic-bezier(.22,.65,.3,1) both;
 }
-.share-copy-check {
+.copy-confirmation-check {
   flex: none;
   width: 7px;
   height: 12px;
@@ -1346,12 +1353,12 @@ summary::-webkit-details-marker { display: none; }
   border-width: 0 2px 2px 0;
   transform: translateY(-2px) rotate(45deg);
 }
-@keyframes share-copy-in {
+@keyframes copy-confirmation-in {
   from { opacity: 0; transform: translateY(3px); }
   to { opacity: 1; transform: translateY(0); }
 }
 @media (prefers-reduced-motion: reduce) {
-  .share-copy-confirmation { animation: none; }
+  .copy-confirmation { animation: none; }
 }
 @media (max-width: 560px) {
   .subpage-heading:has(.library-detail-actions) { flex-wrap: wrap; }

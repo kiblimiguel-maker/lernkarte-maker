@@ -41,7 +41,7 @@ export function searchLibrary(library, query, { subjectId = null, folderId = nul
     return names.join(' / ');
   };
   const matches = (item, path) => {
-    const value = searchable(`${item.name || ''} ${item.description || ''} ${path}`);
+    const value = searchable(`${item.name || ''} ${path}`);
     return words.every(word => value.includes(word));
   };
   const foundSubjects = !subjectId && !folderId && !recentIds
