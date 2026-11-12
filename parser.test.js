@@ -36,6 +36,30 @@ assert.deepEqual(exampleImport.rows[0], {
   back: 'un château fort',
   backExampleSentence: 'Le village a un vieux château fort.'
 }, 'double parentheses split the back into a term and an example sentence');
+assert.deepEqual(
+  parseImport('das Radio ((Kannst du bitte das Radio anmachen?)) = la radio').rows,
+  [{
+    line: 1,
+    front: 'das Radio',
+    back: 'la radio',
+    frontExampleSentence: 'Kannst du bitte das Radio anmachen?'
+  }],
+  'a front example is extracted independently of the back'
+);
+assert.deepEqual(
+  parseImport('die Gebäude ((Die Gebäude (im Zentrum) sind alt.)) = les bâtiments (m pl) ((Les bâtiments du centre sont anciens.))'),
+  {
+    rows: [{
+      line: 1,
+      front: 'die Gebäude',
+      back: 'les bâtiments (m pl)',
+      frontExampleSentence: 'Die Gebäude (im Zentrum) sind alt.',
+      backExampleSentence: 'Les bâtiments du centre sont anciens.'
+    }],
+    errors: []
+  },
+  'examples on both sides remain separate and preserve single parentheses'
+);
 const nestedPunctuationExample = parseImport('das Schloss = le château ((Le château (ancien) est près du village.))');
 assert.deepEqual([nestedPunctuationExample.rows[0].back, nestedPunctuationExample.rows[0].backExampleSentence], [
   'le château', 'Le château (ancien) est près du village.'
@@ -43,6 +67,8 @@ assert.deepEqual([nestedPunctuationExample.rows[0].back, nestedPunctuationExampl
 oneCard('der Artikel = le château (m.)', 'der Artikel', 'le château (m.)');
 oneCard('Doppelte Klammer bleibt bei fehlerhafter Eingabe = Begriff ((ohne Abschluss)', 'Doppelte Klammer bleibt bei fehlerhafter Eingabe', 'Begriff ((ohne Abschluss)');
 oneCard('Leere Beispielsatzmarkierung = Begriff (())', 'Leere Beispielsatzmarkierung', 'Begriff (())');
+oneCard('Begriff ((ohne Abschluss) = mot', 'Begriff ((ohne Abschluss)', 'mot');
+oneCard('Begriff (()) = mot', 'Begriff (())', 'mot');
 
 const invalid = parseImport([
   'der Hund',

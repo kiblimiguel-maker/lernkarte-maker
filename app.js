@@ -3,6 +3,7 @@ import { cardListPage, libraryCardCounts, searchLibrary } from './library-view.m
 import { studyKeyboardAction } from './study-keyboard.mjs';
 import { getAppAppearance } from './appearance.mjs';
 import { createLibraryShare, libraryShareUrl } from './library-sharing.mjs';
+import { frenchImportPrompt, importGuideExamples } from './import-guide.mjs';
 import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown, parseDonationAmountCents, shouldShowDonationWelcome, setDonationReminderEnabled, isDonationReminderEnabled } from './donation-values.mjs';
 
 (() => {
@@ -122,6 +123,8 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
     $('#content').classList.toggle('is-sorting',librarySorting);$('#content').inert=librarySortSaving||recoveryAwaitingChoice;$('#content').setAttribute('aria-busy',String(librarySortSaving));
     if(view==='donations'){
       activeSubject=null;activeFolder=null;activeSet=null;renderDonations();
+    }else if(view==='guide'){
+      renderGuide();
     }else if(activeSet&&setById(activeSet)){
       renderSet();
     }else if(activeFolder&&folder(activeFolder)){
@@ -138,10 +141,11 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
   function renderNav(){
     document.querySelectorAll('[data-view]').forEach(button=>button.onclick=event=>{
       event.preventDefault();closeNavigation();librarySorting=false;activeSubject=null;activeFolder=null;activeSet=null;view=button.dataset.view;if(view!=='donations'){donationReturn=null;donationPayment=null}render();
+      if(view==='guide')$('#guide-title')?.focus({preventScroll:true});
     });
     const atLibraryRoot=!activeSubject&&!activeFolder&&!activeSet;
     document.querySelectorAll('.app-sidebar [data-view]').forEach(button=>{
-      const current=button.dataset.view==='recent'?view==='recent':button.dataset.view==='donations'?view==='donations':button.dataset.view==='library'&&view==='library'&&atLibraryRoot;
+      const current=button.dataset.view===view&&(view!=='library'||atLibraryRoot);
       if(current)button.setAttribute('aria-current','page');else button.removeAttribute('aria-current');
     });
     $('#sidebar-subjects').innerHTML=data.subjects.map((item,index)=>{
@@ -160,7 +164,69 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
       document.querySelector(`[data-sidebar-toggle="${CSS.escape(subjectId)}"]`)?.focus();
     });
     document.querySelectorAll('[data-sidebar-folder]').forEach(button=>button.onclick=()=>{closeNavigation();librarySorting=false;view='library';activeFolder=button.dataset.sidebarFolder;activeSubject=folder(activeFolder)?.subjectId;activeSet=null;render()});
-    crumbs(view==='recent'?['Zuletzt gelernt']:view==='donations'?['Bibliothek','Spenden']:['Bibliothek']);
+    crumbs(view==='guide'?['Anleitung']:view==='recent'?['Zuletzt gelernt']:view==='donations'?['Bibliothek','Spenden']:['Bibliothek']);
+  }
+
+  function renderGuide(){
+    $('#content').innerHTML=`
+      <section class="guide-page" aria-labelledby="guide-title">
+        <header class="page-heading">
+          <div>
+            <h1 class="page-title" id="guide-title" tabindex="-1">Anleitung</h1>
+            <p class="page-subtitle">Lernkarten aus Text erstellen und französische Vokabeln für den Import vorbereiten.</p>
+          </div>
+        </header>
+        <section class="guide-section" aria-labelledby="guide-format-title">
+          <h2 id="guide-format-title">Lernkarten aus Text importieren</h2>
+          <p>Schreibe pro Zeile eine Karte. Das erste Gleichheitszeichen trennt Vorder- und Rückseite.</p>
+          <pre class="guide-example"><code>Vorderseite ((Beispielsatz vorne)) = Rückseite ((Beispielsatz hinten))</code></pre>
+          <dl class="guide-format">
+            <dt>Vorderseite</dt>
+            <dd>Links vom <code>=</code> steht der Begriff oder die Frage, die du zuerst siehst.</dd>
+            <dt>Rückseite</dt>
+            <dd>Rechts vom <code>=</code> steht die Übersetzung oder Antwort.</dd>
+            <dt><code>((Beispielsatz))</code></dt>
+            <dd>Setze einen optionalen Beispielsatz ans Ende der jeweiligen Seite. Auf der Karte erscheint er kleiner unter dem Begriff und in einfachen Klammern.</dd>
+            <dt>Französische Nomen</dt>
+            <dd><code>(m)</code> steht für maskulin, <code>(f)</code> für feminin. <code>(m pl)</code> und <code>(f pl)</code> kennzeichnen die Mehrzahl. Bei <code>le</code>, <code>la</code>, <code>un</code> und <code>une</code> genügt der Artikel.</dd>
+          </dl>
+          <ol class="guide-steps">
+            <li>Öffne einen Lernstapel und wähle <strong>Karten importieren</strong>.</li>
+            <li>Füge deine Liste ein und wähle <strong>Import prüfen</strong>.</li>
+            <li>Kontrolliere die Vorschau und wähle <strong>Lernkarten erstellen</strong>.</li>
+          </ol>
+        </section>
+        <section class="guide-section" aria-labelledby="guide-prompt-title">
+          <div class="guide-prompt-heading">
+            <div>
+              <h2 id="guide-prompt-title">KI-Prompt für Französisch</h2>
+              <p>Lade deine Vokabelliste in der KI deiner Wahl hoch und sende ihr den Prompt. Füge ihre Antwort danach im Importfeld ein.</p>
+            </div>
+            <button type="button" class="primary-button" id="guide-copy-prompt">Prompt kopieren</button>
+          </div>
+          <label class="sr-only" for="guide-prompt">KI-Prompt für Französisch</label>
+          <textarea id="guide-prompt" class="guide-prompt" readonly spellcheck="false" rows="12"></textarea>
+          <p class="guide-copy-status" id="guide-copy-status" role="status"></p>
+          <details class="guide-examples">
+            <summary>Beispielausgabe ansehen</summary>
+            <pre class="guide-example"><code>${esc(importGuideExamples.join('\n'))}</code></pre>
+          </details>
+        </section>
+      </section>`;
+    const prompt=$('#guide-prompt');
+    const status=$('#guide-copy-status');
+    prompt.value=frenchImportPrompt;
+    $('#guide-copy-prompt').addEventListener('click',async()=>{
+      try{
+        await navigator.clipboard.writeText(prompt.value);
+        status.textContent='Prompt kopiert.';
+      }catch{
+        if(!prompt.isConnected)return;
+        prompt.focus();
+        prompt.select();
+        status.textContent='Der Prompt ist markiert. Du kannst ihn jetzt kopieren.';
+      }
+    });
   }
   const mobileNavigation=window.matchMedia('(max-width:760px)');
   let sidebarCollapsed=false;try{sidebarCollapsed=localStorage.getItem('lernkarten-sidebar-collapsed')==='true'}catch{}
@@ -917,9 +983,41 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
   }
   function openImport(targetSet){if(!data.sets.length){toast('Erstelle zuerst ein Set für den Import.');return}$('#import-text').value='';$('#import-file').value='';$('#import-file-name').textContent='TXT · UTF-8';const select=$('#import-set');select.innerHTML=data.sets.map(s=>`<option value="${esc(s.id)}" ${targetSet===s.id?'selected':''}>${esc(subject(s.subjectId)?.name||'Fach')} · ${esc(s.name)}</option>`).join('');importRows=[];importChecked=false;importHasErrors=false;$('#import-preview').innerHTML='';updateImportActionState();$('#import-dialog').showModal()}
   function updateImportPreview(){const result=parseImport($('#import-text').value);importRows=result.rows.map(row=>({...row}));importErrors=result.errors;importChecked=true;importHasErrors=result.errors.length>0;importPreviewLimit=100;renderImportPreview()}
-  function renderImportPreview(){const preview=$('#import-preview');const rows=importRows.slice(0,importPreviewLimit).map((r,i)=>`<div class="preview-line editable-preview"><span class="preview-index">${r.line}</span><input aria-label="Vorderseite Zeile ${r.line}" data-import-front="${i}" value="${esc(r.front)}"><input aria-label="Rückseite Zeile ${r.line}" data-import-back="${i}" value="${esc(r.back)}"><button type="button" class="row-remove" data-import-remove="${i}" aria-label="Karte aus Vorschau entfernen">×</button><input class="preview-example" aria-label="Beispielsatz auf der Rückseite Zeile ${r.line} (optional)" placeholder="Beispielsatz (optional)" data-import-example="${i}" value="${esc(r.backExampleSentence||'')}"></div>`).join('');const errors=importErrors.slice(0,100).map(e=>`<div class="preview-line bad"><span class="preview-index">Zeile ${e.line}</span><span style="grid-column:span 3"><strong>${esc(e.reason)}</strong><br><code>${esc(e.text)}</code></span></div>`).join('');preview.innerHTML=(importRows.length||importErrors.length)?`<div class="preview-head"><span>IMPORT-VORSCHAU</span><span>${importRows.length} Karten · ${importErrors.length} Fehler</span></div>${errors}${importErrors.length>100?'<p class="field-hint">Die ersten 100 Fehler werden angezeigt. Korrigiere die Eingaben oben und prüfe erneut.</p>':''}${rows}${importRows.length>importPreviewLimit?`<p class="field-hint">${importPreviewLimit} von ${importRows.length} Karten angezeigt. Alle gültigen Karten werden übernommen.</p><button type="button" class="quiet-button" id="import-preview-more">Weitere 100 anzeigen</button>`:''}`:'';$('#import-preview-more')?.addEventListener('click',()=>{importPreviewLimit+=100;renderImportPreview()});updateImportActionState()}
+  function renderImportPreview(){
+    const preview=$('#import-preview');
+    const rows=importRows.slice(0,importPreviewLimit).map((row,index)=>`
+      <div class="preview-line editable-preview">
+        <span class="preview-index">${row.line}</span>
+        <div class="preview-side preview-front">
+          <input aria-label="Vorderseite Zeile ${row.line}" data-import-front="${index}" value="${esc(row.front)}">
+          <input aria-label="Beispielsatz auf der Vorderseite Zeile ${row.line} (optional)" placeholder="Beispielsatz vorne" data-import-front-example="${index}" value="${esc(row.frontExampleSentence||'')}">
+        </div>
+        <div class="preview-side preview-back">
+          <input aria-label="Rückseite Zeile ${row.line}" data-import-back="${index}" value="${esc(row.back)}">
+          <input aria-label="Beispielsatz auf der Rückseite Zeile ${row.line} (optional)" placeholder="Beispielsatz hinten" data-import-back-example="${index}" value="${esc(row.backExampleSentence||'')}">
+        </div>
+        <button type="button" class="row-remove" data-import-remove="${index}" aria-label="Karte aus Vorschau entfernen">×</button>
+      </div>`).join('');
+    const errors=importErrors.slice(0,100).map(e=>`<div class="preview-line bad"><span class="preview-index">Zeile ${e.line}</span><span style="grid-column:span 3"><strong>${esc(e.reason)}</strong><br><code>${esc(e.text)}</code></span></div>`).join('');
+    preview.innerHTML=(importRows.length||importErrors.length)?`
+      <div class="preview-head"><span>IMPORT-VORSCHAU</span><span>${importRows.length} Karten · ${importErrors.length} Fehler</span></div>
+      ${errors}
+      ${importErrors.length>100?'<p class="field-hint">Die ersten 100 Fehler werden angezeigt. Korrigiere die Eingaben oben und prüfe erneut.</p>':''}
+      ${rows}
+      ${importRows.length>importPreviewLimit?`<p class="field-hint">${importPreviewLimit} von ${importRows.length} Karten angezeigt. Alle gültigen Karten werden übernommen.</p><button type="button" class="quiet-button" id="import-preview-more">Weitere 100 anzeigen</button>`:''}`:'';
+    $('#import-preview-more')?.addEventListener('click',()=>{importPreviewLimit+=100;renderImportPreview()});
+    updateImportActionState();
+  }
   $('#import-text').addEventListener('input',()=>{importRows=[];importChecked=false;importHasErrors=false;$('#import-preview').innerHTML=$('#import-text').value.trim()?'<p class="field-hint">Text geändert. Prüfe den Import erneut, um die Vorschau zu aktualisieren.</p>':'';updateImportActionState()});
-  $('#import-preview').addEventListener('input',e=>{const f=e.target.dataset.importFront,b=e.target.dataset.importBack,example=e.target.dataset.importExample;if(f!==undefined)importRows[Number(f)].front=e.target.value;if(b!==undefined)importRows[Number(b)].back=e.target.value;if(example!==undefined)importRows[Number(example)].backExampleSentence=e.target.value;updateImportActionState()});
+  $('#import-preview').addEventListener('input',event=>{
+    const {importFront,importBack,importFrontExample,importBackExample}=event.target.dataset;
+    const value=event.target.value;
+    if(importFront!==undefined)importRows[Number(importFront)].front=value;
+    if(importBack!==undefined)importRows[Number(importBack)].back=value;
+    if(importFrontExample!==undefined)importRows[Number(importFrontExample)].frontExampleSentence=value;
+    if(importBackExample!==undefined)importRows[Number(importBackExample)].backExampleSentence=value;
+    updateImportActionState();
+  });
   $('#import-preview').addEventListener('click',e=>{const i=e.target.dataset.importRemove;if(i===undefined)return;importRows.splice(Number(i),1);renderImportPreview()});
   $('#import-file').addEventListener('change',async e=>{const file=e.target.files?.[0];if(!file)return;$('#import-file-name').textContent=file.name;const draft=$('#import-text').value;try{const text=await file.text();if(!$('#import-dialog').open||$('#import-file').files?.[0]!==file||$('#import-text').value!==draft)return;$('#import-text').value=text;updateImportPreview()}catch(error){console.error('Textdatei konnte nicht gelesen werden.',error);toast('Die Textdatei konnte nicht gelesen werden.')} });
   function cancelEntityForm(){if(formContext?.copyCards?.length&&session?.id===formContext.sourceSessionId){session.missedSetPending=false;updateMissedSetActions()}formContext=null;$('#form-dialog').close()}

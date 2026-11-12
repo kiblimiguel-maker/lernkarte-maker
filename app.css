@@ -367,6 +367,43 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .emoji-option:hover, .emoji-option.selected { border-color: var(--line-strong); background: var(--surface-raised); }
 .emoji-option.selected { outline: 1px solid var(--soft); }
 .sr-only { position: absolute !important; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+/* Import guide */
+.guide-page { max-width: 780px; }
+#guide-title:focus { outline: none; }
+.guide-section { margin-block: 28px; }
+.guide-section + .guide-section { padding-top: 24px; border-top: 1px solid var(--divider); }
+.guide-section h2 { margin: 0; font-size: 18px; font-weight: 610; }
+.guide-section p { margin: 6px 0 12px; color: var(--muted); }
+.guide-example, .guide-prompt {
+  width: 100%;
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-control);
+  background: var(--surface-input);
+  color: var(--text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.guide-format { display: grid; grid-template-columns: auto minmax(0,1fr); gap: 8px 20px; margin: 16px 0; }
+.guide-format dt { font-weight: 600; }
+.guide-format dd { margin: 0; color: var(--muted); }
+.guide-steps { margin: 16px 0 0; padding-inline-start: 22px; }
+.guide-steps li + li { margin-top: 5px; }
+.guide-prompt-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px 20px; margin-bottom: 12px; }
+.guide-prompt-heading p { margin-bottom: 0; }
+.guide-prompt-heading button { flex: none; }
+.guide-prompt { display: block; min-height: 180px; max-height: min(70dvh, 520px); resize: vertical; font: inherit; line-height: 1.6; }
+.guide-section .guide-copy-status { min-height: 1.6em; margin: 6px 0; font-size: 13px; }
+.guide-examples summary { padding-block: 8px; color: var(--accent-text); cursor: pointer; }
+.guide-examples .guide-example { margin-top: 8px; }
+@media (max-width: 520px) {
+  .guide-format { grid-template-columns: minmax(0,1fr); row-gap: 2px; }
+  .guide-format dd + dt { margin-top: 8px; }
+  .guide-prompt-heading { flex-wrap: wrap; }
+  .guide-prompt { font-size: 16px; }
+}
+
 /* Text import and editable preview */
 .import-description { max-width: 64ch; margin: 8px 0 0; }
 .import-description code { padding: 2px 4px; border-radius: 4px; background: var(--surface-subtle); color: var(--text); font-size: 11px; }
@@ -388,7 +425,9 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .preview-head span:first-child { font-weight: 610; letter-spacing: .045em; }
 .preview-line { display: grid; grid-template-columns: 28px minmax(0, 1fr) minmax(0, 1fr) 38px; gap: 6px; align-items: center; padding-block: 10px; border-top: 1px solid var(--line); font-size: 12px; }
 .preview-index { color: var(--muted); font-variant-numeric: tabular-nums; }
-.preview-example { grid-column: 2 / 4; }
+.preview-side { display: grid; gap: 6px; min-width: 0; }
+.editable-preview .preview-index { align-self: start; padding-top: 12px; }
+.editable-preview .row-remove { align-self: start; }
 .preview-line.bad { grid-template-columns: 52px repeat(3, minmax(0, 1fr)); align-items: start; color: var(--danger); line-height: 1.55; }
 .preview-line.bad > :last-child { min-width: 0; overflow-wrap: anywhere; }
 .preview-line code { color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -402,13 +441,12 @@ button:disabled { opacity: .45; cursor: not-allowed; }
   .import-action-hint, .import-action-buttons { flex: none; }
   .preview-line.editable-preview {
     grid-template-columns: 24px minmax(0, 1fr) 38px;
-    grid-template-areas: "line front remove" ". back back" ". example example";
+    grid-template-areas: "line front remove" ". back back";
   }
   .editable-preview .preview-index { grid-area: line; }
-  .editable-preview [data-import-front] { grid-area: front; }
-  .editable-preview [data-import-back] { grid-area: back; }
+  .editable-preview .preview-front { grid-area: front; }
+  .editable-preview .preview-back { grid-area: back; }
   .editable-preview .row-remove { grid-area: remove; }
-  .editable-preview .preview-example { grid-area: example; }
 }
 .study-dialog { position: relative; width: min(790px, calc(100vw - 24px)); height: min(850px, calc(100dvh - 24px)); display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--line-strong); border-radius: var(--radius-dialog); color: var(--text); box-shadow: var(--shadow); }
 .study-dialog:not([open]) { display: none; }

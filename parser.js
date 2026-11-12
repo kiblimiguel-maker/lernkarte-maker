@@ -43,8 +43,15 @@
       } else if (!back) {
         errors.push({ line: index + 1, text: raw, reason: 'Rückseite fehlt' });
       } else {
-        const example = parseExampleSide(back);
-        rows.push({ line: index + 1, front, back: example?.term || back, ...(example ? { backExampleSentence: example.exampleSentence } : {}) });
+        const frontExample = parseExampleSide(front);
+        const backExample = parseExampleSide(back);
+        rows.push({
+          line: index + 1,
+          front: frontExample?.term ?? front,
+          back: backExample?.term ?? back,
+          ...(frontExample && { frontExampleSentence: frontExample.exampleSentence }),
+          ...(backExample && { backExampleSentence: backExample.exampleSentence })
+        });
       }
     });
 
