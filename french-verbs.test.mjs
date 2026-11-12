@@ -5,6 +5,7 @@ import {
   detectImportFormat,
   formatFrenchVerbSide,
   frenchVerbExample,
+  frenchVerbPrompt,
   parseFrenchVerbImport,
   parseFrenchVerbSide,
   validateFrenchVerbSide,
@@ -74,6 +75,35 @@ assert.deepEqual(aimer.forms[0], { pronoun: 'j’', separator: '', form: 'aime' 
 assert.deepEqual(parseFrenchVerbSide(multiple.rows[2].back.replace('j’aime', "j'aime")).forms[0], {
   pronoun: "j'", separator: '', form: 'aime',
 });
+
+const lance = 'werfen | lancer | lanc- | avoir | lancé | lance | tu lances | il / elle / on lance | nous lançons | vous lancez | ils / elles lancent';
+const inquieter = "beunruhigen | inquiéter | inquiét- | avoir | inquiété | m'inquiète | tu t'inquiètes | il / elle / on s'inquiète | nous nous inquiétons | vous vous inquiétez | ils / elles s'inquiètent";
+const falloir = 'man muss | falloir | — | avoir | fallu | — | — | il faut | — | — | —';
+const reportedRows = parseFrenchVerbImport(`${lance}\n${inquieter}\n${falloir}`);
+assert.deepEqual(reportedRows.rows.map(row => row.line), [1, 3]);
+assert.equal(parseFrenchVerbSide(reportedRows.rows[0].back).forms[0].pronoun, 'je');
+assert.match(reportedRows.rows[0].back, /je lance/);
+const impersonal = parseFrenchVerbSide(reportedRows.rows[1].back);
+assert.deepEqual(impersonal.forms.map(({ pronoun, separator, form }) => pronoun + separator + form),
+  ['—', '—', 'il faut', '—', '—', '—']);
+assert.equal(formatFrenchVerbSide(impersonal), reportedRows.rows[1].back);
+assert.match(frenchVerbCardMarkup(impersonal, 'man muss'), /il <strong>faut<\/strong>/);
+assert.equal(detectImportFormat(falloir), 'french-verbs');
+assert.equal(reportedRows.errors.length, 1);
+assert.equal(reportedRows.errors[0].line, 2);
+assert.match(reportedRows.errors[0].reason, /reflexiv/);
+const corrected = reportedRows.errors[0].correction;
+assert.equal(corrected, 'beunruhigen | inquiéter | inquiét- | avoir | inquiété | j’inquiète | tu inquiètes | il / elle / on inquiète | nous inquiétons | vous inquiétez | ils / elles inquiètent');
+assert.equal(parseFrenchVerbImport([lance, corrected, falloir].join('\n')).rows.length, 3);
+assert.equal(parseFrenchVerbImport(falloir.replace('il faut', 'il / elle / on faut')).errors.length, 1);
+assert.equal(parseFrenchVerbImport(frenchVerbExample.replace('je cours', '—')).errors.length, 1);
+assert.equal(parseFrenchVerbImport(frenchVerbExample.replace('je cours', 'je')).errors.length, 1);
+assert.equal(parseFrenchVerbImport(frenchVerbExample.replace('je cours', 'tu cours')).errors.length, 1);
+assert.equal(parseFrenchVerbImport(frenchVerbExample.replace('je cours', 'nicht angegeben')).errors.length, 1);
+assert.match(parseFrenchVerbImport(vowel.replace('j’aime', 'aime')).rows[0].back, /j’aime/);
+assert.match(parseFrenchVerbImport(reflexive.replace('je m’habille', 'm’habille')).rows[0].back, /je m’habille/);
+assert.match(parseFrenchVerbImport(reflexive.replace('ÊTRE', 'avoir')).errors[0].correction, /s’habiller \| habill- \| être/);
+assert.ok(frenchVerbPrompt.includes(falloir));
 
 const invalid = parseFrenchVerbImport([
   '  der Hund = le chien  ',

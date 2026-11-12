@@ -101,7 +101,7 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
       const meaning=cardSideContent(card,side==='front'?'back':'front').term;
       const description=[
         meaning,infinitive,stem&&`Stamm ${stem}`,`Hilfsverb ${auxiliary}`,`Partizip ${participle}`,
-        ...forms.map(({pronoun,form,separator})=>pronoun+separator+form),
+        ...forms.filter(({pronoun})=>pronoun).map(({pronoun,form,separator})=>pronoun+separator+form),
         content.exampleSentence&&`Beispielsatz: ${content.exampleSentence}`,
       ].filter(Boolean).join('. ');
       return `${side==='back'?'Rückseite':'Vorderseite'}: ${description}`;
@@ -923,7 +923,7 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
         </label>
         ${field('participle','Partizip Perfekt',verb.participle)}
       </div>
-      <div class="field-hint">Schreibe die Präsensformen mit ihrem Pronomen, z. B. «je cours».</div>
+      <div class="field-hint">Schreibe die Präsensformen mit ihrem Pronomen. Bei unpersönlichen Verben steht «—» in den übrigen Feldern.</div>
       <div class="verb-edit-grid verb-edit-forms">
         ${verb.forms.map(({pronoun,separator,form},index)=>field(`form-${index}`,frenchVerbFormLabels[index],pronoun+separator+form)).join('')}
       </div>
@@ -1054,6 +1054,7 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
   function deleteSet(key){const s=setById(key);if(!s||!confirm(`„${s.name}“ und alle zugehörigen Karten löschen?`))return;data.sets=data.sets.filter(x=>x.id!==key);data.cards=data.cards.filter(c=>c.setId!==key);data.recent=data.recent.filter(r=>r.setId!==key);delete data.studySessions[key];data.studyHistory=data.studyHistory.filter(entry=>entry.setId!==key);activeSet=null;save();render();toast('Set gelöscht')}
   function swapSetSides(key){const item=setById(key),cards=setCards(key);if(!item)return;if(!cards.length){toast('In diesem Lernstapel gibt es keine Karten.');return}if(session?.setId===key){toast('Beende zuerst die laufende Lerneinheit, damit die Karten konsistent bleiben.');return}if(!confirm(`Vorder- und Rückseiten aller ${cards.length} Karten im Lernstapel „${item.name}“ vertauschen?`))return;const count=window.WortwerkModel.swapSetCardSides(data.cards,key,new Date().toISOString());if(!count)return;save();render();toast(`Vorder- und Rückseiten von ${count} Karten getauscht`)}
   let importPreviewFormat=null;
+  const importRemovedLines=new Set();
   function updateImportFormat(){
     const input=$('#import-text');
     const mode=$('#import-mode input:checked').value;
@@ -1070,6 +1071,7 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
   }
   function resetImportPreview(){
     importRows=[];importErrors=[];importChecked=false;importHasErrors=false;importPreviewFormat=null;
+    importRemovedLines.clear();
     $('#import-preview').replaceChildren();
     updateImportActionState();
   }
@@ -1078,7 +1080,12 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
     const previewCount=$('#import-preview .preview-head span:last-child');
     if(previewCount)previewCount.textContent=`${importRows.length} ${importRows.length===1?'Karte':'Karten'} · ${importErrors.length} Fehler`;
     if(!importChecked){button.textContent='Import prüfen';button.disabled=!$('#import-text').value.trim();hint.textContent=button.disabled?'Füge Lernmaterial ein oder wähle eine Textdatei.':'Mit «Import prüfen» öffnest du die Vorschau.';return}
-    if(importHasErrors){button.textContent='Eingaben korrigieren';button.disabled=true;hint.textContent=importPreviewFormat?'Einige Zeilen sind ungültig. Korrigiere den Text oben und prüfe ihn erneut.':'Format konnte nicht erkannt werden. Wähle oben ein Format oder korrigiere die Zeilen.';return}
+    if(importHasErrors){
+      button.textContent='Eingaben korrigieren';button.disabled=true;
+      if(importErrors.some(error=>error.correction))hint.textContent='Übernimm eine passende Korrektur in der Vorschau oder bearbeite die betroffene Zeile.';
+      else hint.textContent=importPreviewFormat?'Einige Zeilen sind ungültig. Korrigiere den Text oben und prüfe ihn erneut.':'Format konnte nicht erkannt werden. Wähle oben ein Format oder korrigiere die Zeilen.';
+      return;
+    }
     if(!importRows.length){button.textContent='Keine Karten zum Erstellen';button.disabled=true;hint.textContent='Es sind keine gültigen Karten in der Vorschau.';return}
     if(importRows.some(row=>!row.front.trim()||!row.back.trim())){button.textContent='Leere Seiten beheben';button.disabled=true;hint.textContent='Ergänze Vorder- und Rückseite in der Vorschau.';return}
     button.textContent='Lernkarten erstellen';button.disabled=false;hint.textContent=`Vorschau geprüft · ${importRows.length} ${importRows.length===1?'Karte':'Karten'} bereit.`;
@@ -1094,11 +1101,12 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
     resetImportPreview();
     $('#import-dialog').showModal();
   }
-  function updateImportPreview(){
+  function updateImportPreview({preserveRemovals=false}={}){
     const text=$('#import-text').value;
     importPreviewFormat=updateImportFormat();
     const result=importPreviewFormat==='french-verbs'?parseFrenchVerbImport(text):window.WortwerkParser.parseImport(text);
-    importRows=result.rows.map(row=>({...row}));importErrors=result.errors;importChecked=true;importHasErrors=result.errors.length>0;importPreviewLimit=100;
+    if(!preserveRemovals)importRemovedLines.clear();
+    importRows=result.rows.filter(row=>!importRemovedLines.has(row.line));importErrors=result.errors;importChecked=true;importHasErrors=result.errors.length>0;importPreviewLimit=100;
     renderImportPreview();
   }
   function importVerbPreview(row,index){
@@ -1124,7 +1132,12 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
         </div>
         <button type="button" class="row-remove" data-import-remove="${index}" aria-label="Karte aus Vorschau entfernen">×</button>
       </div>`).join('');
-    const errors=importErrors.slice(0,100).map(e=>`<div class="preview-line bad"><span class="preview-index">Zeile ${e.line}</span><span style="grid-column:span 3"><strong>${esc(e.reason)}</strong><br><code>${esc(e.text)}</code></span></div>`).join('');
+    const errors=importErrors.slice(0,100).map((error,index)=>`<div class="preview-line bad">
+      <span class="preview-index">Zeile ${error.line}</span>
+      <div class="preview-error"><strong>${esc(error.reason)}</strong><br><code>${esc(error.text)}</code>
+        ${error.correction?`<button type="button" class="quiet-button" data-import-correct="${index}" aria-label="Korrektur übernehmen für Zeile ${error.line}">Korrektur übernehmen</button>`:''}
+      </div>
+    </div>`).join('');
     preview.innerHTML=(importRows.length||importErrors.length)?`
       <div class="preview-head"><span>IMPORT-VORSCHAU</span><span>${importRows.length} Karten · ${importErrors.length} Fehler</span></div>
       ${errors}
@@ -1145,7 +1158,24 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
     if(importBackExample!==undefined)importRows[Number(importBackExample)].backExampleSentence=value;
     updateImportActionState();
   });
-  $('#import-preview').addEventListener('click',e=>{const i=e.target.dataset.importRemove;if(i===undefined)return;importRows.splice(Number(i),1);renderImportPreview()});
+  $('#import-preview').addEventListener('click',event=>{
+    const {importCorrect,importRemove}=event.target.dataset;
+    if(importCorrect!==undefined){
+      const {line,text,correction}=importErrors[Number(importCorrect)]||{};
+      if(!correction)return;
+      const input=$('#import-text'),parts=input.value.split(/(\r\n?|\n|\u2028|\u2029)/u),index=(line-1)*2;
+      if((index===0?parts[index]?.replace(/^\uFEFF/u,''):parts[index])!==text)return;
+      parts[index]=correction;
+      input.value=parts.join('');
+      updateImportPreview({preserveRemovals:true});
+      const submit=$('#import-submit');
+      (submit.disabled?input:submit).focus();
+    }else if(importRemove!==undefined){
+      const [removed]=importRows.splice(Number(importRemove),1);
+      if(removed)importRemovedLines.add(removed.line);
+      renderImportPreview();
+    }
+  });
   $('#import-file').addEventListener('change',async e=>{const file=e.target.files?.[0];if(!file)return;$('#import-file-name').textContent=file.name;const draft=$('#import-text').value;try{const text=await file.text();if(!$('#import-dialog').open||$('#import-file').files?.[0]!==file||$('#import-text').value!==draft)return;$('#import-text').value=text;updateImportPreview()}catch(error){console.error('Textdatei konnte nicht gelesen werden.',error);toast('Die Textdatei konnte nicht gelesen werden.')} });
   function cancelEntityForm(){if(formContext?.copyCards?.length&&session?.id===formContext.sourceSessionId){session.missedSetPending=false;updateMissedSetActions()}formContext=null;$('#form-dialog').close()}
   document.querySelectorAll('#entity-form [value="cancel"]').forEach(button=>button.addEventListener('click',cancelEntityForm));

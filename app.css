@@ -460,7 +460,8 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .editable-preview .preview-index { align-self: start; padding-top: 12px; }
 .editable-preview .row-remove { align-self: start; }
 .preview-line.bad { grid-template-columns: 52px repeat(3, minmax(0, 1fr)); align-items: start; color: var(--danger); line-height: 1.55; }
-.preview-line.bad > :last-child { min-width: 0; overflow-wrap: anywhere; }
+.preview-error { grid-column: span 3; min-width: 0; overflow-wrap: anywhere; }
+.preview-error button { display: block; margin-top: 8px; }
 .preview-line code { color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; }
 .row-remove { width: 38px; height: 44px; padding: 0; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--muted); font-size: 18px; }
 .row-remove:hover { background: var(--danger-surface); color: var(--danger); }

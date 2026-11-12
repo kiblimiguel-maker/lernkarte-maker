@@ -1,7 +1,7 @@
 const fieldSeparator = ' | ';
 const verbSidePrefix = '@fr-verb:1 ';
 const importLineSeparator = /\r\n?|\n|\u2028|\u2029/u;
-const emptyStem = /^(?:[-–—])?$/u;
+const unavailableForm = /^[-–—]$/u;
 const presentForms = [
   ['je / j’', /^(je(?=\s)|j['’])\s*(.+)$/iu],
   ['tu', /^(tu)\s+(.+)$/iu],
@@ -14,17 +14,25 @@ const presentForms = [
 export const frenchVerbFormLabels = presentForms.map(([label]) => label);
 
 export const frenchVerbExample = 'rennen / laufen | courir | cour- | avoir | couru | je cours | tu cours | il / elle / on court | nous courons | vous courez | ils / elles courent';
+const reflexiveExample = 'sich Sorgen machen | s’inquiéter | inquiét- | être | inquiété | je m’inquiète | tu t’inquiètes | il / elle / on s’inquiète | nous nous inquiétons | vous vous inquiétez | ils / elles s’inquiètent';
+const impersonalExample = 'man muss | falloir | — | avoir | fallu | — | — | il faut | — | — | —';
 
 export const frenchVerbPrompt = `Erstelle aus dem hochgeladenen Vokabular eine Liste französischer Verbkarten für Lernkarten Maker. Übernimm die Verben in der Reihenfolge der Vorlage und schreibe eine Zeile pro Verb.
 
 Trenne die elf Felder mit einem senkrechten Strich. Halte diese Reihenfolge ein.
 Deutsche Bedeutung | französischer Infinitiv | Verbstamm | Hilfsverb | Partizip Perfekt | je | tu | il / elle / on | nous | vous | ils / elles
 
-Übernimm den Verbstamm aus der Vorlage. Schreibe — in dieses Feld, wenn kein gemeinsamer Stamm angegeben ist. Verwende als Hilfsverb avoir, être oder avoir / être. Gib danach das französische participe passé an. Schreibe in die letzten sechs Felder jeweils das Subjekt und die vollständige Form im présent de l’indicatif. Verwende bei Bedarf j’ und behalte bei reflexiven Verben das Reflexivpronomen bei.
+Übernimm den Verbstamm aus der Vorlage. Schreibe — in dieses Feld, wenn kein gemeinsamer Stamm angegeben ist. Verwende als Hilfsverb avoir, être oder avoir / être. Gib danach das französische participe passé an.
 
-Gib nur die fertigen Zeilen aus, ohne Überschrift, Aufzählung, Markdown-Tabelle oder Codeblock. Diese Zeile zeigt das Format. Verwende für deine Ausgabe die Verben aus meiner Vorlage.
+Schreibe in jedes Präsensfeld das Subjekt und die vollständige Form, z. B. «je lance», «j’aime» oder «je m’inquiète». Stimme Übersetzung, Infinitiv, Hilfsverb und Formen aufeinander ab. Verwende bei «beunruhigen» inquiéter mit avoir und j’inquiète. Verwende bei «sich Sorgen machen» s’inquiéter mit être und je m’inquiète.
 
-${frenchVerbExample}`;
+Schreibe bei unpersönlichen Verben wie falloir die Form mit «il» ins dritte Präsensfeld und «—» in die fünf übrigen Präsensfelder. Behalte alle elf Felder und alle zehn senkrechten Striche bei.
+
+Prüfe jede Zeile vor der Ausgabe auf Feldanzahl, vollständige Pronomen und Übereinstimmung von Bedeutung und Verbform. Gib nur die fertigen Zeilen aus, ohne Überschrift, Aufzählung, Markdown-Tabelle oder Codeblock. Nutze die folgenden Zeilen als Formatbeispiele und übernimm für deine Ausgabe die Verben aus meiner Vorlage.
+
+${frenchVerbExample}
+${reflexiveExample}
+${impersonalExample}`;
 
 function readAuxiliary(value) {
   const auxiliary = value.toLowerCase().replace(/\s*\/\s*/gu, '/');
@@ -63,7 +71,33 @@ export function detectImportFormat(text) {
   return vocabulary ? 'vocabulary' : null;
 }
 
-function readVerbFields(fields) {
+const explicitSubject = /^(?:(?:je|tu|il|elle|on|nous|vous|ils|elles)(?=$|[\s/])|j['’])/iu;
+const singleVerbForm = /^\p{L}[\p{L}\p{M}]*$/u;
+const reflexiveClitics = [
+  /^(?:me\s+|m['’]\s*)/iu, /^(?:te\s+|t['’]\s*)/iu, /^(?:se\s+|s['’]\s*)/iu,
+  /^nous\s+/iu, /^vous\s+/iu, /^(?:se\s+|s['’]\s*)/iu,
+];
+
+function addSubject(form, index) {
+  if (index > 0) return { pronoun: frenchVerbFormLabels[index], separator: ' ', form };
+  if (/^h/iu.test(form)) return null; // The spelling alone cannot distinguish h aspiré from h muet.
+  return /^[aàâäæeéèêëiîïoôöœuùûüyÿ]/iu.test(form)
+    ? { pronoun: 'j’', separator: '', form }
+    : { pronoun: 'je', separator: ' ', form };
+}
+
+function readPresentForm(value, index, repair) {
+  const match = value.match(presentForms[index][1]);
+  if (match && (!repair || /\p{L}/u.test(match[2]))) {
+    const [, rawPronoun, form] = match;
+    const pronoun = rawPronoun.replace(/\s*\/\s*/gu, ' / ');
+    return { pronoun, separator: /['’]$/u.test(pronoun) ? '' : ' ', form };
+  }
+  if (!repair || explicitSubject.test(value) || !singleVerbForm.test(value.replace(reflexiveClitics[index], ''))) return null;
+  return addSubject(value, index);
+}
+
+function readVerbFields(fields, repair = false) {
   const [infinitive, rawStem, rawAuxiliary, participle, ...conjugations] = fields;
   if (!infinitive) return { reason: 'Der französische Infinitiv fehlt.' };
 
@@ -71,19 +105,44 @@ function readVerbFields(fields) {
   if (!auxiliary) return { reason: 'Beim Hilfsverb ist avoir, être oder avoir / être erforderlich.' };
   if (!participle) return { reason: 'Das Partizip Perfekt fehlt.' };
 
-  const forms = [];
-  for (const [index, [subject, pattern]] of presentForms.entries()) {
-    const match = conjugations[index].match(pattern);
-    if (!match) return { reason: `Die Präsensform für ${subject} fehlt oder beginnt mit einem anderen Pronomen.` };
-
-    const [, rawPronoun, form] = match;
-    const pronoun = rawPronoun.replace(/\s*\/\s*/gu, ' / ');
-    const separator = /['’]$/u.test(pronoun) ? '' : ' ';
-    forms.push({ pronoun, form, separator });
+  const impersonal = conjugations.every((value, index) => index === 2
+    ? /^il\s+\p{L}/iu.test(value)
+    : unavailableForm.test(value));
+  if (conjugations.some(value => unavailableForm.test(value)) && !impersonal) {
+    return { reason: 'Bei unpersönlichen Verben gehört die Form mit «il» ins dritte Präsensfeld. Die übrigen fünf Präsensfelder enthalten «—».' };
   }
 
-  const stem = emptyStem.test(rawStem) ? '' : rawStem;
+  const forms = [];
+  for (const [index, subject] of frenchVerbFormLabels.entries()) {
+    const form = impersonal && index !== 2
+      ? { pronoun: '', separator: '', form: '—' }
+      : readPresentForm(conjugations[index], index, repair);
+    if (!form) return { reason: `Prüfe das Präsensfeld für ${subject}. Trage das passende Subjekt und die konjugierte Form ein.` };
+    forms.push(form);
+  }
+
+  const stem = unavailableForm.test(rawStem) ? '' : rawStem;
   return { verb: { infinitive, stem, auxiliary, participle, forms } };
+}
+
+function findReflexiveConflict(verb) {
+  const reflexive = verb.forms.every(({ form }, index) => reflexiveClitics[index].test(form));
+  if (!reflexive) return null;
+  if (/^(?:se\s|s['’])/iu.test(verb.infinitive)) {
+    if (verb.auxiliary === 'être') return null;
+    return {
+      reason: `«${verb.infinitive}» ist reflexiv und verwendet «être» als Hilfsverb.`,
+      replacement: { ...verb, auxiliary: 'être' },
+    };
+  }
+  const reason = `Die Präsensformen sind reflexiv. Prüfe, welche Bedeutung zum Infinitiv «${verb.infinitive}» passt.`;
+  if (verb.auxiliary !== 'avoir') return { reason };
+  const bareForms = verb.forms.map(({ form }, index) => form.replace(reflexiveClitics[index], ''));
+  if (!bareForms.every(form => singleVerbForm.test(form))) return { reason };
+  const firstPerson = addSubject(bareForms[0], 0);
+  if (!firstPerson) return { reason };
+  const forms = verb.forms.map((form, index) => index === 0 ? firstPerson : { ...form, form: bareForms[index] });
+  return { reason: reason + ' Der Vorschlag behält den angegebenen Infinitiv und «avoir» bei.', replacement: { ...verb, forms } };
 }
 
 export function validateFrenchVerbSide(value) {
@@ -102,11 +161,14 @@ export function parseFrenchVerbSide(value) {
   return validateFrenchVerbSide(text.slice(verbSidePrefix.length)).verb ?? null;
 }
 
-export function formatFrenchVerbSide({ infinitive, stem, auxiliary, participle, forms }) {
-  const fields = [infinitive, stem || '—', auxiliary, participle,
+function verbFields({ infinitive, stem, auxiliary, participle, forms }) {
+  return [infinitive, stem || '—', auxiliary, participle,
     ...forms.map(({ pronoun, separator, form }) => `${pronoun}${separator}${form}`),
   ];
-  return verbSidePrefix + fields.join(fieldSeparator);
+}
+
+export function formatFrenchVerbSide(verb) {
+  return verbSidePrefix + verbFields(verb).join(fieldSeparator);
 }
 
 export function parseFrenchVerbImport(text) {
@@ -134,9 +196,15 @@ export function parseFrenchVerbImport(text) {
       continue;
     }
 
-    const { verb, reason } = readVerbFields(fields);
+    const { verb, reason } = readVerbFields(fields, true);
     if (!verb) {
       errors.push({ line, text: raw, reason });
+      continue;
+    }
+    const conflict = findReflexiveConflict(verb);
+    if (conflict) {
+      const correction = conflict.replacement && [front, ...verbFields(conflict.replacement)].join(fieldSeparator);
+      errors.push({ line, text: raw, reason: conflict.reason, ...(correction && { correction }) });
       continue;
     }
 
