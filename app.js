@@ -24,10 +24,12 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
   cardThemes.applyTheme(activeCardThemeId);
   const emojiChoices = [
     ['📚','lernen buch bücher bildung','Lernen'],['📖','buch lesen','Lernen'],['✏️','stift schreiben','Lernen'],['📝','notizen schreiben','Lernen'],['🎓','abschluss schule','Lernen'],['💡','idee wissen','Lernen'],['🧠','gehirn wissen','Lernen'],['🔬','wissenschaft labor','Lernen'],['🧪','chemie labor','Lernen'],['🧮','mathe rechnen','Lernen'],['💻','computer informatik','Lernen'],['🌍','welt erde geografie','Lernen'],
+    ['📈','Liniendiagramm kurve statistik wirtschaft','Lernen'],['📊','Balkendiagramm säulendiagramm grafik statistik','Lernen'],['⚛️','Atom physik chemie wissenschaft','Lernen'],['🔢','Zahlen ziffern mathematik rechnen','Lernen'],['🧬','DNA dns genetik biologie','Lernen'],
     ['🇬🇧','england flagge englisch sprache','Sprachen'],['🇫🇷','frankreich flagge französisch sprache','Sprachen'],['🇪🇸','spanien flagge spanisch sprache','Sprachen'],['🇮🇹','italien flagge italienisch sprache','Sprachen'],['🇩🇪','deutschland flagge deutsch sprache','Sprachen'],['🗣️','sprechen sprache','Sprachen'],['💬','dialog sprache','Sprachen'],['🔤','buchstaben alphabet','Sprachen'],['📜','geschichte dokument','Sprachen'],['✍️','schreiben text','Sprachen'],
     ['😀','lächeln gesicht froh','Menschen'],['😎','cool gesicht','Menschen'],['🤓','brille klug','Menschen'],['👩‍🏫','lehrerin schule','Menschen'],['👨‍🏫','lehrer schule','Menschen'],['🧑‍🎓','schüler studium','Menschen'],['❤️','herz liebe','Menschen'],['⭐️','stern','Menschen'],['🏆','pokal erfolg','Menschen'],['🎯','ziel fokus','Menschen'],
-    ['🌱','pflanze wachsen natur','Natur'],['🌿','blatt natur','Natur'],['🌸','blume natur','Natur'],['🌞','sonne natur','Natur'],['🌙','mond nacht','Natur'],['🌈','regenbogen natur','Natur'],['🌊','meer wasser','Natur'],['🔥','feuer energie','Natur'],['🦋','schmetterling tier','Natur'],['🐝','biene tier','Natur'],['🐈','katze tier','Natur'],['🦉','eule tier','Natur'],
-    ['⚽️','fußball sport','Aktivitäten'],['🏀','basketball sport','Aktivitäten'],['🎨','kunst malen','Aktivitäten'],['🎵','musik noten','Aktivitäten'],['🎸','gitarre musik','Aktivitäten'],['🎭','theater kunst','Aktivitäten'],['♟️','schach spiel','Aktivitäten'],['🚀','rakete weltraum','Aktivitäten'],['✈️','flugzeug reisen','Aktivitäten'],['🏛️','gebäude geschichte','Aktivitäten'],['⏳','zeit sanduhr','Aktivitäten'],['🔑','schlüssel','Aktivitäten']
+    ['☠️','Totenkopf schädel skelett anatomie pirat','Menschen'],['🫀','Herzorgan herz kreislauf anatomie biologie','Menschen'],['🫁','Lunge lungen atmung anatomie biologie','Menschen'],
+    ['🌱','pflanze wachsen natur','Natur'],['🌿','blatt natur','Natur'],['☘️','Kleeblatt klee pflanze glück','Natur'],['🌸','blume natur','Natur'],['🌞','sonne natur','Natur'],['🌙','mond nacht','Natur'],['🌈','regenbogen natur','Natur'],['🌊','meer wasser','Natur'],['🔥','feuer energie','Natur'],['🦋','schmetterling tier','Natur'],['🐝','biene tier','Natur'],['🐈','katze tier','Natur'],['🦉','eule tier','Natur'],
+    ['⚽️','fussball fußball sport','Aktivitäten'],['🏀','basketball sport','Aktivitäten'],['🎨','kunst malen','Aktivitäten'],['🎵','musik noten','Aktivitäten'],['🎸','gitarre musik','Aktivitäten'],['🎭','theater kunst','Aktivitäten'],['♟️','schach spiel','Aktivitäten'],['🚀','rakete weltraum','Aktivitäten'],['✈️','flugzeug reisen','Aktivitäten'],['🏛️','gebäude geschichte','Aktivitäten'],['⌛️','Sanduhr zeit stunde','Aktivitäten'],['🔑','schlüssel','Aktivitäten']
   ];
   const icons = ['📚','🌐','📐','🏛️','🧪','🎨'];
   const $ = (s, root=document) => root.querySelector(s);
@@ -446,7 +448,14 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
     if(!isCurrentShare(context)||!shareUrlField.value)return;
     try{
       await navigator.clipboard.writeText(shareUrlField.value);
-      if(isCurrentShare(context))shareStatus.textContent='Link kopiert.';
+      if(!isCurrentShare(context))return;
+      const confirmation=document.createElement('span');
+      confirmation.className='share-copy-confirmation';
+      const check=document.createElement('span');
+      check.className='share-copy-check';
+      check.setAttribute('aria-hidden','true');
+      confirmation.append(check,'Link kopiert.');
+      shareStatus.replaceChildren(confirmation);
     }catch{
       if(!isCurrentShare(context))return;
       shareUrlField.focus();

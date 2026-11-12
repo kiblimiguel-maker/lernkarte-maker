@@ -1224,6 +1224,42 @@ summary::-webkit-details-marker { display: none; }
 .share-dialog .dialog-head { margin-bottom: 14px; }
 #share-item-name { margin: 5px 0 0; color: var(--muted); overflow-wrap: anywhere; }
 #share-status:empty { margin: 0; }
+#share-link-field:not([hidden]) + #share-status {
+  display: flex;
+  align-items: center;
+  min-block-size: 40px;
+  margin: 0;
+  padding-block-start: 8px;
+}
+.share-copy-confirmation {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  border: 1px solid color-mix(in srgb, var(--success) 30%, var(--surface-dialog));
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--success) 12%, var(--surface-dialog));
+  color: var(--success);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 20px;
+  animation: share-copy-in 240ms cubic-bezier(.22,.65,.3,1) both;
+}
+.share-copy-check {
+  flex: none;
+  width: 7px;
+  height: 12px;
+  border: solid currentColor;
+  border-width: 0 2px 2px 0;
+  transform: translateY(-2px) rotate(45deg);
+}
+@keyframes share-copy-in {
+  from { opacity: 0; transform: translateY(3px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .share-copy-confirmation { animation: none; }
+}
 @media (max-width: 560px) {
   .subpage-heading:has(.library-detail-actions) { flex-wrap: wrap; }
   .subpage-heading .library-detail-actions { flex-basis: 100%; justify-content: flex-end; }
