@@ -1,7 +1,7 @@
 const fieldSeparator = ' | ';
 const verbSidePrefix = '@fr-verb:1 ';
 const importLineSeparator = /\r\n?|\n|\u2028|\u2029/u;
-const unavailableForm = /^[-‐‑‒–—―−]$/u;
+const isGap = value => /^[-‐‑‒–—―−]*$/u.test(value.replace(/[\s\p{Cf}]/gu, ''));
 const presentForms = [
   ['je / j’', /^(je(?=\s)|j['’])\s*(.+)$/iu],
   ['tu', /^(tu)\s+(.+)$/iu],
@@ -23,11 +23,11 @@ export const frenchVerbPrompt = `Erstelle aus dem hochgeladenen Vokabular eine L
 Trenne die elf Felder mit einem senkrechten Strich. Halte diese Reihenfolge ein.
 Deutsche Bedeutung | französischer Infinitiv | Verbstamm | Hilfsverb | Partizip Perfekt | je | tu | il / elle / on | nous | vous | ils / elles
 
-Übernimm den Verbstamm aus der Vorlage. Schreibe — in dieses Feld, wenn kein gemeinsamer Stamm angegeben ist. Verwende als Hilfsverb avoir, être oder avoir / être. Gib danach das französische participe passé an.
+Schreibe zuerst den deutschen Infinitiv oder die natürliche deutsche Entsprechung und erst im zweiten Feld den französischen Infinitiv. Beispiel: «plaudern | bavarder». Übernimm den Verbstamm aus der Vorlage, einschliesslich eines Bindestrichs wie in «fuy-». Verwende als Hilfsverb avoir, être oder avoir / être. Gib danach das französische participe passé an.
 
 Schreibe in jedes Präsensfeld das Subjekt und die vollständige Form, z. B. «je lance», «j’aime» oder «je m’inquiète». Stimme Übersetzung, Infinitiv, Hilfsverb und Formen aufeinander ab. Verwende bei «beunruhigen» inquiéter mit avoir und j’inquiète. Verwende bei «sich Sorgen machen» s’inquiéter mit être und je m’inquiète.
 
-Schreibe bei unpersönlichen Verben wie falloir und pleuvoir die Form mit «il» ins dritte Präsensfeld und «—» in die fünf übrigen Präsensfelder. Behalte alle elf Felder und alle zehn senkrechten Striche bei.
+Schreibe einen einzelnen Strich «—» in jedes Feld ohne Angabe, damit es auf der Karte leer bleibt. Bei unpersönlichen Verben wie falloir und pleuvoir steht die Form mit «il» im dritten Präsensfeld. Die übrigen Präsensfelder bleiben durch «—» als Lücken markiert. Behalte alle elf Felder und alle zehn senkrechten Striche bei.
 
 Prüfe jede Zeile vor der Ausgabe auf Feldanzahl, vollständige Pronomen und Übereinstimmung von Bedeutung und Verbform. Gib nur die fertigen Zeilen aus, ohne Überschrift, Aufzählung, Markdown-Tabelle oder Codeblock. Nutze die folgenden Zeilen als Formatbeispiele und übernimm für deine Ausgabe die Verben aus meiner Vorlage.
 
@@ -65,7 +65,8 @@ export function detectImportFormat(text) {
     const hasAuxiliary = fields.slice(2, 5).some(readAuxiliary);
 
     // An incomplete verb row should still get verb-specific validation.
-    if (matchingForms >= 4 || (hasAuxiliary && (fields.length === 11 || matchingForms >= 2))) {
+    if (matchingForms >= 4 || (hasAuxiliary && (fields.length === 11 || matchingForms >= 2))
+      || (fields.length === 11 && fields[0] && fields[1] && matchingForms > 0 && isGap(fields[3]))) {
       return 'french-verbs';
     }
   }
@@ -101,37 +102,30 @@ function readPresentForm(value, index, repair) {
 
 function readVerbFields(fields, repair = false) {
   const [infinitive, rawStem, rawAuxiliary, participle, ...conjugations] = fields;
-  if (!infinitive) return { reason: 'Der französische Infinitiv fehlt.' };
+  if (isGap(infinitive)) return { reason: 'Der französische Infinitiv fehlt.' };
 
-  const auxiliary = readAuxiliary(rawAuxiliary);
-  if (!auxiliary) return { reason: 'Beim Hilfsverb ist avoir, être oder avoir / être erforderlich.' };
-  if (!participle) return { reason: 'Das Partizip Perfekt fehlt.' };
-
-  const impersonal = conjugations.every((value, index) => index === 2
-    ? /^il\s+\p{L}/iu.test(value)
-    : unavailableForm.test(value));
-  if (conjugations.some(value => unavailableForm.test(value)) && !impersonal) {
-    return { reason: 'Bei unpersönlichen Verben gehört die Form mit «il» ins dritte Präsensfeld. Die übrigen fünf Präsensfelder enthalten «—».' };
-  }
+  const auxiliary = isGap(rawAuxiliary) ? '' : readAuxiliary(rawAuxiliary);
+  if (auxiliary === null) return { reason: 'Beim Hilfsverb sind avoir, être, avoir / être oder ein Strich zulässig.' };
 
   const forms = [];
   for (const [index, subject] of frenchVerbFormLabels.entries()) {
-    const form = impersonal && index !== 2
-      ? { pronoun: '', separator: '', form: '—' }
-      : readPresentForm(conjugations[index], index, repair);
+    const value = conjugations[index];
+    const form = isGap(value)
+      ? { pronoun: '', separator: '', form: '' }
+      : readPresentForm(value, index, repair);
     if (!form) return { reason: `Prüfe das Präsensfeld für ${subject}. Trage das passende Subjekt und die konjugierte Form ein.` };
     forms.push(form);
   }
 
-  const stem = unavailableForm.test(rawStem) ? '' : rawStem;
-  return { verb: { infinitive, stem, auxiliary, participle, forms } };
+  const stem = isGap(rawStem) ? '' : rawStem;
+  return { verb: { infinitive, stem, auxiliary, participle: isGap(participle) ? '' : participle, forms } };
 }
 
 function findReflexiveConflict(verb) {
   const reflexive = verb.forms.every(({ form }, index) => reflexiveClitics[index].test(form));
   if (!reflexive) return null;
   if (/^(?:se\s|s['’])/iu.test(verb.infinitive)) {
-    if (verb.auxiliary === 'être') return null;
+    if (!verb.auxiliary || verb.auxiliary === 'être') return null;
     return {
       reason: `«${verb.infinitive}» ist reflexiv und verwendet «être» als Hilfsverb.`,
       replacement: { ...verb, auxiliary: 'être' },
@@ -164,8 +158,8 @@ export function parseFrenchVerbSide(value) {
 }
 
 function verbFields({ infinitive, stem, auxiliary, participle, forms }) {
-  return [infinitive, stem || '—', auxiliary, participle,
-    ...forms.map(({ pronoun, separator, form }) => `${pronoun}${separator}${form}`),
+  return [infinitive, stem || '—', auxiliary || '—', participle || '—',
+    ...forms.map(({ pronoun, separator, form }) => form ? `${pronoun}${separator}${form}` : '—'),
   ];
 }
 
@@ -193,7 +187,7 @@ export function parseFrenchVerbImport(text) {
       errors.push({ line, text: raw, reason: 'Eine Verbzeile braucht elf Felder, getrennt durch |.' });
       continue;
     }
-    if (!front) {
+    if (isGap(front)) {
       errors.push({ line, text: raw, reason: 'Die deutsche Bedeutung fehlt.' });
       continue;
     }
@@ -201,6 +195,10 @@ export function parseFrenchVerbImport(text) {
     const { verb, reason } = readVerbFields(fields, true);
     if (!verb) {
       errors.push({ line, text: raw, reason });
+      continue;
+    }
+    if (front.normalize('NFC').toLowerCase() === verb.infinitive.normalize('NFC').toLowerCase()) {
+      errors.push({ line, text: raw, reason: 'Im ersten Feld steht derselbe Infinitiv wie im zweiten. Trage im ersten Feld die deutsche Bedeutung ein.' });
       continue;
     }
     const conflict = findReflexiveConflict(verb);

@@ -85,7 +85,7 @@ assert.equal(parseFrenchVerbSide(reportedRows.rows[0].back).forms[0].pronoun, 'j
 assert.match(reportedRows.rows[0].back, /je lance/);
 const impersonal = parseFrenchVerbSide(reportedRows.rows[1].back);
 assert.deepEqual(impersonal.forms.map(({ pronoun, separator, form }) => pronoun + separator + form),
-  ['—', '—', 'il faut', '—', '—', '—']);
+  ['', '', 'il faut', '', '', '']);
 assert.equal(formatFrenchVerbSide(impersonal), reportedRows.rows[1].back);
 assert.match(frenchVerbCardMarkup(impersonal, 'man muss'), /il <strong>faut<\/strong>/);
 assert.equal(detectImportFormat(falloir), 'french-verbs');
@@ -95,8 +95,7 @@ assert.match(reportedRows.errors[0].reason, /reflexiv/);
 const corrected = reportedRows.errors[0].correction;
 assert.equal(corrected, 'beunruhigen | inquiéter | inquiét- | avoir | inquiété | j’inquiète | tu inquiètes | il / elle / on inquiète | nous inquiétons | vous inquiétez | ils / elles inquiètent');
 assert.equal(parseFrenchVerbImport([lance, corrected, falloir].join('\n')).rows.length, 3);
-assert.equal(parseFrenchVerbImport(falloir.replace('il faut', 'il / elle / on faut')).errors.length, 1);
-assert.equal(parseFrenchVerbImport(frenchVerbExample.replace('je cours', '—')).errors.length, 1);
+assert.equal(parseFrenchVerbImport(frenchVerbExample.replace('je cours', '—')).errors.length, 0);
 assert.equal(parseFrenchVerbImport(frenchVerbExample.replace('je cours', 'je')).errors.length, 1);
 assert.equal(parseFrenchVerbImport(frenchVerbExample.replace('je cours', 'tu cours')).errors.length, 1);
 assert.equal(parseFrenchVerbImport(frenchVerbExample.replace('je cours', 'nicht angegeben')).errors.length, 1);
@@ -105,14 +104,29 @@ assert.match(parseFrenchVerbImport(reflexive.replace('je m’habille', 'm’habi
 assert.match(parseFrenchVerbImport(reflexive.replace('ÊTRE', 'avoir')).errors[0].correction, /s’habiller \| habill- \| être/);
 assert.ok(frenchVerbPrompt.includes(falloir));
 const pleuvoir = 'regnen | pleuvoir | — | avoir | plu | — | — | il pleut | — | — | —';
-const listWithWeatherVerb = parseFrenchVerbImport([...Array(107).fill(frenchVerbExample), falloir, pleuvoir].join('\n'));
-assert.equal(listWithWeatherVerb.rows.length, 109);
+const listWithWeatherVerb = parseFrenchVerbImport([...Array(108).fill(frenchVerbExample), falloir, frenchVerbExample, pleuvoir].join('\n'));
+assert.equal(listWithWeatherVerb.rows.length, 111);
 assert.deepEqual(listWithWeatherVerb.errors, []);
-const weatherCard = listWithWeatherVerb.rows[108];
-assert.equal(weatherCard.line, 109);
+assert.equal(listWithWeatherVerb.rows[108].front, 'man muss');
+const weatherCard = listWithWeatherVerb.rows[110];
+assert.equal(weatherCard.line, 111);
 assert.equal(weatherCard.front, 'regnen');
 assert.match(frenchVerbCardMarkup(parseFrenchVerbSide(weatherCard.back), 'regnen'), /il <strong>pleut<\/strong>/);
 assert.deepEqual(parseFrenchVerbImport(pleuvoir.replaceAll('—', '−')).rows[0], { ...weatherCard, line: 1 });
+assert.deepEqual(parseFrenchVerbImport(pleuvoir.replaceAll('—', '\u200b-\u2060')).rows[0], { ...weatherCard, line: 1 });
+assert.deepEqual(parseFrenchVerbImport(pleuvoir.replaceAll('—', '')).rows[0], { ...weatherCard, line: 1 });
+assert.doesNotMatch(frenchVerbCardMarkup(parseFrenchVerbSide(weatherCard.back), 'regnen'), /—/);
+const partialRow = 'fliehen | fuir | fuy- | - | - | je fuis | — | il fuit | nous fuyons | | ils fuient';
+const partial = parseFrenchVerbImport(partialRow);
+assert.equal(detectImportFormat(partialRow), 'french-verbs');
+assert.deepEqual(partial.errors, []);
+const partialVerb = parseFrenchVerbSide(partial.rows[0].back);
+assert.equal(partialVerb.stem, 'fuy-');
+assert.equal(partialVerb.auxiliary, '');
+assert.equal(partialVerb.participle, '');
+assert.equal(partialVerb.forms[1].form, '');
+assert.equal(partialVerb.forms[3].form, 'fuyons');
+assert.match(parseFrenchVerbImport(partialRow.replace('fliehen', 'FUIR')).errors[0].reason, /deutsche Bedeutung/);
 assert.ok(frenchVerbPrompt.includes(pleuvoir));
 
 const invalid = parseFrenchVerbImport([
@@ -124,10 +138,10 @@ const invalid = parseFrenchVerbImport([
   frenchVerbExample,
 ].join('\n'));
 assert.equal(invalid.errors[0].text, '  der Hund = le chien  ');
-assert.deepEqual(invalid.errors.map(({ line }) => line), [1, 2, 3, 4, 5]);
+assert.deepEqual(invalid.errors.map(({ line }) => line), [1, 2, 3, 5]);
 assert.match(invalid.errors[2].reason, /Hilfsverb/);
-assert.match(invalid.errors[4].reason, /vous/);
-assert.equal(invalid.rows[0].line, 6);
+assert.match(invalid.errors.find(error => error.line === 5).reason, /vous/);
+assert.deepEqual(invalid.rows.map(row => row.line), [4, 6]);
 assert.deepEqual(parseFrenchVerbImport('  \n'), { rows: [], errors: [] });
 assert.match(validateFrenchVerbSide(courirFields.replace('je cours', 'je')).reason, /je/);
 assert.equal(parseFrenchVerbSide('le chien | un animal'), null);
