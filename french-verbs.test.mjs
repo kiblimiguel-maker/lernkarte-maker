@@ -62,7 +62,7 @@ const multiple = parseFrenchVerbImport(`\uFEFF${irregular}\r\n\u2028${reflexive}
 assert.deepEqual(multiple.errors, []);
 assert.deepEqual(multiple.rows.map(row => [row.line, row.front]), [[1, 'ausgehen'], [3, 'sich anziehen'], [4, 'lieben']]);
 const sortir = parseFrenchVerbSide(multiple.rows[0].back);
-assert.equal(sortir.stem, '');
+assert.equal(sortir.stem, 'sort-');
 assert.equal(sortir.auxiliary, 'avoir / être');
 assert.equal(sortir.forms[2].pronoun, 'il / elle / on');
 assert.equal(formatFrenchVerbSide(sortir), multiple.rows[0].back);
@@ -70,6 +70,16 @@ const habiller = parseFrenchVerbSide(multiple.rows[1].back);
 assert.equal(habiller.infinitive, 's’habiller');
 assert.equal(habiller.auxiliary, 'être');
 assert.equal(habiller.forms[3].form, 'nous habillons');
+const aller = 'gehen | aller | — | être | allé | je vais | tu vas | il va | nous allons | vous allez | ils vont';
+const tenir = 'halten | tenir | — | avoir | tenu | je tiens | tu tiens | il tient | nous tenons | vous tenez | ils tiennent';
+const etre = 'sein | être | — | avoir | été | je suis | tu es | il est | nous sommes | vous êtes | ils sont';
+const manger = 'essen | manger | — | avoir | mangé | je mange | tu manges | il mange | nous mangeons | vous mangez | ils mangent';
+const derivedStems = parseFrenchVerbImport([aller, tenir, etre, manger, reflexive.replace('habill-', '—')].join('\n'));
+assert.deepEqual(derivedStems.errors, []);
+assert.deepEqual(derivedStems.rows.map(row => row.back.split(' | ')[1]), ['all-', 'ten-', 'ét-', 'mange-', 'habill-']);
+const oldAller = '@fr-verb:1 ' + aller.slice(aller.indexOf('|') + 2);
+assert.match(frenchVerbCardMarkup(parseFrenchVerbSide(oldAller), 'gehen'), /role="cell">all-<\/span>/);
+assert.equal(parseFrenchVerbSide(oldAller.replace('nous allons', '—')).stem, '');
 const aimer = parseFrenchVerbSide(multiple.rows[2].back);
 assert.deepEqual(aimer.forms[0], { pronoun: 'j’', separator: '', form: 'aime' });
 assert.deepEqual(parseFrenchVerbSide(multiple.rows[2].back.replace('j’aime', "j'aime")).forms[0], {
@@ -87,6 +97,7 @@ const impersonal = parseFrenchVerbSide(reportedRows.rows[1].back);
 assert.deepEqual(impersonal.forms.map(({ pronoun, separator, form }) => pronoun + separator + form),
   ['', '', 'il faut', '', '', '']);
 assert.equal(formatFrenchVerbSide(impersonal), reportedRows.rows[1].back);
+assert.equal(impersonal.stem, 'fall-');
 assert.match(frenchVerbCardMarkup(impersonal, 'man muss'), /il <strong>faut<\/strong>/);
 assert.equal(detectImportFormat(falloir), 'french-verbs');
 assert.equal(reportedRows.errors.length, 1);
@@ -102,7 +113,7 @@ assert.equal(parseFrenchVerbImport(frenchVerbExample.replace('je cours', 'nicht 
 assert.match(parseFrenchVerbImport(vowel.replace('j’aime', 'aime')).rows[0].back, /j’aime/);
 assert.match(parseFrenchVerbImport(reflexive.replace('je m’habille', 'm’habille')).rows[0].back, /je m’habille/);
 assert.match(parseFrenchVerbImport(reflexive.replace('ÊTRE', 'avoir')).errors[0].correction, /s’habiller \| habill- \| être/);
-assert.ok(frenchVerbPrompt.includes(falloir));
+assert.ok(frenchVerbPrompt.includes(falloir.replace('falloir | —', 'falloir | fall-')));
 const pleuvoir = 'regnen | pleuvoir | — | avoir | plu | — | — | il pleut | — | — | —';
 const listWithWeatherVerb = parseFrenchVerbImport([...Array(108).fill(frenchVerbExample), falloir, frenchVerbExample, pleuvoir].join('\n'));
 assert.equal(listWithWeatherVerb.rows.length, 111);
@@ -111,6 +122,7 @@ assert.equal(listWithWeatherVerb.rows[108].front, 'man muss');
 const weatherCard = listWithWeatherVerb.rows[110];
 assert.equal(weatherCard.line, 111);
 assert.equal(weatherCard.front, 'regnen');
+assert.equal(parseFrenchVerbSide(weatherCard.back).stem, 'pleuv-');
 assert.match(frenchVerbCardMarkup(parseFrenchVerbSide(weatherCard.back), 'regnen'), /il <strong>pleut<\/strong>/);
 assert.deepEqual(parseFrenchVerbImport(pleuvoir.replaceAll('—', '−')).rows[0], { ...weatherCard, line: 1 });
 assert.deepEqual(parseFrenchVerbImport(pleuvoir.replaceAll('—', '\u200b-\u2060')).rows[0], { ...weatherCard, line: 1 });
@@ -140,7 +152,8 @@ assert.equal(partialVerb.participle, '');
 assert.equal(partialVerb.forms[1].form, '');
 assert.equal(partialVerb.forms[3].form, 'fuyons');
 assert.match(parseFrenchVerbImport(partialRow.replace('fliehen', 'FUIR')).errors[0].reason, /deutsche Bedeutung/);
-assert.ok(frenchVerbPrompt.includes(pleuvoir));
+assert.ok(frenchVerbPrompt.includes(pleuvoir.replace('pleuvoir | —', 'pleuvoir | pleuv-')));
+assert.match(frenchVerbPrompt, /französischer Infinitiv \| Imparfait-Stamm/);
 
 const invalid = parseFrenchVerbImport([
   '  der Hund = le chien  ',

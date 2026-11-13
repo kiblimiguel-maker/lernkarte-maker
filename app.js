@@ -100,7 +100,7 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
       const {infinitive,stem,auxiliary,participle,forms}=content.verb;
       const meaning=cardSideContent(card,side==='front'?'back':'front').term;
       const description=[
-        meaning,infinitive,stem&&`Stamm ${stem}`,auxiliary&&`Hilfsverb ${auxiliary}`,participle&&`Partizip ${participle}`,
+        meaning,infinitive,stem&&`Imparfait-Stamm ${stem}`,auxiliary&&`Hilfsverb ${auxiliary}`,participle&&`Partizip ${participle}`,
         ...forms.filter(({pronoun})=>pronoun).map(({pronoun,form,separator})=>pronoun+separator+form),
         content.exampleSentence&&`Beispielsatz: ${content.exampleSentence}`,
       ].filter(Boolean).join('. ');
@@ -915,7 +915,7 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
       <legend>${label} · Französisches Verb</legend>
       <div class="verb-edit-grid">
         ${field('infinitive','Infinitiv',verb.infinitive)}
-        ${field('stem','Verbstamm (optional)',verb.stem,false)}
+        ${field('stem','Imparfait-Stamm (optional)',verb.stem,false)}
         <label class="verb-edit-field" for="f-${side}-auxiliary"><span>Hilfsverb</span>
           <select id="f-${side}-auxiliary" name="${side}-auxiliary">
             <option value="">Leer lassen</option>
@@ -924,7 +924,7 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
         </label>
         ${field('participle','Partizip Perfekt',verb.participle,false)}
       </div>
-      <div class="field-hint">Schreibe die Präsensformen mit ihrem Pronomen. Felder ohne Form kannst du leer lassen.</div>
+      <div class="field-hint">Schreibe die Präsensformen mit ihrem Pronomen. Wenn der Stamm fehlt, wird er nach Möglichkeit aus der nous-Form ergänzt.</div>
       <div class="verb-edit-grid verb-edit-forms">
         ${verb.forms.map(({pronoun,separator,form},index)=>field(`form-${index}`,frenchVerbFormLabels[index],pronoun+separator+form,false)).join('')}
       </div>

@@ -16,15 +16,15 @@ export const frenchVerbFormLabels = presentForms.map(([label]) => label);
 
 export const frenchVerbExample = 'rennen / laufen | courir | cour- | avoir | couru | je cours | tu cours | il / elle / on court | nous courons | vous courez | ils / elles courent';
 const reflexiveExample = 'sich Sorgen machen | s’inquiéter | inquiét- | être | inquiété | je m’inquiète | tu t’inquiètes | il / elle / on s’inquiète | nous nous inquiétons | vous vous inquiétez | ils / elles s’inquiètent';
-const impersonalExample = 'man muss | falloir | — | avoir | fallu | — | — | il faut | — | — | —';
-const weatherExample = 'regnen | pleuvoir | — | avoir | plu | — | — | il pleut | — | — | —';
+const impersonalExample = 'man muss | falloir | fall- | avoir | fallu | — | — | il faut | — | — | —';
+const weatherExample = 'regnen | pleuvoir | pleuv- | avoir | plu | — | — | il pleut | — | — | —';
 
 export const frenchVerbPrompt = `Erstelle aus dem hochgeladenen Vokabular eine Liste französischer Verbkarten für Lernkarten Maker. Übernimm die Verben in der Reihenfolge der Vorlage und schreibe eine Zeile pro Verb.
 
 Trenne die elf Felder mit einem senkrechten Strich. Halte diese Reihenfolge ein.
-Deutsche Bedeutung | französischer Infinitiv | Verbstamm | Hilfsverb | Partizip Perfekt | je | tu | il / elle / on | nous | vous | ils / elles
+Deutsche Bedeutung | französischer Infinitiv | Imparfait-Stamm | Hilfsverb | Partizip Perfekt | je | tu | il / elle / on | nous | vous | ils / elles
 
-Schreibe zuerst den deutschen Infinitiv oder die natürliche deutsche Entsprechung und erst im zweiten Feld den französischen Infinitiv. Beispiel: «plaudern | bavarder». Übernimm den Verbstamm aus der Vorlage, einschliesslich eines Bindestrichs wie in «fuy-». Verwende als Hilfsverb avoir, être oder avoir / être. Gib danach das französische participe passé an.
+Schreibe zuerst den deutschen Infinitiv oder die natürliche deutsche Entsprechung und danach den französischen Infinitiv. Ins dritte Feld kommt der Imparfait-Stamm mit Bindestrich. Nimm dafür in der Regel die nous-Form im Präsens ohne -ons und ohne Reflexivpronomen: nous tenons → ten-, nous allons → all-, nous fuyons → fuy-. Für être lautet der Stamm ét-, für falloir fall- und für pleuvoir pleuv-. Verwende als Hilfsverb avoir, être oder avoir / être. Gib danach das französische participe passé an.
 
 Schreibe in jedes Präsensfeld das Subjekt und die vollständige Form, z. B. «je lance», «j’aime» oder «je m’inquiète». Stimme Übersetzung, Infinitiv, Hilfsverb und Formen aufeinander ab. Verwende bei «beunruhigen» inquiéter mit avoir und j’inquiète. Verwende bei «sich Sorgen machen» s’inquiéter mit être und je m’inquiète.
 
@@ -101,6 +101,23 @@ function readPresentForm(value, index, repair) {
   return addSubject(value, index);
 }
 
+const specialImparfaitStems = new Map([
+  ['être', 'ét-'],
+  ['falloir', 'fall-'],
+  ['pleuvoir', 'pleuv-'],
+]);
+
+function inferImparfaitStem(infinitive, nousForm) {
+  const lemma = infinitive.normalize('NFC').toLowerCase();
+  const special = specialImparfaitStems.get(lemma);
+  if (special) return special;
+
+  // For reflexive verbs, the parsed form may start with a second «nous».
+  const form = nousForm.replace(/^nous\s+/iu, '');
+  const match = form.match(/^([\p{L}\p{M}]+(?:-[\p{L}\p{M}]+)*)ons$/iu);
+  return match ? match[1] + '-' : '';
+}
+
 function readVerbFields(fields, repair = false) {
   const [infinitive, rawStem, rawAuxiliary, participle, ...conjugations] = fields;
   if (isGap(infinitive)) return { reason: 'Der französische Infinitiv fehlt.' };
@@ -118,7 +135,7 @@ function readVerbFields(fields, repair = false) {
     forms.push(form);
   }
 
-  const stem = isGap(rawStem) ? '' : rawStem;
+  const stem = isGap(rawStem) ? inferImparfaitStem(infinitive, forms[3].form) : rawStem;
   return { verb: { infinitive, stem, auxiliary, participle: isGap(participle) ? '' : participle, forms } };
 }
 
