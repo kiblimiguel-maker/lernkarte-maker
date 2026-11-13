@@ -80,6 +80,37 @@ assert.deepEqual(derivedStems.rows.map(row => row.back.split(' | ')[1]), ['all-'
 const oldAller = '@fr-verb:1 ' + aller.slice(aller.indexOf('|') + 2);
 assert.match(frenchVerbCardMarkup(parseFrenchVerbSide(oldAller), 'gehen'), /role="cell">all-<\/span>/);
 assert.equal(parseFrenchVerbSide(oldAller.replace('nous allons', '—')).stem, '');
+assert.equal(parseFrenchVerbSide(oldAller.replace(' | — | ', ' | ir- | ')).stem, 'ir-');
+
+const wrongStem = tenir.replace('tenir | —', 'tenir | tiendr-');
+const stemError = parseFrenchVerbImport(wrongStem).errors[0];
+assert.match(stemError.reason, /Imparfait-Stamm.*tiendr-.*ten-/u);
+assert.equal(stemError.correction, tenir.replace('tenir | —', 'tenir | ten-'));
+assert.deepEqual(parseFrenchVerbImport(stemError.correction), { rows: [{ ...derivedStems.rows[1], line: 1 }], errors: [] });
+
+const incompatibleForms = wrongStem.replace('nous tenons', 'nous tiendrons');
+const formError = parseFrenchVerbImport(incompatibleForms).errors[0];
+assert.match(formError.reason, /nous- und vous-Form/u);
+assert.equal(formError.correction, undefined);
+const oldIncompatibleForms = oldAller.replace('nous allons', 'nous irons');
+assert.equal(parseFrenchVerbSide(oldIncompatibleForms).stem, '');
+
+const stemCases = [
+  [tenir.replace('tenir | —', 'tenir | TEN‑'), 'TEN‑'],
+  [etre.replace('être | —', 'être | somm-'), 'ét-'],
+  [manger.replace('manger | —', 'manger | mang-'), 'mang-'],
+  ['beginnen | commencer | commenc- | avoir | commencé | je commence | tu commences | il commence | nous commençons | vous commencez | ils commencent', 'commenc-'],
+  ['sich setzen | s’asseoir | assoy- | être | assis | je m’assieds | tu t’assieds | il s’assied | nous nous asseyons | vous vous asseyez | ils s’asseyent', 'assoy-'],
+  ['sich erinnern | se souvenir | — | être | souvenu | je me souviens | tu te souviens | il se souvient | nous nous en souvenons | vous vous en souvenez | ils se souviennent', 'souven-'],
+  ['tun | faire | — | avoir | fait | je fais | tu fais | il fait | nous faisons | vous faites | ils font', 'fais-'],
+  [tenir.replace('tenir | —', 'tenir | ten-').replace('nous tenons', '—'), 'ten-'],
+];
+for (const [source, expected] of stemCases) {
+  const result = parseFrenchVerbImport(source);
+  const ready = result.errors[0]?.correction ? parseFrenchVerbImport(result.errors[0].correction) : result;
+  assert.deepEqual(ready.errors, []);
+  assert.equal(parseFrenchVerbSide(ready.rows[0].back).stem, expected);
+}
 const aimer = parseFrenchVerbSide(multiple.rows[2].back);
 assert.deepEqual(aimer.forms[0], { pronoun: 'j’', separator: '', form: 'aime' });
 assert.deepEqual(parseFrenchVerbSide(multiple.rows[2].back.replace('j’aime', "j'aime")).forms[0], {

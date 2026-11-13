@@ -24,7 +24,7 @@ export const frenchVerbPrompt = `Erstelle aus dem hochgeladenen Vokabular eine L
 Trenne die elf Felder mit einem senkrechten Strich. Halte diese Reihenfolge ein.
 Deutsche Bedeutung | französischer Infinitiv | Imparfait-Stamm | Hilfsverb | Partizip Perfekt | je | tu | il / elle / on | nous | vous | ils / elles
 
-Schreibe zuerst den deutschen Infinitiv oder die natürliche deutsche Entsprechung und danach den französischen Infinitiv. Ins dritte Feld kommt der Imparfait-Stamm mit Bindestrich. Nimm dafür in der Regel die nous-Form im Präsens ohne -ons und ohne Reflexivpronomen: nous tenons → ten-, nous allons → all-, nous fuyons → fuy-. Für être lautet der Stamm ét-, für falloir fall- und für pleuvoir pleuv-. Verwende als Hilfsverb avoir, être oder avoir / être. Gib danach das französische participe passé an.
+Schreibe zuerst den deutschen Infinitiv oder die natürliche deutsche Entsprechung und danach den französischen Infinitiv. Ins dritte Feld kommt der Imparfait-Stamm mit Bindestrich. Nimm dafür in der Regel die nous-Form im Präsens ohne -ons und ohne Reflexivpronomen: nous tenons → ten-, nous allons → all-, nous fuyons → fuy-. Für être lautet der Stamm ét-, für falloir fall- und für pleuvoir pleuv-. Prüfe den Stamm mit einer Imparfait-Form wie «je tenais» oder «il fallait». Ist der Stamm unsicher, setze — ins dritte Feld. Verwende als Hilfsverb avoir, être oder avoir / être. Gib danach das französische participe passé an.
 
 Schreibe in jedes Präsensfeld das Subjekt und die vollständige Form, z. B. «je lance», «j’aime» oder «je m’inquiète». Stimme Übersetzung, Infinitiv, Hilfsverb und Formen aufeinander ab. Verwende bei «beunruhigen» inquiéter mit avoir und j’inquiète. Verwende bei «sich Sorgen machen» s’inquiéter mit être und je m’inquiète.
 
@@ -107,15 +107,46 @@ const specialImparfaitStems = new Map([
   ['pleuvoir', 'pleuv-'],
 ]);
 
-function inferImparfaitStem(infinitive, nousForm) {
+function stemForComparison(stem) {
+  return stem.normalize('NFC').toLowerCase().replace(/\s*[-‐‑‒–—―−]$/u, '');
+}
+
+function comparableImparfaitStem(lemma, stem) {
+  const base = stemForComparison(stem);
+  // These verbs drop the extra e or cédille before -ions and -iez.
+  if (lemma.endsWith('ger') && base.endsWith('ge')) return base.slice(0, -1);
+  if (lemma.endsWith('cer') && base.endsWith('ç')) return base.slice(0, -1) + 'c';
+  if (/^(?:se |s['’])?r?asseoir$/u.test(lemma)) return base.replace(/assoy$/u, 'assey');
+  return base;
+}
+
+function getImparfaitEvidence(infinitive, forms) {
   const lemma = infinitive.normalize('NFC').toLowerCase();
   const special = specialImparfaitStems.get(lemma);
-  if (special) return special;
+  if (special) return { stem: special };
 
-  // For reflexive verbs, the parsed form may start with a second «nous».
-  const form = nousForm.replace(/^nous\s+/iu, '');
-  const match = form.match(/^([\p{L}\p{M}]+(?:-[\p{L}\p{M}]+)*)ons$/iu);
-  return match ? match[1] + '-' : '';
+  const nous = forms[3].form.replace(/^nous\s+/iu, '').replace(/^(?:en|y)\s+/iu, '');
+  const vous = forms[4].form.replace(/^vous\s+/iu, '').replace(/^(?:en|y)\s+/iu, '');
+  const nousStem = nous.match(/^([\p{L}\p{M}]+(?:-[\p{L}\p{M}]+)*)ons$/iu)?.[1];
+  const vousStem = vous.match(/^([\p{L}\p{M}]+(?:-[\p{L}\p{M}]+)*)ez$/iu)?.[1];
+  if (!nousStem) return { stem: '' };
+  if (vousStem && comparableImparfaitStem(lemma, nousStem) !== comparableImparfaitStem(lemma, vousStem)) {
+    return { stem: '', conflict: true };
+  }
+  return { stem: nousStem + '-' };
+}
+
+function findImparfaitConflict(verb, evidence) {
+  if (evidence.conflict) {
+    return { reason: 'Die nous- und vous-Form ergeben unterschiedliche Imparfait-Stämme. Prüfe die beiden Präsensformen.' };
+  }
+  if (!evidence.stem) return null;
+  const lemma = verb.infinitive.normalize('NFC').toLowerCase();
+  if (comparableImparfaitStem(lemma, verb.stem) === comparableImparfaitStem(lemma, evidence.stem)) return null;
+  return {
+    reason: 'Prüfe den Imparfait-Stamm «' + verb.stem + '». Der Vorschlag aus Infinitiv und Präsensformen lautet «' + evidence.stem + '».',
+    replacement: { ...verb, stem: evidence.stem },
+  };
 }
 
 function readVerbFields(fields, repair = false) {
@@ -135,8 +166,9 @@ function readVerbFields(fields, repair = false) {
     forms.push(form);
   }
 
-  const stem = isGap(rawStem) ? inferImparfaitStem(infinitive, forms[3].form) : rawStem;
-  return { verb: { infinitive, stem, auxiliary, participle: isGap(participle) ? '' : participle, forms } };
+  const imparfaitEvidence = getImparfaitEvidence(infinitive, forms);
+  const stem = isGap(rawStem) ? imparfaitEvidence.stem : rawStem;
+  return { verb: { infinitive, stem, auxiliary, participle: isGap(participle) ? '' : participle, forms }, imparfaitEvidence };
 }
 
 function findReflexiveConflict(verb) {
@@ -210,7 +242,7 @@ export function parseFrenchVerbImport(text) {
       continue;
     }
 
-    const { verb, reason } = readVerbFields(fields, true);
+    const { verb, reason, imparfaitEvidence } = readVerbFields(fields, true);
     if (!verb) {
       errors.push({ line, text: raw, reason });
       continue;
@@ -219,7 +251,7 @@ export function parseFrenchVerbImport(text) {
       errors.push({ line, text: raw, reason: 'Im ersten Feld steht derselbe Infinitiv wie im zweiten. Trage im ersten Feld die deutsche Bedeutung ein.' });
       continue;
     }
-    const conflict = findReflexiveConflict(verb);
+    const conflict = findReflexiveConflict(verb) || findImparfaitConflict(verb, imparfaitEvidence);
     if (conflict) {
       const correction = conflict.replacement && [front, ...verbFields(conflict.replacement)].join(fieldSeparator);
       errors.push({ line, text: raw, reason: conflict.reason, ...(correction && { correction }) });
