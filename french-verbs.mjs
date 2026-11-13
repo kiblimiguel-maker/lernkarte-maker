@@ -1,6 +1,7 @@
 const fieldSeparator = ' | ';
 const verbSidePrefix = '@fr-verb:1 ';
 const importLineSeparator = /\r\n?|\n|\u2028|\u2029/u;
+const verbImportFields = line => line.replace(/(?<!\\)\\\s*$/u, '').split('|').map(field => field.trim());
 const isGap = value => /^[-‐‑‒–—―−]*$/u.test(value.replace(/[\s\p{Cf}]/gu, ''));
 const presentForms = [
   ['je / j’', /^(je(?=\s)|j['’])\s*(.+)$/iu],
@@ -29,7 +30,7 @@ Schreibe in jedes Präsensfeld das Subjekt und die vollständige Form, z. B. «j
 
 Schreibe einen einzelnen Strich «—» in jedes Feld ohne Angabe, damit es auf der Karte leer bleibt. Bei unpersönlichen Verben wie falloir und pleuvoir steht die Form mit «il» im dritten Präsensfeld. Die übrigen Präsensfelder bleiben durch «—» als Lücken markiert. Behalte alle elf Felder und alle zehn senkrechten Striche bei.
 
-Prüfe jede Zeile vor der Ausgabe auf Feldanzahl, vollständige Pronomen und Übereinstimmung von Bedeutung und Verbform. Gib nur die fertigen Zeilen aus, ohne Überschrift, Aufzählung, Markdown-Tabelle oder Codeblock. Nutze die folgenden Zeilen als Formatbeispiele und übernimm für deine Ausgabe die Verben aus meiner Vorlage.
+Prüfe jede Zeile vor der Ausgabe auf Feldanzahl, vollständige Pronomen und Übereinstimmung von Bedeutung und Verbform. Gib nur die fertigen Zeilen als Klartext aus. Beende jede Zeile mit dem Inhalt des letzten Felds und einem normalen Zeilenumbruch. Nutze die folgenden Zeilen als Formatbeispiele und übernimm für deine Ausgabe die Verben aus meiner Vorlage.
 
 ${frenchVerbExample}
 ${reflexiveExample}
@@ -51,7 +52,7 @@ export function detectImportFormat(text) {
     vocabulary ||= hasEquals;
     if (!line.includes('|')) continue;
 
-    const fields = line.split('|').map(field => field.trim());
+    const fields = verbImportFields(line);
     if (hasEquals) {
       if (fields.length === 11 && !fields[0].includes('=') && readVerbFields(fields.slice(1)).verb) return 'french-verbs';
       continue;
@@ -182,7 +183,7 @@ export function parseFrenchVerbImport(text) {
   for (const [index, raw] of lines.entries()) {
     if (!raw.trim()) continue;
     const line = index + 1;
-    const [front, ...fields] = raw.split('|').map(field => field.trim());
+    const [front, ...fields] = verbImportFields(raw);
     if (fields.length !== 10) {
       errors.push({ line, text: raw, reason: 'Eine Verbzeile braucht elf Felder, getrennt durch |.' });
       continue;

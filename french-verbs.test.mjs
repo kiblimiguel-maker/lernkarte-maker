@@ -116,6 +116,19 @@ assert.deepEqual(parseFrenchVerbImport(pleuvoir.replaceAll('—', '−')).rows[0
 assert.deepEqual(parseFrenchVerbImport(pleuvoir.replaceAll('—', '\u200b-\u2060')).rows[0], { ...weatherCard, line: 1 });
 assert.deepEqual(parseFrenchVerbImport(pleuvoir.replaceAll('—', '')).rows[0], { ...weatherCard, line: 1 });
 assert.doesNotMatch(frenchVerbCardMarkup(parseFrenchVerbSide(weatherCard.back), 'regnen'), /—/);
+// Pasting Markdown source can leave a hard-break backslash at the end of each line.
+const withMarkdownBreak = line => line.replaceAll(' | ', '|') + '\\';
+const pasted = [
+  ...Array(108).fill(withMarkdownBreak(frenchVerbExample)),
+  withMarkdownBreak(falloir),
+  withMarkdownBreak(frenchVerbExample),
+  withMarkdownBreak(pleuvoir) + '  ',
+].join('\r\n');
+assert.equal(detectImportFormat(pasted), 'french-verbs');
+assert.deepEqual(parseFrenchVerbImport(pasted), listWithWeatherVerb);
+const brokenLine = withMarkdownBreak(pleuvoir.replace(/—$/u, 'tu pleus'));
+assert.equal(parseFrenchVerbImport(brokenLine).errors[0].text, brokenLine);
+assert.deepEqual(parseFrenchVerbImport(withMarkdownBreak(pleuvoir.replace(/—$/u, ''))).rows[0], { ...weatherCard, line: 1 });
 const partialRow = 'fliehen | fuir | fuy- | - | - | je fuis | — | il fuit | nous fuyons | | ils fuient';
 const partial = parseFrenchVerbImport(partialRow);
 assert.equal(detectImportFormat(partialRow), 'french-verbs');
