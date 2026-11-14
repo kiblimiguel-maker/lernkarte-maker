@@ -12,8 +12,8 @@ export function studyKeyboardAction(event, { open = false, blocked = false, canI
   if (key === 'm') return 'known';
 
   // Study owns Space and arrows even when a control retains focus after a
-  // click. The caller prevents native button activation before dispatching.
-  if (key === ' ') return 'flip';
+  // click. Speech controls keep native Space activation.
+  if (key === ' ') return target?.closest?.('#study-speech-toolbar') ? null : 'flip';
   if (key === 'arrowleft') return 'previous';
   if (key === 'arrowright') return 'next';
   return null;

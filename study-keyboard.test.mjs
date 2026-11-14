@@ -41,6 +41,11 @@ for (const button of ['study-close', 'answer-no', 'answer-yes', 'study-card-0'])
   assert.equal(action('ArrowLeft', { target: focusedButton }), 'previous');
 }
 
+const speechControl = { closest: selector => selector === '#study-speech-toolbar' ? {} : null };
+assert.equal(action(' ', { target: speechControl }), null);
+assert.equal(action('N', { target: speechControl }), 'missed');
+assert.equal(action('ArrowRight', { target: speechControl }), 'next');
+
 // State is read for each event: a rating locks the current card until the next
 // card is ready, and holding a key never rates the newly revealed card.
 let state = { ...active }, ratings = [];

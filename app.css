@@ -803,6 +803,110 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 
 .study-back .card-side-label, .study-back .flip-hint { color: var(--study-back-muted, #BAC5D5); }
 
+/* The pronunciation controls sit above the card, outside its flip button. */
+.study-speech {
+  position: absolute;
+  z-index: 4;
+  inset-inline: 0;
+  inset-block-end: calc((100% - var(--study-card-height)) / 2 + 5px);
+  width: min(calc(var(--study-card-width) - 12px), 440px);
+  margin-inline: auto;
+  pointer-events: none;
+  --speech-text: var(--study-back-text, #F2F5FA);
+  --speech-surface: var(--study-back-surface, #26344A);
+}
+.study-speech[data-side="front"] {
+  --speech-text: var(--study-front-text, #F2F5FA);
+  --speech-surface: var(--study-front-surface, #242A33);
+}
+.study-stage:has(.study-speech[data-side="back"]:not([hidden])) .is-active .study-back,
+.study-stage:has(.study-speech[data-side="front"]:not([hidden])) .is-active .study-front { padding-block-end: 58px; }
+.study-stage:has(.study-speech[data-side="back"]:not([hidden])) .is-active .study-back .flip-hint,
+.study-stage:has(.study-speech[data-side="front"]:not([hidden])) .is-active .study-front .flip-hint { visibility: hidden; }
+.study-speech-actions {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+}
+.study-speech-button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 44px;
+  padding-inline: 11px;
+  border: 1px solid color-mix(in srgb, var(--speech-text) 30%, var(--speech-surface));
+  border-radius: var(--radius-control);
+  background: var(--speech-surface);
+  color: var(--speech-text);
+  font-size: 12px;
+  font-weight: 570;
+  line-height: 1.3;
+  cursor: pointer;
+  pointer-events: auto;
+  list-style: none;
+}
+.study-speech-button svg { width: 16px; height: 16px; flex: none; }
+.study-speech-button:hover, .study-speech-forms[open] > summary {
+  background: color-mix(in srgb, var(--speech-text) 9%, var(--speech-surface));
+}
+.study-speech-button[aria-pressed="true"], .study-speech-button:active {
+  border-color: var(--speech-text);
+  background: color-mix(in srgb, var(--speech-text) 14%, var(--speech-surface));
+}
+.study-speech-button:focus-visible { outline: 2px solid var(--speech-text); outline-offset: 2px; }
+.study-speech-button[aria-pressed="true"] .speech-play-icon { visibility: hidden; }
+.study-speech-actions > .study-speech-button[aria-pressed="true"]::before {
+  position: absolute;
+  inset-inline-start: 14px;
+  content: "";
+  width: 9px;
+  aspect-ratio: 1;
+  border-radius: 2px;
+  background: currentColor;
+}
+.study-speech-forms > summary::-webkit-details-marker { display: none; }
+.study-speech-menu {
+  position: absolute;
+  z-index: 1;
+  inset: auto 4px calc(100% + 7px);
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px;
+  max-height: 165px;
+  overflow-y: auto;
+  pointer-events: auto;
+  padding: 7px;
+  border: 1px solid color-mix(in srgb, var(--speech-text) 32%, var(--speech-surface));
+  border-radius: var(--radius-control);
+  background: var(--speech-surface);
+  box-shadow: var(--shadow-soft);
+}
+.study-speech-menu .study-speech-button { justify-content: flex-start; text-align: start; overflow-wrap: anywhere; }
+.study-speech-status {
+  position: absolute;
+  z-index: 2;
+  inset: auto 8px calc(100% + 7px);
+  margin: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-control);
+  background: var(--surface-dialog);
+  color: var(--text);
+  box-shadow: var(--shadow-soft);
+  font-size: 12px;
+  line-height: 1.45;
+  text-align: center;
+  pointer-events: none;
+}
+.study-speech:has(.study-speech-forms[open]) .study-speech-status { inset-block-end: calc(100% + 184px); }
+@media (max-width: 480px) {
+  .study-speech-actions { gap: 4px; }
+  .study-speech-button { gap: 4px; padding-inline: 6px; font-size: 11px; }
+  .study-speech-actions > .study-speech-button[aria-pressed="true"]::before { inset-inline-start: 10px; }
+}
+
 /* Subtle stack depth shadow (no color shift!) */
 .study-card-slot.is-stack .study-face {
   box-shadow: 0 9px 20px rgba(0, 0, 0, 0.24);

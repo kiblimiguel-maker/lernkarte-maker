@@ -2,6 +2,7 @@ import { supabase } from './supabaseClient.js';
 import { cardListPage, libraryCardCounts, searchLibrary } from './library-view.mjs';
 import { bindLibraryDrag } from './library-drag.mjs';
 import { studyKeyboardAction } from './study-keyboard.mjs';
+import { createStudySpeech, frenchSpeechForms, frenchSpeechSide } from './study-speech.mjs';
 import { getAppAppearance } from './appearance.mjs';
 import { createLibraryShare, libraryShareUrl } from './library-sharing.mjs';
 import { frenchImportPrompt, importGuideExamples } from './import-guide.mjs';
@@ -206,13 +207,14 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
         <header class="page-heading">
           <div>
             <h1 class="page-title" id="guide-title" tabindex="-1">Anleitung</h1>
-            <p class="page-subtitle">Lernkarten aus Text erstellen und französische Vokabeln oder Verben für den Import vorbereiten.</p>
+            <p class="page-subtitle">Lernkarten importieren und französische Vokabeln und Verben lernen.</p>
           </div>
         </header>
         <nav class="guide-index" aria-label="In dieser Anleitung">
           <a href="#guide-format-title" data-guide-section="guide-format-title">Textimport</a>
           <a href="#guide-prompt-title" data-guide-section="guide-prompt-title">Vokabel-Prompt</a>
           <a href="#guide-verb-title" data-guide-section="guide-verb-title">Verben-Prompt</a>
+          <a href="#guide-speech-title" data-guide-section="guide-speech-title">Aussprache</a>
         </nav>
         <section class="guide-section" aria-labelledby="guide-format-title">
           <h2 id="guide-format-title" tabindex="-1">Lernkarten aus Text importieren</h2>
@@ -269,6 +271,11 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
             <summary>Beispielausgabe ansehen</summary>
             <pre class="guide-example"><code>${esc(frenchVerbExample)}</code></pre>
           </details>
+        </section>
+        <section class="guide-section" aria-labelledby="guide-speech-title">
+          <h2 id="guide-speech-title" tabindex="-1">Französische Aussprache</h2>
+          <p>Wähle auf der französischen Kartenseite <strong>Begriff</strong> oder <strong>Beispielsatz</strong>. Bei Konjugationskarten findest du unter <strong>Verbformen</strong> die einzelnen Präsensformen. Erneutes Antippen stoppt die Wiedergabe.</p>
+          <p>Unter <strong>Lernstapel bearbeiten</strong> kannst du die Seite für die Aussprache wählen. Die App nutzt eine lokale französische Stimme. Falls sie fehlt, aktiviere eine in den Bedienungshilfen deines Geräts.</p>
         </section>
       </section>`;
     document.querySelectorAll('[data-guide-section]').forEach(link=>link.onclick=event=>{
@@ -476,7 +483,7 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
   }
   document.addEventListener('click',event=>{
     if(accountMenu.open&&!accountMenu.contains(event.target))accountMenu.open=false;
-    document.querySelectorAll(':is(.management-menu,.item-menu)[open]').forEach(menu=>{
+    document.querySelectorAll(':is(.management-menu,.item-menu,.study-speech-forms)[open]').forEach(menu=>{
       if(!menu.contains(event.target))menu.open=false;
     });
     const move=event.target.closest('[data-move-item]');
@@ -1072,7 +1079,12 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
       const folderId=entity?entity.folderId||'':(formContext?.defaultFolderId&&folder(formContext.defaultFolderId)?.subjectId===subjectId?formContext.defaultFolderId:activeFolder&&folder(activeFolder)?.subjectId===subjectId?activeFolder:'');
       fields=subjectChoice+input('name',`Name des Lernstapels <span class="optional-label">(optional)</span>`,entity?.name,window.WortwerkModel.nextSetName(data.sets,subjectId||'__default__',folderId||null),Boolean(entity))+`<div class="field-hint">Ohne Namen vergeben wir automatisch den nächsten freien „Lernstapel“-Namen.</div><label class="field-label" for="f-folder">Ordner <span class="optional-label">(optional)</span></label><select id="f-folder" name="folderId"><option value="">${subjectFolders(subjectId).length?'Kein Ordner':'Ohne Ordner'}</option>${subjectFolders(subjectId).map(f=>`<option value="${esc(f.id)}" ${folderId===f.id?'selected':''}>${esc(folderLabel(f))}</option>`).join('')}</select><div class="field-hint">Der Lernstapel wird im ausgewählten Fach gespeichert. Ein Ordner ist optional.</div>`
     }
-    if(type==='set')fields+=setDesignFields(entity?.cardThemeId||'');
+    if(type==='set'){
+      const speechSide=entity?.frenchSpeechSide||(formContext?.copyCards?.length?setById(session?.setId)?.frenchSpeechSide:null)||'auto';
+      const speechOptions=[['auto','Automatisch'],['back','Rückseite'],['front','Vorderseite'],['off','Aus']];
+      fields+=`<label class="field-label" for="f-french-speech">Französische Aussprache</label><select id="f-french-speech" name="frenchSpeechSide" aria-describedby="f-french-speech-hint">${speechOptions.map(([id,label])=>`<option value="${id}" ${speechSide===id?'selected':''}>${label}</option>`).join('')}</select><p class="field-hint" id="f-french-speech-hint">Automatisch nutzt die Rückseite in Französisch-Lernstapeln und die französische Seite bei Verbkarten.</p>`;
+      fields+=setDesignFields(entity?.cardThemeId||'');
+    }
     if(type==='card'){
       fields=cardSideFields(entity,'front','Vorderseite','Begriff, Frage oder Wort')+
         cardSideFields(entity,'back','Rückseite','Übersetzung, Antwort oder Erklärung')+
@@ -1119,7 +1131,8 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
       const name=rawName||(existing?.name||window.WortwerkModel.nextSetName(data.sets,subjectId,folderId));
       const duplicate=data.sets.some(set=>set.id!==existing?.id&&set.subjectId===subjectId&&(set.folderId||null)===(folderId||null)&&set.name.trim().toLocaleLowerCase('de')===name.trim().toLocaleLowerCase('de'));
       if(duplicate&&(existing?.name!==name||(existing?.folderId||null)!==folderId)){toast('An diesem Speicherort gibt es bereits einen Lernstapel mit diesem Namen.');return}
-      const selectedTheme=fd.get('cardThemeId')||null;const v={name,folderId,cardThemeId:cardThemes.themes.some(theme=>theme.id===selectedTheme)?selectedTheme:null};
+      const selectedTheme=fd.get('cardThemeId')||null,selectedSpeech=fd.get('frenchSpeechSide');
+      const v={name,folderId,cardThemeId:cardThemes.themes.some(theme=>theme.id===selectedTheme)?selectedTheme:null,frenchSpeechSide:['front','back','off'].includes(selectedSpeech)?selectedSpeech:undefined};
       if(existing){const moved=(existing.folderId||null)!==folderId;Object.assign(existing,v,{updatedAt:new Date().toISOString()});if(moved)existing.position=window.WortwerkModel.nextLibraryPosition(data,'set',existing)}
       else{
         const timestamp=new Date().toISOString(),created={id:id(),...v,subjectId,createdAt:timestamp,updatedAt:timestamp};
@@ -1170,7 +1183,13 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
   function deleteSubject(key){const s=subject(key);if(!s||!confirm(`„${s.name}“ mit allen Ordnern, Sets und Karten löschen?`))return;const setIds=data.sets.filter(x=>x.subjectId===key).map(x=>x.id);data.subjects=data.subjects.filter(x=>x.id!==key);data.folders=data.folders.filter(x=>x.subjectId!==key);data.sets=data.sets.filter(x=>x.subjectId!==key);data.cards=data.cards.filter(x=>!setIds.includes(x.setId));data.recent=data.recent.filter(r=>!setIds.includes(r.setId));for(const setId of setIds)delete data.studySessions[setId];data.studyHistory=data.studyHistory.filter(entry=>!setIds.includes(entry.setId));activeSubject=null;activeFolder=null;activeSet=null;save();render();toast('Fach gelöscht')}
   function deleteFolder(key){const f=folder(key);if(!f||!confirm(`Ordner „${f.name}“ löschen? Lernstapel und Unterordner bleiben erhalten und werden eine Ebene nach oben verschoben.`))return;data.folders=data.folders.filter(x=>x.id!==key);data.sets.forEach(s=>{if(s.folderId===key){s.folderId=f.parentId||null;s.position=window.WortwerkModel.nextLibraryPosition(data,'set',s)}});data.folders.forEach(child=>{if(child.parentId===key){child.parentId=f.parentId||null;child.position=window.WortwerkModel.nextLibraryPosition(data,'folder',child)}});if(activeFolder===key)activeFolder=f.parentId||null;refreshLibraryOrder();save();render();toast('Ordner gelöscht')}
   function deleteSet(key){const s=setById(key);if(!s||!confirm(`„${s.name}“ und alle zugehörigen Karten löschen?`))return;data.sets=data.sets.filter(x=>x.id!==key);data.cards=data.cards.filter(c=>c.setId!==key);data.recent=data.recent.filter(r=>r.setId!==key);delete data.studySessions[key];data.studyHistory=data.studyHistory.filter(entry=>entry.setId!==key);activeSet=null;save();render();toast('Set gelöscht')}
-  function swapSetSides(key){const item=setById(key),cards=setCards(key);if(!item)return;if(!cards.length){toast('In diesem Lernstapel gibt es keine Karten.');return}if(session?.setId===key){toast('Beende zuerst die laufende Lerneinheit, damit die Karten konsistent bleiben.');return}if(!confirm(`Vorder- und Rückseiten aller ${cards.length} Karten im Lernstapel „${item.name}“ vertauschen?`))return;const count=window.WortwerkModel.swapSetCardSides(data.cards,key,new Date().toISOString());if(!count)return;save();render();toast(`Vorder- und Rückseiten von ${count} Karten getauscht`)}
+  function swapSetSides(key){const item=setById(key),cards=setCards(key);if(!item)return;if(!cards.length){toast('In diesem Lernstapel gibt es keine Karten.');return}if(session?.setId===key){toast('Beende zuerst die laufende Lerneinheit, damit die Karten konsistent bleiben.');return}if(!confirm(`Vorder- und Rückseiten aller ${cards.length} Karten im Lernstapel „${item.name}“ vertauschen?`))return;const count=window.WortwerkModel.swapSetCardSides(data.cards,key,new Date().toISOString());if(!count)return;
+    if(item.frenchSpeechSide!=='off'){
+      const owner=subject(item.subjectId);
+      const speechSide=frenchSpeechSide(item.frenchSpeechSide,{subjectName:owner?.name,subjectSymbol:owner?.emoji||owner?.icon,deckName:item.name});
+      if(speechSide)item.frenchSpeechSide=speechSide==='back'?'front':'back';
+    }
+    save();render();toast(`Vorder- und Rückseiten von ${count} Karten getauscht`)}
   let importPreviewFormat=null;
   const importRemovedLines=new Set();
   let importUpdateCheck=null;
@@ -1426,7 +1445,7 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
   }
   function getUncopiedMissedCards(){if(!session)return[];const copied=session.missedCardIdsCopied||new Set();return session.cards.filter(card=>window.WortwerkModel.getStudyResult(session,card.id)===false&&!copied.has(card.id))}
   function updateMissedSetActions(){if(!session)return;const results=window.WortwerkModel.getStudyResults(session),totalMissed=results.filter(result=>result===false).length,available=getUncopiedMissedCards().length,pending=Boolean(session.missedSetPending);const button=$('#create-missed-set');button.disabled=!available||pending||session.transitioning;button.textContent=available?`Lernstapel aus ${available} falschen Karten erstellen`:totalMissed?'Lernstapel erstellt':'Lernstapel aus falschen Karten erstellen';button.title=available?'Bisher falsch bewertete Karten in einen eigenen Lernstapel kopieren':totalMissed?'Alle bisher falschen Karten wurden bereits kopiert':'Bewerte zuerst eine Karte als Nicht gewusst';const resultButton=$('#create-missed-set-complete');resultButton.hidden=totalMissed===0;resultButton.disabled=!available||pending;resultButton.textContent=available?`Lernstapel aus ${available} falschen Karten erstellen`:totalMissed?'Lernstapel erstellt':'Lernstapel aus falschen Karten erstellen';resultButton.title=button.title}
-  function openMissedSetCreation(){if(!session||session.missedSetPending)return;const cards=getUncopiedMissedCards();if(!cards.length){toast('Bewerte zuerst Karten als „Nicht gewusst“.');return}const originalSet=setById(session.setId);session.missedSetPending=true;formContext={type:'set',defaultSubjectId:originalSet?.subjectId||activeSubject||data.subjects[0]?.id||'',defaultFolderId:originalSet?.folderId||null,copyCards:cards.slice(),sourceSessionId:session.id};fillForm('set');$('#form-submit').textContent='Lernstapel erstellen';$('#form-dialog').showModal();$('#f-name').focus();updateMissedSetActions()}
+  function openMissedSetCreation(){if(!session||session.missedSetPending)return;const cards=getUncopiedMissedCards();if(!cards.length){toast('Bewerte zuerst Karten als „Nicht gewusst“.');return}const originalSet=setById(session.setId);session.missedSetPending=true;studySpeech.stop();speechForms.open=false;formContext={type:'set',defaultSubjectId:originalSet?.subjectId||activeSubject||data.subjects[0]?.id||'',defaultFolderId:originalSet?.folderId||null,copyCards:cards.slice(),sourceSessionId:session.id};fillForm('set');$('#form-submit').textContent='Lernstapel erstellen';$('#form-dialog').showModal();$('#f-name').focus();updateMissedSetActions()}
   function resetSlotOrientation(slotObj){
     if(!slotObj)return;
     slotObj.button.setAttribute('aria-pressed','false');
@@ -1490,6 +1509,7 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
     $('#study-next').setAttribute('aria-label',canFinish?'Lernrunde abschliessen':'Nächste Karte');
     $('#study-next').title=canFinish?'Lernrunde abschliessen':'Nächste Karte';
     $('#study-next .study-step-label').textContent=canFinish?'Abschliessen':'Weiter';
+    syncStudySpeech(card);
   }
   function flip(){
     if(!session||session.transitioning||!$('#study-complete').hidden)return;
@@ -1499,6 +1519,7 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
     const card=window.WortwerkModel.getStudyCard(session);
     active.button.setAttribute('aria-label',describeCardSide(card,session.flipped?'back':'front'));
     active.button.setAttribute('aria-pressed',String(session.flipped));
+    syncStudySpeech(card);
   }
   function moveStudy(delta){
     if(!session||session.transitioning||!$('#study-complete').hidden)return;
@@ -1527,6 +1548,7 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
     const activeSession=session,card=window.WortwerkModel.getStudyCard(session),cardId=card?.id,previous=window.WortwerkModel.getStudyResult(session),timestamp=new Date().toISOString();
     if(!card||!cardId)return;
     session.transitioning=true;
+    syncStudySpeech();
     window.WortwerkModel.updateCardAnswer(card,previous,known,timestamp);
     window.WortwerkModel.setStudyAnswer(session,cardId,known);
     const remaining=session.shuffleRemainingCardIds.length>0||window.WortwerkModel.getStudyResults(session).some(result=>result===null);
@@ -1595,6 +1617,7 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
   }
   function finishStudy(){
     if(!session)return;
+    syncStudySpeech();
     const results=window.WortwerkModel.getStudyResults(session);
     if(!session.completionRecorded)completeSession({id:session.id,setId:session.setId,startedAt:session.startedAt,cardIds:session.cards.map(card=>card.id),results});
     const {known,missed,unrated,percentage}=window.WortwerkModel.summarizeResults(results);
@@ -1640,9 +1663,69 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
   });
   $('#settings-close').onclick=()=>settingsDialog.close();
   $('#settings-done').onclick=()=>settingsDialog.close();
+  const speechToolbar=$('#study-speech-toolbar');
+  const speechStatus=$('#study-speech-status');
+  const speechForms=$('#study-speech-forms');
+  const speechFormList=$('#study-speech-form-list');
+  const speechExample=$('#study-speak-example');
+  let speechContent=new Map();
+  const studySpeech=createStudySpeech({onState({key,status}){
+    speechToolbar.querySelectorAll('button[data-study-speech-key]').forEach(button=>{
+      button.setAttribute('aria-pressed',String(status==='playing'&&button.dataset.studySpeechKey===key));
+    });
+    const message={
+      'no-voice':'Keine lokale französische Stimme verfügbar. Aktiviere eine französische Stimme in den Bedienungshilfen deines Geräts.',
+      unsupported:'Dein Browser unterstützt das Vorlesen hier nicht.',
+      error:'Die Wiedergabe ist fehlgeschlagen. Versuche es erneut.',
+    }[status]||'';
+    speechStatus.classList.toggle('sr-only',!message);
+    speechStatus.textContent=message;
+  }});
+  function syncStudySpeech(card){
+    if(card&&speechToolbar.contains(document.activeElement))getSlot(activeSlotIndex).button.focus({preventScroll:true});
+    studySpeech.stop();
+    speechForms.open=false;
+    speechContent=new Map();
+    const deck=setById(session?.setId),owner=subject(deck?.subjectId);
+    const visibleSide=session?.flipped?'back':'front';
+    const content=card&&cardSideContent(card,visibleSide);
+    const opposite=content&&!content.verb&&cardSideContent(card,visibleSide==='back'?'front':'back').verb;
+    const side=content&&frenchSpeechSide(deck?.frenchSpeechSide,{
+      frontVerb:visibleSide==='front'?content.verb:opposite,
+      backVerb:visibleSide==='back'?content.verb:opposite,
+      subjectName:owner?.name,subjectSymbol:owner?.emoji||owner?.icon,deckName:deck?.name,
+    });
+    speechToolbar.hidden=side!==visibleSide||!content?.term?.trim();
+    if(speechToolbar.hidden)return;
+    speechToolbar.dataset.side=visibleSide;
+    speechContent.set('term',content.term);
+    speechExample.hidden=!content.exampleSentence;
+    if(content.exampleSentence)speechContent.set('example',content.exampleSentence);
+    const forms=frenchSpeechForms(content.verb);
+    speechForms.hidden=forms.length===0;
+    speechFormList.innerHTML=forms.map(({label,speech},index)=>{
+      const key=`form-${index}`;
+      speechContent.set(key,speech);
+      return `<button class="study-speech-button" type="button" lang="fr" aria-pressed="false" data-study-speech-key="${key}" data-study-speech-form>${esc(label)}</button>`;
+    }).join('');
+  }
+  speechToolbar.addEventListener('click',event=>{
+    const control=event.target.closest('button[data-study-speech-key]');
+    if(!control||speechToolbar.hidden||!session||session.transitioning)return;
+    const key=control.dataset.studySpeechKey;
+    studySpeech.play(key,speechContent.get(key));
+  });
+  speechForms.addEventListener('keydown',event=>{
+    if(event.key!=='Escape'||!speechForms.open)return;
+    event.preventDefault();
+    speechForms.open=false;
+    $('#study-speech-forms-summary').focus();
+  });
+  document.addEventListener('visibilitychange',()=>{if(document.hidden&&studyDialog.open)studySpeech.stop()});
+  studyDialog.addEventListener('close',()=>{if(!studyDialog.open)studySpeech.stop()});
   function syncFullscreenButton(){const active=document.fullscreenElement===studyDialog||studyDialog.classList.contains('is-fullscreen'),button=$('#study-expand');button.setAttribute('aria-pressed',String(active));button.setAttribute('aria-label',active?'Vollbild verlassen':'Lernmodus im Vollbild öffnen');button.title=active?'Vollbild verlassen':'Vollbild';$('#study-expand-label').textContent=active?'Fenster':'Vollbild'}
   async function toggleStudyFullscreen(){if(document.fullscreenElement===studyDialog||studyDialog.classList.contains('is-fullscreen')){studyDialog.classList.remove('is-fullscreen');if(document.fullscreenElement===studyDialog){try{await document.exitFullscreen()}catch(error){console.warn('Vollbildmodus konnte nicht beendet werden.',error)}}syncFullscreenButton();return}try{if(studyDialog.requestFullscreen)await studyDialog.requestFullscreen();else studyDialog.classList.add('is-fullscreen')}catch(error){studyDialog.classList.add('is-fullscreen')}syncFullscreenButton()}
-  function endStudy(){const setId=session?.setId;clearActiveStudyTransition();if(document.fullscreenElement===studyDialog)document.exitFullscreen().catch(()=>{});studyDialog.classList.remove('is-fullscreen');studyDialog.close();session=null;cardThemes.applyTheme(activeCardThemeId);syncFullscreenButton();if(setId){const label=studyActionLabel(setId);if(activeSet===setId){const button=$('#start-study');if(button)button.textContent=label}document.querySelectorAll('[data-quick-study]').forEach(button=>{if(button.dataset.quickStudy===setId)button.textContent=label});render()}}
+  function endStudy(){const setId=session?.setId;syncStudySpeech();clearActiveStudyTransition();if(document.fullscreenElement===studyDialog)document.exitFullscreen().catch(()=>{});studyDialog.classList.remove('is-fullscreen');studyDialog.close();session=null;cardThemes.applyTheme(activeCardThemeId);syncFullscreenButton();if(setId){const label=studyActionLabel(setId);if(activeSet===setId){const button=$('#start-study');if(button)button.textContent=label}document.querySelectorAll('[data-quick-study]').forEach(button=>{if(button.dataset.quickStudy===setId)button.textContent=label});render()}}
   studyDialog.addEventListener('fullscreenchange',syncFullscreenButton);
   studyDialog.addEventListener('cancel',event=>{event.preventDefault();endStudy()});
   $('#study-expand').onclick=toggleStudyFullscreen;
