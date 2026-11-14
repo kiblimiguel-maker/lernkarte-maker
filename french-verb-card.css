@@ -104,3 +104,11 @@
     font-size: 12px;
   }
 }
+
+@media (max-height: 460px) {
+  .study-face:has(.is-verb-card) { padding-block: 26px 18px; }
+  .study-copy-main.is-verb-card .french-verb-card {
+    --verb-spacing: 4px;
+    font-size: 13px;
+  }
+}
