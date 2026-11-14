@@ -1,5 +1,6 @@
 import { supabase } from './supabaseClient.js';
 import { cardListPage, libraryCardCounts, searchLibrary } from './library-view.mjs';
+import { bindLibraryDrag } from './library-drag.mjs';
 import { studyKeyboardAction } from './study-keyboard.mjs';
 import { getAppAppearance } from './appearance.mjs';
 import { createLibraryShare, libraryShareUrl } from './library-sharing.mjs';
@@ -626,96 +627,157 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
 
   let moveContext=null;
   const moveDialog=$('#move-dialog');
+  const libraryModel=window.WortwerkModel;
+  const libraryItem=(type,key)=>({subject,folder,set:setById})[type]?.(key);
+  const parentId=(type,item)=>(type==='folder'?item.parentId:item.folderId)||null;
+  const locationSnapshot=()=>({activeSubject,activeFolder,activeSet,view,librarySorting,scrollY:window.scrollY});
   function openMoveDialog(type,itemId){
     if(librarySortSaving)return;
-    const item=type==='set'?setById(itemId):folder(itemId);if(!item)return;
-    const currentId=(type==='set'?item.folderId:item.parentId)||null,parent=subject(item.subjectId);
-    moveContext={type,id:itemId,owner:data};
+    const item=libraryItem(type,itemId);if(!item)return;
+    const currentId=parentId(type,item);
+    moveContext={type,id:itemId,owner:data,destinations:new Map()};
     $('#move-item-name').textContent=item.name;
-    $('#move-origin').textContent=`Aktuell: ${parent?.name||'Fach'}${currentId?' / '+folderLabel(folder(currentId)):' · direkt im Fach'}`;
-    const destinations=[{id:null,name:`${parent?.name||'Fach'} — direkt auf Fach-Ebene`},...subjectFolders(item.subjectId).map(entry=>({id:entry.id,name:folderLabel(entry)}))];
-    $('#move-destination').innerHTML=destinations.filter(target=>target.id===currentId||window.WortwerkModel.canMoveLibraryItem(data,{type,id:itemId,folderId:target.id})).map(target=>`<option value="${esc(target.id||'')}" ${target.id===currentId?'selected':''}>${esc(target.name)}${target.id===currentId?' (aktueller Speicherort)':''}</option>`).join('');
+    $('#move-origin').textContent=`Aktuell: ${subject(item.subjectId)?.name||'Fach'}${currentId?' / '+folderLabel(folder(currentId)):' · direkt im Fach'}`;
+    $('#move-destination').innerHTML=data.subjects.map(destination=>{
+      const entries=[{id:null,name:'Direkt im Fach'},...subjectFolders(destination.id).map(entry=>({id:entry.id,name:folderLabel(entry)}))];
+      const options=entries.map(entry=>{
+        const current=destination.id===item.subjectId&&entry.id===currentId;
+        const move={type,id:itemId,subjectId:destination.id,folderId:entry.id};
+        if(!current&&!libraryModel.canMoveLibraryItem(data,move))return '';
+        const key=entry.id||`subject:${destination.id}`;
+        moveContext.destinations.set(key,move);
+        return `<option value="${esc(key)}"${current?' selected':''}>${esc(entry.name)}${current?' (aktueller Speicherort)':''}</option>`;
+      }).join('');
+      return options?`<optgroup label="${esc(destination.name)}">${options}</optgroup>`:'';
+    }).join('');
     updateMoveDestination();moveDialog.showModal();
   }
   function updateMoveDestination(){
-    $('#move-submit').disabled=!moveContext||!window.WortwerkModel.canMoveLibraryItem(data,{...moveContext,folderId:$('#move-destination').value||null});
+    const move=moveContext?.destinations.get($('#move-destination').value);
+    $('#move-submit').disabled=!move||!libraryModel.canMoveLibraryItem(data,move);
   }
   $('#move-destination').addEventListener('change',updateMoveDestination);
   moveDialog.querySelectorAll('[data-cancel-move]').forEach(button=>button.onclick=()=>moveDialog.close());
   moveDialog.addEventListener('close',()=>{moveContext=null});
   $('#move-form').addEventListener('submit',event=>{
     event.preventDefault();if(!moveContext||moveContext.owner!==data||$('#move-submit').disabled)return;
-    const options={type:moveContext.type,id:moveContext.id,folderId:$('#move-destination').value||null};moveDialog.close();performLibraryMove(options);
+    const move=moveContext.destinations.get($('#move-destination').value);
+    moveDialog.close();performLibraryMove(move);
   });
-  function performLibraryMove(options){
-    const item=options.type==='set'?setById(options.id):folder(options.id);if(!item)return Promise.resolve(false);
-    const destination=options.folderId?folder(options.folderId)?.name:subject(item.subjectId)?.name;
+  function performLibraryMove(options,visual,landing,origin){
+    const item=libraryItem(options.type,options.id);if(!item){visual?.finish(null);return Promise.resolve(false)}
+    const destination=options.folderId?folder(options.folderId)?.name:subject(options.subjectId||item.subjectId)?.name;
     return persistOrganisation(()=>{
-      const changed=window.WortwerkModel.moveLibraryItem(data,{...options,timestamp:new Date().toISOString()});
-      if(changed&&activeSet===options.id&&options.type==='set')activeFolder=options.folderId;
+      const changed=libraryModel.moveLibraryItem(data,options);
+      if(changed&&activeSet===options.id&&options.type==='set'){
+        activeSubject=options.subjectId||item.subjectId;
+        activeFolder=options.folderId;
+      }
       return changed;
-    },`„${item.name}“ nach „${destination}“ verschoben.`);
+    },options.targetId?'Reihenfolge gespeichert.':`„${item.name}“ nach „${destination}“ verschoben.`,null,visual,landing,origin);
   }
 
-  // Moving and sibling sorting use different grips and distinct drop feedback.
-  let organisationPointer=null,dragFrame=null;
-  function clearOrganisationPointer(){
-    const state=organisationPointer;organisationPointer=null;
-    if(dragFrame!==null)cancelAnimationFrame(dragFrame);dragFrame=null;
-    if(state?.handle.hasPointerCapture?.(state.pointerId))state.handle.releasePointerCapture(state.pointerId);
-    state?.ghost?.remove();state?.status?.remove();
-    document.body.classList.remove('is-organising');
-    document.querySelectorAll('.organisation-source,.drop-allowed,.drop-over,.drop-rejected').forEach(el=>el.classList.remove('organisation-source','drop-allowed','drop-over','drop-rejected'));
+  function dragSource(tile){
+    if(librarySortSaving||recoveryAwaitingChoice||entitySaving||view!=='library'||$('dialog[open]'))return null;
+    const {sortType:type,sortId:id}=tile.dataset;
+    const item=libraryItem(type,id);
+    if(!item)return null;
+    const index=type==='subject'?data.subjects.findIndex(entry=>entry.id===id):null;
+    return {type,id,index,owner:data,origin:locationSnapshot(),valid:new Map()};
   }
-  function dropAllowed(state,target){
-    return target?.dataset.dropSubject===state.subjectId&&window.WortwerkModel.canMoveLibraryItem(data,{type:state.type,id:state.id,folderId:target.dataset.dropFolder||null});
+  function dragTile(type,id){
+    return $(`#content [data-sort-type="${type}"][data-sort-id="${CSS.escape(id)}"]`);
   }
-  function updateOrganisationDrag(){
-    const state=organisationPointer;if(!state?.dragging)return;if(state.owner!==data){clearOrganisationPointer();return}
-    state.ghost.style.transform=`translate3d(${state.x+16}px,${state.y+16}px,0)`;
-    document.querySelectorAll('.drop-over,.drop-rejected').forEach(el=>el.classList.remove('drop-over','drop-rejected'));
-    const target=document.elementFromPoint(state.x,state.y)?.closest('[data-drop-folder]');
-    state.target=target&&dropAllowed(state,target)?target:null;
-    if(target)target.classList.add(state.target?'drop-over':'drop-rejected');
-    const destination=state.target?(state.target.dataset.dropFolder?folder(state.target.dataset.dropFolder)?.name:subject(state.subjectId)?.name):null;
-    const message=destination?`Nach „${destination}“ verschieben`:'Auf einen markierten Ordner oder die Fach-Ebene ziehen';
-    if(state.status.textContent!==message)state.status.textContent=message;
+  function canDragMove(source,move){
+    if(source.owner!==data)return false;
+    const key=JSON.stringify(move);
+    if(!source.valid.has(key))source.valid.set(key,libraryModel.canMoveLibraryItem(data,move));
+    return source.valid.get(key);
   }
-  function organisationScroll(){
-    const state=organisationPointer;if(!state?.dragging)return;if(state.owner!==data){clearOrganisationPointer();return}
-    const sidebar=document.elementFromPoint(state.x,state.y)?.closest('.sidebar-subjects');
-    if(sidebar){const rect=sidebar.getBoundingClientRect();sidebar.scrollTop+=state.y<rect.top+36?-9:state.y>rect.bottom-36?9:0}
-    else if(state.y<70)window.scrollBy(0,-12);else if(state.y>window.innerHeight-65)window.scrollBy(0,12);
-    updateOrganisationDrag();dragFrame=requestAnimationFrame(organisationScroll);
+  function destinationMove(source,element){
+    if(!element||source.type==='subject')return null;
+    const {dropSubject:subjectId,dropFolder:folderId}=element.dataset;
+    const move={type:source.type,id:source.id,subjectId,folderId:folderId||null};
+    return canDragMove(source,move)?move:null;
   }
-  document.addEventListener('pointerdown',event=>{
-    const handle=event.target.closest('[data-organise-handle]');if(!handle||librarySortSaving||librarySorting||event.button!==0)return;
-    const type=handle.dataset.itemType,item=type==='set'?setById(handle.dataset.itemId):folder(handle.dataset.itemId);if(!item)return;
-    event.preventDefault();handle.setPointerCapture(event.pointerId);
-    organisationPointer={owner:data,handle,pointerId:event.pointerId,type,id:item.id,subjectId:item.subjectId,name:item.name,startX:event.clientX,startY:event.clientY,x:event.clientX,y:event.clientY,target:null,dragging:false};
-  });
-  document.addEventListener('pointermove',event=>{
-    const state=organisationPointer;if(!state||state.pointerId!==event.pointerId)return;
-    state.x=event.clientX;state.y=event.clientY;
-    if(!state.dragging){
-      if(Math.hypot(state.x-state.startX,state.y-state.startY)<7)return;
-      state.dragging=true;document.body.classList.add('is-organising');state.handle.closest('[data-sort-id]')?.classList.add('organisation-source');
-      state.ghost=document.createElement('div');state.ghost.className='organisation-ghost';state.ghost.textContent=state.name;state.ghost.setAttribute('aria-hidden','true');document.body.append(state.ghost);
-      state.status=document.createElement('div');state.status.className='organisation-status';state.status.setAttribute('role','status');document.body.append(state.status);
-      document.querySelectorAll('[data-drop-folder]').forEach(target=>{if(dropAllowed(state,target))target.classList.add('drop-allowed')});
-      dragFrame=requestAnimationFrame(organisationScroll);
+  function visibleDragTargets(source){
+    if(source.type==='subject')return [];
+    return [...document.querySelectorAll('[data-drop-folder]')].filter(element=>element.getClientRects().length&&destinationMove(source,element));
+  }
+  function dragDestinationBar(source){
+    if(source.type==='subject')return null;
+    const bar=document.createElement('div');
+    bar.className='library-drag-destinations';
+    bar.setAttribute('aria-label','Ablageziele');
+    bar.innerHTML=data.subjects.map(item=>{
+      const move={type:source.type,id:source.id,subjectId:item.id,folderId:null};
+      if(!canDragMove(source,move))return '';
+      return `<span ${dropAttributes(item.id,null)}>${esc(item.name)}</span>`;
+    }).join('');
+    if(!bar.children.length)return null;
+    document.body.append(bar);
+    return bar;
+  }
+  function resolveDragTarget(source,hit,x,y){
+    const tile=hit?.closest('#content [data-sort-id]');
+    if(tile?.dataset.sortId===source.id&&tile.dataset.sortType===source.type)return null;
+    if(tile?.dataset.sortType===source.type){
+      const target=libraryItem(source.type,tile.dataset.sortId);
+      if(!target)return null;
+      const rect=tile.getBoundingClientRect();
+      const columns=getComputedStyle(tile.parentElement).gridTemplateColumns.split(' ').length;
+      const fraction=columns>1?(x-rect.left)/rect.width:(y-rect.top)/rect.height;
+      // The centre of a folder nests. Its edges insert beside it.
+      const inside=source.type==='folder'&&fraction>.27&&fraction<.73;
+      if(!inside){
+        const placement=fraction<.5?'before':'after';
+        const move={type:source.type,id:source.id,targetId:target.id,placement};
+        if(source.type!=='subject')Object.assign(move,{subjectId:target.subjectId,folderId:parentId(source.type,target)});
+        const targetIndex=source.type==='subject'?data.subjects.indexOf(target):null;
+        const valid=source.type==='subject'
+          ? source.index!==targetIndex-Number(source.index<targetIndex)+Number(placement==='after')
+          : canDragMove(source,move);
+        if(valid)return {element:tile,move,placement,label:`${placement==='before'?'Vor':'Nach'} „${target.name}“ einordnen`};
+        return null;
+      }
     }
-    updateOrganisationDrag();
+    const element=hit?.closest('[data-drop-folder]');
+    const move=destinationMove(source,element);
+    if(!move)return null;
+    const label=(move.folderId?folder(move.folderId):subject(move.subjectId))?.name;
+    const alreadyHere=activeSubject===move.subjectId&&activeFolder===move.folderId;
+    return {element,move,open:!alreadyHere,key:JSON.stringify([move.subjectId,move.folderId]),label:`In „${label}“ verschieben`};
+  }
+  function navigateDrag(source,{move}){
+    if(source.owner!==data)return false;
+    activeSubject=move.subjectId;activeFolder=move.folderId;activeSet=null;librarySorting=false;
+    expandedSidebarSubjects.add(activeSubject);
+    render();
+    return true;
+  }
+  function cancelDragNavigation(source){
+    if(source.owner!==data)return null;
+    ({activeSubject,activeFolder,activeSet,view,librarySorting}=source.origin);
+    render();
+    window.scrollTo({top:source.origin.scrollY,behavior:'instant'});
+    return dragTile(source.type,source.id);
+  }
+  const clearOrganisationPointer=bindLibraryDrag({
+    identify:dragSource,targets:visibleDragTargets,resolve:resolveDragTarget,destinations:dragDestinationBar,
+    navigate:navigateDrag,cancelNavigation:cancelDragNavigation,
+    drop(source,target,visual){
+      if(source.owner!==data){visual.finish(null);return}
+      const {move,element}=target;
+      const landing=()=>{
+        const moved=dragTile(source.type,source.id);if(moved)return moved;
+        if(element.isConnected&&element.getClientRects().length)return element;
+        const destination=[...document.querySelectorAll('[data-drop-folder]')].filter(item=>item.getClientRects().length&&item.dataset.dropSubject===move.subjectId&&item.dataset.dropFolder===(move.folderId||''));
+        return destination.find(item=>item.classList.contains('folder-card'))||destination.find(item=>item.closest('#content'))||destination[0];
+      };
+      if(source.type==='subject')reorderItem(move.type,move.id,move.targetId,move.placement,visual,landing);
+      else performLibraryMove(move,visual,landing,source.origin);
+    }
   });
-  document.addEventListener('pointerup',event=>{
-    const state=organisationPointer;if(!state||state.pointerId!==event.pointerId)return;
-    updateOrganisationDrag();const target=state.target,options=target?{type:state.type,id:state.id,folderId:target.dataset.dropFolder||null}:null;
-    clearOrganisationPointer();if(options)performLibraryMove(options);
-  });
-  document.addEventListener('pointercancel',clearOrganisationPointer);
-  document.addEventListener('lostpointercapture',event=>{if(organisationPointer?.pointerId===event.pointerId)clearOrganisationPointer()});
-  document.addEventListener('keydown',event=>{if(event.key==='Escape'&&organisationPointer)clearOrganisationPointer()});
-  window.addEventListener('blur',clearOrganisationPointer);
 
   function appearanceFields(type,color,preview){
     const isSubject=type==='subject';
@@ -761,7 +823,7 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
   function folderLabel(item){return folderPath(item?.id).map(part=>part.name).join(' / ')}
   function crumbs(parts){
     const entries=parts.map((part,index)=>typeof part==='string'?{label:part,...(index===0?{level:'library'}:index===1?{level:'subject',id:activeSubject}:{})}:part);
-    $('#breadcrumbs').innerHTML=entries.map((part,index)=>`<span>${index===entries.length-1?`<b aria-current="location" title="${esc(part.label)}">${esc(part.label)}</b>`:`<button class="breadcrumb-link" title="${esc(part.label)}" data-crumb="${index}" ${part.level==='subject'?dropAttributes(part.id,null):part.level==='folder'?dropAttributes(folder(part.id)?.subjectId,part.id):''}>${esc(part.label)}</button>`}</span>`).join('');
+    $('#breadcrumbs').innerHTML=entries.map((part,index)=>`<span>${index===entries.length-1?`<b aria-current="location" title="${esc(part.label)}" ${part.level==='folder'?dropAttributes(folder(part.id)?.subjectId,part.id):''}>${esc(part.label)}</b>`:`<button class="breadcrumb-link" title="${esc(part.label)}" data-crumb="${index}" ${part.level==='subject'?dropAttributes(part.id,null):part.level==='folder'?dropAttributes(folder(part.id)?.subjectId,part.id):''}>${esc(part.label)}</button>`}</span>`).join('');
     $('#breadcrumbs').querySelectorAll('[data-crumb]').forEach(button=>button.onclick=()=>{const part=entries[Number(button.dataset.crumb)];librarySorting=false;activeSet=null;view='library';if(part.level==='library'){activeSubject=null;activeFolder=null}else if(part.level==='subject'){activeSubject=part.id;activeFolder=null}else if(part.level==='folder'){activeFolder=part.id;activeSubject=folder(part.id)?.subjectId||activeSubject}render()});
   }
   function libraryCrumbs(item,tail){return [{label:'Bibliothek',level:'library'},{label:subject(item.subjectId)?.name||'Fach',level:'subject',id:item.subjectId},...folderPath(item.folderId||item.parentId).map(part=>({label:part.name,level:'folder',id:part.id})),{label:item.name,...(tail?{}:{level:'folder',id:item.id})}]}
@@ -769,28 +831,66 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
   function sortingButton(){return `<button type="button" class="quiet-button sort-toggle" data-toggle-sort aria-pressed="${librarySorting}" ${librarySortSaving?'disabled':''}>${librarySorting?'<svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 10 4 4 8-8"/></svg> Fertig':'<svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 16V4m-3 3 3-3 3 3m5-3v12m-3-3 3 3 3-3"/></svg> Reihenfolge'}</button>`}
   function sortControls(type,item){if(!librarySorting)return '';const siblings=window.WortwerkModel.getLibrarySiblings(data,type,item.id),index=siblings.findIndex(record=>record.id===item.id);return `<div class="sort-controls"><button type="button" class="sort-handle" data-sort-handle aria-label="${esc(item.name)} ziehen zum Sortieren" title="Ziehen zum Sortieren" ${librarySortSaving?'disabled':''}>⠿</button><span class="sort-position">${index+1} / ${siblings.length}</span><button type="button" data-sort-step="-1" aria-label="${esc(item.name)} früher anordnen" title="Früher anordnen" ${index===0||librarySortSaving?'disabled':''}>←</button><button type="button" data-sort-step="1" aria-label="${esc(item.name)} später anordnen" title="Später anordnen" ${index===siblings.length-1||librarySortSaving?'disabled':''}>→</button></div>`}
   function sortAttributes(type,item){return `data-sort-type="${type}" data-sort-id="${esc(item.id)}"`}
-  async function persistOrganisation(change,message,focusId){
-    if(librarySortSaving)return false;
-    const owner=data,snapshot={subjects:structuredClone(data.subjects),folders:structuredClone(data.folders),sets:structuredClone(data.sets)};
-    if(!change())return false;
+  async function persistOrganisation(change,message,focusId,visual,landing,origin){
+    if(librarySortSaving||recoveryAwaitingChoice||entitySaving){visual?.finish();return false}
+    const owner=data;
+    const before={subjects:data.subjects,folders:data.folders,sets:data.sets};
+    const location=origin||locationSnapshot();
+    let saved=false;
+    Object.assign(data,structuredClone(before));
+    if(!change()){Object.assign(data,before);visual?.finish();return false}
+    const after={subjects:data.subjects,folders:data.folders,sets:data.sets};
     librarySortSaving=true;render();
-    try{await save();if(data!==owner)return false;toast(message);return true}
-    catch{if(data!==owner)return false;Object.assign(data,snapshot);window.WortwerkRepository.stagePendingRecovery?.(data);toast('Speichern fehlgeschlagen. Bitte prüfe die Verbindung und speichere erneut.');return false}
-    finally{if(data===owner){librarySortSaving=false;render();}if(data===owner&&focusId){const tile=[...document.querySelectorAll('[data-sort-id]')].find(el=>el.dataset.sortId===focusId);(tile?.querySelector('[data-sort-handle]')||tile)?.focus()}}
+    visual?.finish(landing?.()||null);
+    try{
+      await window.WortwerkRepository.saveLibraryOrganisation(before,after);
+      if(data!==owner)return false;
+      saved=true;toast(message);return true;
+    }catch(error){
+      if(data!==owner)return false;
+      Object.assign(data,before);
+      ({activeSubject,activeFolder,activeSet,view,librarySorting}=location);
+      if(error?.code==='40001'){
+        toast('Die Reihenfolge oder Ablage wurde inzwischen geändert. Deine Bibliothek wird neu geladen.');
+        const reloadVersion=libraryLoadVersion+1;
+        await window.WortwerkReloadLibrary();
+        if(libraryLoadVersion!==reloadVersion)return false;
+        librarySortSaving=false;
+        $('#content').inert=recoveryAwaitingChoice;
+        $('#content').setAttribute('aria-busy','false');
+        if(data!==owner)render();
+        return false;
+      }else {
+        toast('Die Verschiebung konnte nicht gespeichert werden. Prüfe deine Verbindung und versuche es erneut.');
+      }
+      return false;
+    }finally{
+      if(data===owner&&librarySortSaving){
+        librarySortSaving=false;
+        if(saved&&visual&&!librarySorting){
+          $('#content').inert=recoveryAwaitingChoice;
+          $('#content').setAttribute('aria-busy','false');
+          $('#content [data-toggle-sort]')?.removeAttribute('disabled');
+        }else {
+          render();
+          if(!saved)window.scrollTo({top:location.scrollY,behavior:'instant'});
+        }
+        if(focusId){
+          const tile=[...document.querySelectorAll('[data-sort-id]')].find(el=>el.dataset.sortId===focusId);
+          (tile?.querySelector('[data-sort-handle]')||tile)?.focus();
+        }
+      }
+    }
   }
-  function reorderItem(type,itemId,targetId,placement){return persistOrganisation(()=>window.WortwerkModel.reorderLibraryItems(data,{type,id:itemId,targetId,placement}),'Reihenfolge gespeichert.',itemId)}
+  function reorderItem(type,itemId,targetId,placement,visual,landing){
+    return persistOrganisation(()=>libraryModel.reorderLibraryItems(data,{type,id:itemId,targetId,placement}),'Reihenfolge gespeichert.',visual?null:itemId,visual,landing);
+  }
   $('#content').addEventListener('click',event=>{
     if(event.target.closest('[data-toggle-sort]')){librarySorting=!librarySorting;render();document.querySelector('[data-toggle-sort]')?.focus();return}
     const step=event.target.closest('[data-sort-step]');if(!step)return;
     const tile=step.closest('[data-sort-id]'),{sortType:type,sortId:itemId}=tile.dataset,siblings=window.WortwerkModel.getLibrarySiblings(data,type,itemId),index=siblings.findIndex(item=>item.id===itemId),direction=Number(step.dataset.sortStep),target=siblings[index+direction];
     if(target)reorderItem(type,itemId,target.id,direction>0?'after':'before');
   });
-  let sortingPointer=null;
-  function clearSortPointer(){document.querySelectorAll('.is-dragging,.drop-before,.drop-after').forEach(el=>el.classList.remove('is-dragging','drop-before','drop-after'));sortingPointer=null}
-  $('#content').addEventListener('pointerdown',event=>{const handle=event.target.closest('[data-sort-handle]');if(!handle||librarySortSaving||event.button!==0)return;event.preventDefault();handle.setPointerCapture(event.pointerId);sortingPointer={handle,tile:handle.closest('[data-sort-id]'),pointerId:event.pointerId,x:event.clientX,y:event.clientY,target:null,dragging:false}});
-  $('#content').addEventListener('pointermove',event=>{const state=sortingPointer;if(!state||state.pointerId!==event.pointerId)return;if(!state.dragging&&Math.hypot(event.clientX-state.x,event.clientY-state.y)<6)return;state.dragging=true;state.tile.classList.add('is-dragging');document.querySelectorAll('.drop-before,.drop-after').forEach(el=>el.classList.remove('drop-before','drop-after'));const target=document.elementFromPoint(event.clientX,event.clientY)?.closest('[data-sort-id]');state.target=null;if(!target||target===state.tile||target.dataset.sortType!==state.tile.dataset.sortType)return;const siblings=window.WortwerkModel.getLibrarySiblings(data,state.tile.dataset.sortType,state.tile.dataset.sortId);if(!siblings.some(item=>item.id===target.dataset.sortId))return;const rect=target.getBoundingClientRect();state.placement=event.clientY<rect.top+rect.height/2?'before':'after';state.target=target;target.classList.add('drop-'+state.placement)});
-  $('#content').addEventListener('pointerup',event=>{const state=sortingPointer;if(!state||state.pointerId!==event.pointerId)return;const {tile,target,placement}=state;clearSortPointer();if(target)reorderItem(tile.dataset.sortType,tile.dataset.sortId,target.dataset.sortId,placement)});
-  $('#content').addEventListener('pointercancel',clearSortPointer);
   const searchIcon='<svg class="library-search-icon" viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="m13 13 4 4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>';
   function renderLibrarySearch(){
     if(activeSet||view==='donations'||librarySorting||!data.subjects.length)return;
@@ -834,7 +934,7 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
       bindSetCards();return;
     }
     const subjectCards=data.subjects.map((item,index)=>`<article class="subject-card" ${sortAttributes('subject',item)} tabindex="0" data-open-subject="${esc(item.id)}" style="${subjectCardStyle(item.color,subjectColors[index%subjectColors.length])}">${subjectCardContents(item,icons[index%icons.length])}${sortControls('subject',item)}</article>`).join('');
-    $('#content').innerHTML=`<div class="page-heading"><div><h1 class="page-title">Bibliothek</h1><p class="page-subtitle">Deine Fächer, Ordner und Lernstapel.</p></div><div class="page-primary-actions"><button class="quiet-button" id="home-add-subject">＋ Fach anlegen</button><button class="primary-button" id="home-create-set">＋ Lernstapel erstellen</button></div></div>${data.subjects.length?`<section class="library-section"><div class="section-head"><h2>Fächer <span class="count-label">${data.subjects.length}</span></h2>${data.subjects.length>1?sortingButton():''}</div>${librarySorting?'<p class="sort-instructions">Ziehe am Griff oder verwende die Pfeile. Die Reihenfolge wird automatisch gespeichert.</p>':''}<div class="subject-grid">${subjectCards}</div></section>`:empty('Dein Lernraum ist noch leer','Lege ein Fach an, um deine Lernstapel zu organisieren.')}`;
+    $('#content').innerHTML=`<div class="page-heading"><div><h1 class="page-title">Bibliothek</h1><p class="page-subtitle">Deine Fächer, Ordner und Lernstapel.</p></div><div class="page-primary-actions"><button class="quiet-button" id="home-add-subject">＋ Fach anlegen</button><button class="primary-button" id="home-create-set">＋ Lernstapel erstellen</button></div></div>${data.subjects.length?`<section class="library-section"><div class="section-head"><h2>Fächer <span class="count-label">${data.subjects.length}</span></h2>${data.subjects.length>1?sortingButton():''}</div>${librarySorting?'<p class="sort-instructions">Halte eine Kachel gedrückt und ziehe sie an eine neue Stelle. Du kannst auch die Pfeile verwenden.</p>':''}<div class="subject-grid">${subjectCards}</div></section>`:empty('Dein Lernraum ist noch leer','Lege ein Fach an, um deine Lernstapel zu organisieren.')}`;
     $('#home-add-subject')?.addEventListener('click',()=>openEntity('subject'));
     $('#home-create-set')?.addEventListener('click',()=>openEntity('set'));
     bindSubjectCards();bindSetCards();
@@ -850,7 +950,7 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
   }
   function setCard(set){
     const parent=folder(set.folderId),sub=subject(set.subjectId),count=cardCounts.get(set.id)||0,theme=cardThemes.getTheme(cardThemes.resolveSetThemeId(set,activeCardThemeId));
-    return `<article class="set-card" ${sortAttributes('set',set)} tabindex="0" data-open-set="${esc(set.id)}" style="--set-front:${theme.front.surface};--set-back:${theme.back.surface}"><div class="set-card-top"><button class="set-cover" data-organise-handle ${librarySorting?'tabindex="-1" aria-hidden="true"':''} data-item-type="set" data-item-id="${esc(set.id)}" aria-label="${esc(set.name)} ziehen zum Verschieben" title="Ziehen zum Verschieben"><span></span><span></span></button>${itemActions('set',set)}</div><div class="set-card-meta">${esc(view==='recent'&&sub?[sub.name,parent?.name].filter(Boolean).join(' / '):parent?.name||sub?.name||'Fach')}</div><h2>${esc(set.name)}</h2><div class="set-card-bottom"><span>${count} ${count===1?'Karte':'Karten'}</span><span class="set-actions"><button type="button" class="quiet-button" data-quick-study="${esc(set.id)}" ${count?'':'disabled'}>${studyActionLabel(set.id)}</button><button type="button" class="quiet-button" data-quick-edit="${esc(set.id)}">Öffnen</button></span></div>${sortControls('set',set)}</article>`;
+    return `<article class="set-card" ${sortAttributes('set',set)} tabindex="0" data-open-set="${esc(set.id)}" style="--set-front:${theme.front.surface};--set-back:${theme.back.surface}"><div class="set-card-top"><span class="set-cover" data-organise-handle aria-hidden="true"><span></span><span></span></span>${itemActions('set',set)}</div><div class="set-card-meta">${esc(view==='recent'&&sub?[sub.name,parent?.name].filter(Boolean).join(' / '):parent?.name||sub?.name||'Fach')}</div><h2>${esc(set.name)}</h2><div class="set-card-bottom"><span>${count} ${count===1?'Karte':'Karten'}</span><span class="set-actions"><button type="button" class="quiet-button" data-quick-study="${esc(set.id)}" ${count?'':'disabled'}>${studyActionLabel(set.id)}</button><button type="button" class="quiet-button" data-quick-edit="${esc(set.id)}">Öffnen</button></span></div>${sortControls('set',set)}</article>`;
   }
   function bindSetCards(){
     document.querySelectorAll('[data-open-set]').forEach(element=>{
@@ -862,7 +962,7 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
   }
   function folderCard(item){
     const count=subjectSets(item.subjectId).filter(set=>set.folderId===item.id).length,children=subjectFolders(item.subjectId).filter(child=>child.parentId===item.id).length;
-    return `<article class="folder-card" ${sortAttributes('folder',item)} ${dropAttributes(item.subjectId,item.id)} tabindex="0" data-open-folder="${esc(item.id)}" style="--dot:${safeColor(item.color,defaultFolderColor)}"><button class="folder-icon" data-organise-handle ${librarySorting?'tabindex="-1" aria-hidden="true"':''} data-item-type="folder" data-item-id="${esc(item.id)}" aria-label="${esc(item.name)} ziehen zum Verschieben" title="Ziehen zum Verschieben">${folderSymbol()}</button><div class="folder-card-copy"><h3>${esc(item.name)}</h3><p>${count} Lernstapel${children?` · ${children} Unterordner`:''}</p></div>${itemActions('folder',item)}${sortControls('folder',item)}</article>`;
+    return `<article class="folder-card" ${sortAttributes('folder',item)} ${dropAttributes(item.subjectId,item.id)} tabindex="0" data-open-folder="${esc(item.id)}" style="--dot:${safeColor(item.color,defaultFolderColor)}"><span class="folder-icon" data-organise-handle aria-hidden="true">${folderSymbol()}</span><div class="folder-card-copy"><h3>${esc(item.name)}</h3><p>${count} Lernstapel${children?` · ${children} Unterordner`:''}</p></div>${itemActions('folder',item)}${sortControls('folder',item)}</article>`;
   }
   function bindFolderCards(){
     document.querySelectorAll('[data-open-folder]').forEach(element=>{
@@ -872,9 +972,9 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
     document.querySelectorAll('[data-edit-folder]').forEach(button=>button.onclick=()=>editEntity('folder',button.dataset.editFolder));
     document.querySelectorAll('[data-delete-folder]').forEach(button=>button.onclick=()=>deleteFolder(button.dataset.deleteFolder));
   }
-  function backButton(label){
+  function backButton(label,dropSubject,dropFolder){
     const destination=esc(label?`Zurück zu ${label}`:'Zurück');
-    return `<button type="button" class="back-button" id="go-back" aria-label="${destination}" title="${destination}"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m13 6-6 6 6 6M7 12h12"/></svg></button>`;
+    return `<button type="button" class="back-button" id="go-back" ${dropSubject?dropAttributes(dropSubject,dropFolder):''} aria-label="${destination}" title="${destination}"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m13 6-6 6 6 6M7 12h12"/></svg></button>`;
   }
   function renderSubject(){
     const item=subject(activeSubject);if(!item){activeSubject=null;return renderLibrary()}
@@ -883,7 +983,7 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
     const cardCount=subjectSets(item.id).reduce((sum,set)=>sum+(cardCounts.get(set.id)||0),0);
     const folderSection=folders.length?`<div class="folder-grid">${folders.map(folderCard).join('')}</div>`:'';
     const looseSection=looseSets.length?`<section class="library-section"><div class="section-head"><h2>Lernstapel <span class="count-label">${looseSets.length}</span></h2></div><div class="set-grid">${looseSets.map(setCard).join('')}</div></section>`:'';
-    $('#content').innerHTML=`<div class="subpage-heading">${backButton('Bibliothek')}<div class="subject-heading">${subjectSymbol(item)}<div><h1 class="page-title">${esc(item.name)}</h1><p class="page-subtitle">${subjectSets(item.id).length} Lernstapel · ${cardCount} ${cardCount===1?'Karte':'Karten'}</p></div></div>${managementActions('<button id="edit-subject">Fach bearbeiten</button><button class="danger-action" id="delete-subject">Fach löschen</button>')}</div><div class="section-actions library-folder-actions">${sortingButton()}<button class="quiet-button" id="add-folder">＋ Ordner anlegen</button><button class="primary-button" id="subject-new-set">＋ Lernstapel erstellen</button></div><section class="library-section"><div class="section-head"><h2>Ordner <span class="count-label">${folders.length}</span></h2></div>${folderSection||'<p class="section-note">Ordner sind optional. Lege sie an, wenn du deine Lernstapel weiter gliedern möchtest.</p>'}</section>${looseSection}`;
+    $('#content').innerHTML=`<div class="subpage-heading">${backButton('Bibliothek')}<div class="subject-heading" ${dropAttributes(item.id,null)}>${subjectSymbol(item)}<div><h1 class="page-title">${esc(item.name)}</h1><p class="page-subtitle">${subjectSets(item.id).length} Lernstapel · ${cardCount} ${cardCount===1?'Karte':'Karten'}</p></div></div>${managementActions('<button id="edit-subject">Fach bearbeiten</button><button class="danger-action" id="delete-subject">Fach löschen</button>')}</div><div class="section-actions library-folder-actions">${sortingButton()}<button class="quiet-button" id="add-folder">＋ Ordner anlegen</button><button class="primary-button" id="subject-new-set">＋ Lernstapel erstellen</button></div><section class="library-section"><div class="section-head"><h2>Ordner <span class="count-label">${folders.length}</span></h2></div>${folderSection||'<p class="section-note">Ordner sind optional. Lege sie an, wenn du deine Lernstapel weiter gliedern möchtest.</p>'}</section>${looseSection}`;
     $('#go-back').onclick=()=>{librarySorting=false;activeSubject=null;activeFolder=null;render()};$('#edit-subject').onclick=()=>editEntity('subject',item.id);$('#delete-subject').onclick=()=>deleteSubject(item.id);$('#add-folder').onclick=()=>openEntity('folder');$('#subject-new-set').onclick=()=>openEntity('set');
     bindFolderCards();bindSetCards();bindSubjectCards();
   }
@@ -893,7 +993,7 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
     const sets=subjectSets(parent.id).filter(set=>set.folderId===item.id),children=subjectFolders(parent.id).filter(child=>child.parentId===item.id);crumbs(libraryCrumbs(item));
     const subfolders=children.length?`<section class="library-section"><div class="section-head"><h2>Unterordner <span class="count-label">${children.length}</span></h2></div><div class="folder-grid">${children.map(folderCard).join('')}</div></section>`:'';
     const stacks=sets.length?`<section class="library-section"><div class="section-head"><h2>Lernstapel <span class="count-label">${sets.length}</span></h2></div><div class="set-grid">${sets.map(setCard).join('')}</div></section>`:'';
-    $('#content').innerHTML=`<div class="subpage-heading">${backButton(folder(item.parentId)?.name||parent.name)}<div class="subject-heading library-folder-heading" style="--dot:${safeColor(item.color,defaultFolderColor)}"><span class="subject-icon" aria-hidden="true">${folderSymbol()}</span><div><div class="page-context">Ordner</div><h1 class="page-title">${esc(item.name)}</h1><p class="page-subtitle">${children.length} Unterordner · ${sets.length} Lernstapel</p></div></div>${libraryDetailActions('folder',item,`<button id="edit-folder-current">Ordner bearbeiten</button><button data-move-item="folder" data-item-id="${esc(item.id)}">Ordner verschieben …</button><button class="danger-action" id="delete-folder-current">Ordner löschen</button>`)}</div><div class="section-actions library-folder-actions">${sortingButton()}<button class="quiet-button" id="add-subfolder">＋ Unterordner</button><button class="primary-button" id="folder-new-set">＋ Lernstapel erstellen</button></div>${subfolders}${stacks}${!children.length&&!sets.length?empty('Dieser Ordner ist leer','Lege einen Lernstapel oder einen Unterordner an.'):''}`;
+    $('#content').innerHTML=`<div class="subpage-heading">${backButton(folder(item.parentId)?.name||parent.name,item.subjectId,item.parentId||null)}<div class="subject-heading library-folder-heading" ${dropAttributes(item.subjectId,item.id)} style="--dot:${safeColor(item.color,defaultFolderColor)}"><span class="subject-icon" aria-hidden="true">${folderSymbol()}</span><div><div class="page-context">Ordner</div><h1 class="page-title">${esc(item.name)}</h1><p class="page-subtitle">${children.length} Unterordner · ${sets.length} Lernstapel</p></div></div>${libraryDetailActions('folder',item,`<button id="edit-folder-current">Ordner bearbeiten</button><button data-move-item="folder" data-item-id="${esc(item.id)}">Ordner verschieben …</button><button class="danger-action" id="delete-folder-current">Ordner löschen</button>`)}</div><div class="section-actions library-folder-actions">${sortingButton()}<button class="quiet-button" id="add-subfolder">＋ Unterordner</button><button class="primary-button" id="folder-new-set">＋ Lernstapel erstellen</button></div>${subfolders}${stacks}${!children.length&&!sets.length?`<div ${dropAttributes(item.subjectId,item.id)}>${empty('Dieser Ordner ist leer','Lege einen Lernstapel oder einen Unterordner an.')}</div>`:''}`;
     $('#go-back').onclick=()=>{librarySorting=false;activeFolder=item.parentId||null;render()};$('#edit-folder-current').onclick=()=>editEntity('folder',item.id);$('#delete-folder-current').onclick=()=>deleteFolder(item.id);$('#folder-new-set').onclick=()=>openEntity('set');$('#add-subfolder').onclick=()=>openEntity('folder');bindFolderCards();bindSetCards();bindSubjectCards();
   }
   function renderSet(){
@@ -904,7 +1004,7 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
     const previous=parentFolder?.name||parent?.name;
     const progress=window.WortwerkModel.getSetProgress(cards);
     const studyLabel=studyActionLabel(item.id);
-    $('#content').innerHTML=`<div class="subpage-heading">${backButton(previous)}<div><div class="page-context">${esc(parentFolder?.name||parent?.name||'Lernstapel')}</div><h1 class="page-title">${esc(item.name)}</h1><p class="page-subtitle">${cards.length} ${cards.length===1?'Lernkarte':'Lernkarten'}</p></div>${libraryDetailActions('set',item,`<button id="edit-set">Lernstapel bearbeiten</button><button data-move-item="set" data-item-id="${esc(item.id)}">Lernstapel verschieben …</button><button id="swap-card-sides" ${cards.length?'':'disabled'}>Vorder- und Rückseiten tauschen</button><button class="danger-action" id="delete-set">Lernstapel löschen</button>`)}</div>${cards.length?`<section class="study-banner" aria-labelledby="learning-progress-title"><div class="learning-progress-copy"><h2 id="learning-progress-title">Lernfortschritt</h2><p>${cards.length} ${cards.length===1?'Karte':'Karten'} · ${progress.secure} sicher · ${progress.practice} zu üben · ${progress.new} neu</p><div class="library-progress" role="progressbar" aria-label="Sicher beherrschte Karten" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${progress.percentage}"><span style="width:${progress.percentage}%"></span></div><small class="study-progress-caption">${progress.percentage}% sicher beherrscht · mindestens zwei richtige Antworten.</small></div><div class="study-banner-actions"><button class="primary-button" id="start-study">${studyLabel}</button><button class="quiet-button" id="reset-progress">Lernfortschritt zurücksetzen</button></div></section>`:''}<section class="library-section"><div class="section-head"><h2>Lernkarten <span class="count-label">${cards.length}</span></h2><div class="section-actions"><button class="quiet-button" id="import-this">Karten importieren</button><button class="${cards.length?'quiet-button':'primary-button'}" id="add-card">＋ Karte erstellen</button></div></div>${cards.length?renderCardList(cards):empty('Noch keine Lernkarten','Erstelle deine erste Karte oder importiere mehrere Begriffe aus Text.')}</section>`;
+    $('#content').innerHTML=`<div class="subpage-heading">${backButton(previous,item.subjectId,item.folderId||null)}<div><div class="page-context">${esc(parentFolder?.name||parent?.name||'Lernstapel')}</div><h1 class="page-title">${esc(item.name)}</h1><p class="page-subtitle">${cards.length} ${cards.length===1?'Lernkarte':'Lernkarten'}</p></div>${libraryDetailActions('set',item,`<button id="edit-set">Lernstapel bearbeiten</button><button data-move-item="set" data-item-id="${esc(item.id)}">Lernstapel verschieben …</button><button id="swap-card-sides" ${cards.length?'':'disabled'}>Vorder- und Rückseiten tauschen</button><button class="danger-action" id="delete-set">Lernstapel löschen</button>`)}</div>${cards.length?`<section class="study-banner" aria-labelledby="learning-progress-title"><div class="learning-progress-copy"><h2 id="learning-progress-title">Lernfortschritt</h2><p>${cards.length} ${cards.length===1?'Karte':'Karten'} · ${progress.secure} sicher · ${progress.practice} zu üben · ${progress.new} neu</p><div class="library-progress" role="progressbar" aria-label="Sicher beherrschte Karten" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${progress.percentage}"><span style="width:${progress.percentage}%"></span></div><small class="study-progress-caption">${progress.percentage}% sicher beherrscht · mindestens zwei richtige Antworten.</small></div><div class="study-banner-actions"><button class="primary-button" id="start-study">${studyLabel}</button><button class="quiet-button" id="reset-progress">Lernfortschritt zurücksetzen</button></div></section>`:''}<section class="library-section"><div class="section-head"><h2>Lernkarten <span class="count-label">${cards.length}</span></h2><div class="section-actions"><button class="quiet-button" id="import-this">Karten importieren</button><button class="${cards.length?'quiet-button':'primary-button'}" id="add-card">＋ Karte erstellen</button></div></div>${cards.length?renderCardList(cards):empty('Noch keine Lernkarten','Erstelle deine erste Karte oder importiere mehrere Begriffe aus Text.')}</section>`;
     $('#go-back').onclick=()=>{librarySorting=false;activeSet=null;activeFolder=item.folderId||null;render()};$('#edit-set').onclick=()=>editEntity('set',item.id);$('#delete-set').onclick=()=>deleteSet(item.id);$('#start-study')?.addEventListener('click',()=>beginStudy(item.id));$('#reset-progress')?.addEventListener('click',()=>openResetProgress(item.id));$('#swap-card-sides').onclick=()=>swapSetSides(item.id);$('#add-card').onclick=()=>openEntity('card');$('#import-this').onclick=()=>openImport(item.id);
     bindCardList();bindSubjectCards();
   }
@@ -1059,7 +1159,7 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
     if(awaitSave){
       entitySaving=true;form.inert=true;form.setAttribute('aria-busy','true');const submitLabel=$('#form-submit').textContent;$('#form-submit').textContent='Wird gespeichert …';
       try{await save();if(data!==owner)return;$('#form-dialog').close();render();toast(successNotice||'Änderungen gespeichert.');}
-      catch{if(data!==owner)return;Object.assign(data,snapshot);window.WortwerkRepository.stagePendingRecovery?.(data);activeSubject=previousLocation.activeSubject;activeFolder=previousLocation.activeFolder;activeSet=previousLocation.activeSet;toast('Speichern fehlgeschlagen. Deine Eingaben bleiben geöffnet. Bitte erneut versuchen.');}
+      catch(error){if(data!==owner)return;Object.assign(data,snapshot);if(error?.code!=='40001')window.WortwerkRepository.stagePendingRecovery?.(data);activeSubject=previousLocation.activeSubject;activeFolder=previousLocation.activeFolder;activeSet=previousLocation.activeSet;toast(error?.code==='40001'?'Die Ablage wurde zwischenzeitlich geändert. Schliess den Dialog und lade den aktuellen Stand über den Hinweis oben.':'Speichern fehlgeschlagen. Deine Eingaben bleiben geöffnet. Bitte erneut versuchen.');}
       finally{entitySaving=false;form.inert=false;form.removeAttribute('aria-busy');$('#form-submit').textContent=submitLabel;}
     }else{save();$('#form-dialog').close();if(!keepStudyView)render();if(successNotice)toast(successNotice)}
   }
@@ -1568,12 +1668,12 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
   function showSaveStatus(text,failed=false){saveStatus.textContent=text;saveStatus.parentElement.classList.toggle('is-error',failed);saveRetry.hidden=!failed}
   window.addEventListener('library-save-start',()=>{unsavedChanges=true;showSaveStatus('Wird gespeichert …',saveFailed)});
   window.addEventListener('library-save-success',event=>{if(event.detail?.pending)return;unsavedChanges=false;saveFailed=false;showSaveStatus('Gespeichert')});
-  window.addEventListener('library-save-error',()=>{unsavedChanges=true;saveFailed=true;showSaveStatus('Nicht synchronisiert',true)});
-  saveRetry.onclick=()=>{if(recoveryAwaitingChoice){$('#recovery-notice [data-recover]')?.focus();return}if(entitySaving||librarySortSaving)return;save().catch(()=>{})};
-  window.addEventListener('online',()=>{if(saveFailed&&!entitySaving&&!librarySortSaving&&!recoveryAwaitingChoice)save().catch(()=>{})});
+  window.addEventListener('library-save-error',event=>{unsavedChanges=true;saveFailed=true;showSaveStatus(event.detail?.error?.code==='40001'?'Ablage wurde geändert':'Nicht synchronisiert',true)});
+  saveRetry.onclick=()=>{if(recoveryAwaitingChoice){$('#recovery-notice [data-recover]')?.focus();return}if(entitySaving||librarySortSaving)return;if(window.WortwerkRepository.getPendingRecovery()?.preserveOrganisation){window.WortwerkReloadLibrary();return}save().catch(()=>{})};
+  window.addEventListener('online',()=>{if(saveFailed&&!entitySaving&&!librarySortSaving&&!recoveryAwaitingChoice&&!window.WortwerkRepository.getPendingRecovery()?.preserveOrganisation)save().catch(()=>{})});
   window.addEventListener('beforeunload',event=>{if(unsavedChanges){event.preventDefault();event.returnValue=''}});
   let libraryLoadVersion=0;
-  window.WortwerkResetWorkspace=()=>{libraryLoadVersion++;window.WortwerkRepository.resetLibraryOwner?.();if(session)endStudy();clearOrganisationPointer();clearSortPointer();document.querySelectorAll('dialog[open]').forEach(dialog=>dialog.close());data=initial();activeSubject=null;activeFolder=null;activeSet=null;view='library';expandedSidebarSubjects.clear();cardListSetId=null;librarySearchScope='';librarySearchQuery='';librarySearchLimit=100;formContext=null;librarySortSaving=false;entitySaving=false;$('#entity-form').inert=false;recoveryAwaitingChoice=false;$('#recovery-notice')?.remove();unsavedChanges=false;saveFailed=false;showSaveStatus('');closeNavigation();$('#content').innerHTML=''};
+  window.WortwerkResetWorkspace=()=>{libraryLoadVersion++;window.WortwerkRepository.resetLibraryOwner?.();if(session)endStudy();clearOrganisationPointer();document.querySelectorAll('dialog[open]').forEach(dialog=>dialog.close());data=initial();activeSubject=null;activeFolder=null;activeSet=null;view='library';expandedSidebarSubjects.clear();cardListSetId=null;librarySearchScope='';librarySearchQuery='';librarySearchLimit=100;formContext=null;librarySortSaving=false;entitySaving=false;$('#entity-form').inert=false;recoveryAwaitingChoice=false;$('#recovery-notice')?.remove();unsavedChanges=false;saveFailed=false;showSaveStatus('');closeNavigation();$('#content').innerHTML=''};
 
   function offerPendingRecovery(){
     $('#recovery-notice')?.remove();
@@ -1582,7 +1682,7 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
     const notice=document.createElement('aside');notice.id='recovery-notice';notice.className='recovery-notice';notice.setAttribute('aria-label','Nicht synchronisierte Änderungen');
     notice.innerHTML='<h2>Ein lokaler Lernstand wartet auf dich.</h2><p>Ein früherer Speichervorgang wurde nicht abgeschlossen. Beim Wiederherstellen werden lokale Änderungen übernommen; zusätzlich auf dem Server vorhandene Inhalte bleiben erhalten. Lokale Löschungen werden nicht nachgeholt.</p><button type="button" class="primary-button" data-recover>Lokalen Stand wiederherstellen</button><button type="button" class="quiet-button" data-keep-server>Serverstand behalten</button>';
     $('#content').before(notice);
-    notice.querySelector('[data-recover]').onclick=async()=>{data=window.WortwerkModel.normalizeLibrary(window.WortwerkRepository.mergePendingLibrary(data,recovery.library));recoveryAwaitingChoice=false;notice.remove();render();try{await save();toast('Lokaler Lernstand wiederhergestellt.')}catch{toast('Der lokale Stand ist wieder geöffnet. Prüfe die Verbindung und speichere erneut.')}};
+    notice.querySelector('[data-recover]').onclick=async()=>{data=window.WortwerkModel.normalizeLibrary(window.WortwerkRepository.mergePendingLibrary(data,recovery.library,{preserveOrganisation:recovery.preserveOrganisation}));recoveryAwaitingChoice=false;notice.remove();render();try{await save();toast('Lokaler Lernstand wiederhergestellt.')}catch{toast('Der lokale Stand ist wieder geöffnet. Prüfe die Verbindung und speichere erneut.')}};
     notice.querySelector('[data-keep-server]').onclick=()=>{window.WortwerkRepository.discardPendingRecovery();recoveryAwaitingChoice=false;unsavedChanges=false;saveFailed=false;showSaveStatus('Serverstand geladen');notice.remove();render()};
   }
   window.WortwerkReloadLibrary=async()=>{

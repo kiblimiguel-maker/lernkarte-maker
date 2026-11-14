@@ -115,61 +115,89 @@
     return true;
   }
 
-  // Shared by drop feedback and the committed move, so a highlighted target
-  // always follows exactly the same ownership and ancestry checks as a move.
-  function canMoveLibraryItem(library, { type, id, folderId } = {}) {
+  // Use the same destination checks for preview and commit.
+  function planLibraryMove(library, { type, id, folderId, subjectId, targetId, placement = 'before' } = {}) {
     if (!['set', 'folder'].includes(type) || typeof id !== 'string' || !id ||
-      !(folderId === null || (typeof folderId === 'string' && folderId))) return false;
+      !(folderId === null || (typeof folderId === 'string' && folderId)) ||
+      (subjectId !== undefined && (typeof subjectId !== 'string' || !subjectId)) ||
+      (targetId !== undefined && (typeof targetId !== 'string' || !targetId || targetId === id)) ||
+      !['before', 'after'].includes(placement)) return null;
     const key = libraryCollectionKey(type);
-    if (!isRecord(library) || !Array.isArray(library[key])) return false;
+    if (!isRecord(library) || !Array.isArray(library[key])) return null;
     const collection = records(library[key]);
-    if (new Set(collection.map(record => record.id)).size !== collection.length) return false;
+    if (new Set(collection.map(record => record.id)).size !== collection.length) return null;
     const source = collection.find(record => record.id === id);
-    if (!source || !source.subjectId || !records(library.subjects).some(subject => subject.id === source.subjectId)) return false;
-    const parentField = type === 'folder' ? 'parentId' : 'folderId';
-    if ((source[parentField] || null) === folderId) return false;
-
-    const folders = records(library.folders);
-    if (new Set(folders.map(folder => folder.id)).size !== folders.length) return false;
-    const folderById = new Map(folders.map(folder => [folder.id, folder]));
-    if (folderId !== null && !folderById.has(folderId)) return false;
-    const ancestry = new Set();
-    let ancestor = folderById.get(folderId);
-    while (ancestor) {
-      if (ancestor.subjectId !== source.subjectId || ancestry.has(ancestor.id) ||
-        (type === 'folder' && ancestor.id === source.id)) return false;
-      ancestry.add(ancestor.id);
-      if (!ancestor.parentId) break;
-      ancestor = folderById.get(ancestor.parentId);
-      if (!ancestor) return false;
-    }
-    return true;
-  }
-
-  // Moving changes membership; reordering only changes sibling order. Both
-  // operations retain stable IDs and never rebuild cards or learning sessions.
-  function moveLibraryItem(library, { type, id, folderId, timestamp } = {}) {
-    if (!canMoveLibraryItem(library, { type, id, folderId })) return false;
-    const key = libraryCollectionKey(type);
-    const collection = records(library[key]);
-    const source = collection.find(record => record.id === id);
+    const subjectIds = new Set(records(library.subjects).map(subject => subject.id));
+    if (!source?.subjectId || !subjectIds.has(source.subjectId)) return null;
+    const destinationSubject = subjectId ?? source.subjectId;
+    if (!subjectIds.has(destinationSubject)) return null;
     const parentField = type === 'folder' ? 'parentId' : 'folderId';
     const previousScope = libraryScope(source, type);
-    const destinationScope = libraryScope({ ...source, [parentField]: folderId }, type);
-    const previousSiblings = orderedLibraryRecords(collection.filter(record => record.id !== id && libraryScope(record, type) === previousScope));
-    const destinationSiblings = orderedLibraryRecords(collection.filter(record => record.id !== id && libraryScope(record, type) === destinationScope));
-    source[parentField] = folderId;
-    if (typeof timestamp === 'string') source.updatedAt = timestamp;
-    previousSiblings.forEach((record, position) => { record.position = position; });
-    destinationSiblings.push(source);
-    destinationSiblings.forEach((record, position) => { record.position = position; });
+    const destinationScope = libraryScope({ ...source, subjectId: destinationSubject, [parentField]: folderId }, type);
+    if (previousScope === destinationScope && targetId === undefined) return null;
 
-    // Restore display order inside both affected scopes while leaving unrelated
-    // records, cards and their live session references untouched.
+    const folders = records(library.folders);
+    if (new Set(folders.map(folder => folder.id)).size !== folders.length) return null;
+    const folderById = new Map(folders.map(folder => [folder.id, folder]));
+    const ancestry = new Set();
+    let parentId = folderId;
+    while (parentId) {
+      const parent = folderById.get(parentId);
+      if (!parent || parent.subjectId !== destinationSubject || ancestry.has(parentId) ||
+        (type === 'folder' && parentId === id)) return null;
+      ancestry.add(parentId);
+      parentId = parent.parentId;
+    }
+
+    const previousSiblings = orderedLibraryRecords(collection.filter(record => libraryScope(record, type) === previousScope));
+    const destinationSiblings = orderedLibraryRecords(collection.filter(record => record.id !== id && libraryScope(record, type) === destinationScope));
+    const targetIndex = targetId === undefined ? destinationSiblings.length : destinationSiblings.findIndex(record => record.id === targetId);
+    if (targetIndex < 0) return null;
+    destinationSiblings.splice(targetIndex + Number(targetId !== undefined && placement === 'after'), 0, source);
+    if (previousScope === destinationScope && destinationSiblings.every((record, index) => record === previousSiblings[index])) return null;
+
+    const subtree = [];
+    if (type === 'folder' && destinationSubject !== source.subjectId) {
+      const folderIds = new Set([id, ...getFolderDescendantIds(library, id)]);
+      const sets = records(library.sets);
+      if (new Set(sets.map(record => record.id)).size !== sets.length) return null;
+      const containedSets = sets.filter(record => folderIds.has(record.folderId));
+      if (containedSets.some(record => record.subjectId !== source.subjectId) ||
+        folders.some(record => folderIds.has(record.parentId) && !folderIds.has(record.id))) return null;
+      for (const descendantId of folderIds) {
+        if (descendantId !== id) subtree.push(folderById.get(descendantId));
+      }
+      subtree.push(...containedSets);
+    }
+    return { key, source, parentField, destinationSubject, previousScope, destinationScope, previousSiblings, destinationSiblings, subtree };
+  }
+
+  function canMoveLibraryItem(library, options) {
+    return Boolean(planLibraryMove(library, options));
+  }
+
+  // Moving retains stable IDs, including the references held by live sessions.
+  function moveLibraryItem(library, options = {}) {
+    const plan = planLibraryMove(library, options);
+    if (!plan) return false;
+    const { type, folderId, timestamp } = options;
+    const { key, source, parentField, destinationSubject, previousScope, destinationScope, previousSiblings, destinationSiblings, subtree } = plan;
+
+    if (previousScope !== destinationScope) {
+      source[parentField] = folderId;
+      source.subjectId = destinationSubject;
+      if (typeof timestamp === 'string') source.updatedAt = timestamp;
+      for (const record of subtree) {
+        record.subjectId = destinationSubject;
+        if (typeof timestamp === 'string') record.updatedAt = timestamp;
+      }
+    }
+
     const groups = new Map([
-      [previousScope, { items: previousSiblings, index: 0 }],
+      [previousScope, { items: previousSiblings.filter(record => record !== source), index: 0 }],
       [destinationScope, { items: destinationSiblings, index: 0 }]
     ]);
+    for (const { items } of groups.values()) items.forEach((record, position) => { record.position = position; });
     library[key] = library[key].map(record => {
       if (!isRecord(record)) return record;
       const group = groups.get(libraryScope(record, type));

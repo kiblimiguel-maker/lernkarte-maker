@@ -187,6 +187,15 @@ let failTable = null;
 const writerErrors = [];
 const writerClient = {
   auth: { async getUser() { return { data: { user: { id: currentUser } }, error: null }; } },
+  async rpc(name, { p_table: table, p_rows: records }) {
+    assert.equal(name, 'save_library_organisation_rows');
+    for (const { row, expected } of records) {
+      const current = remoteTables.get(table).get(`${currentUser}:${row.id}`);
+      if (!current || current.data.position !== expected.position) return { error: Object.assign(new Error('stale'), { code: '40001' }) };
+    }
+    for (const { row } of records) remoteTables.get(table).set(`${row.user_id}:${row.id}`, structuredClone(row));
+    return { error: null };
+  },
   from(table) {
     if (!remoteTables.has(table)) remoteTables.set(table, new Map());
     return {
@@ -259,6 +268,122 @@ currentUser = 'another-owner';
 await assert.rejects(writer.save(writeLibrary, 'writer-owner'), /aktive Sitzung hat sich geändert/);
 assert.equal(writes.length, writeCount, 'an account switch rejects a pending save before touching remote records');
 
+const organisationOwner = 'organisation-writer-owner';
+const organisationTables = ['subjects', 'folders', 'sets'];
+const legacyOrganisation = {
+  subjects: [{ id: 'source' }, { id: 'destination' }, { id: 'unrelated' }],
+  folders: [{ id: 'origin', subjectId: 'source' }, { id: 'target', subjectId: 'destination' }],
+  sets: [
+    { id: 'moving', subjectId: 'source', folderId: 'origin', name: 'Verben' },
+    { id: 'remaining', subjectId: 'source', folderId: 'origin', position: 3 },
+    { id: 'target-set', subjectId: 'destination' },
+    { id: 'unrelated-set', subjectId: 'unrelated' }
+  ],
+  cards: [{ id: 'moving-card', setId: 'moving', front: 'fliehen', back: 'fuir', correctCount: 3 }]
+};
+const organisationRemote = Object.fromEntries(organisationTables.map(table => [table, toLibraryRows(table, structuredClone(legacyOrganisation), organisationOwner)]));
+const organisationRequests = [];
+const checkedOrganisationWrites = [];
+const organisationWrites = [];
+let organisationAccount = organisationOwner;
+let organisationError;
+const organisationClient = {
+  auth: { async getUser() { return { data: { user: { id: organisationAccount } }, error: null }; } },
+  async rpc(name, payload) {
+    if (name === 'save_library_organisation_rows') {
+      const { p_table: table, p_rows: entries } = payload;
+      checkedOrganisationWrites.push(structuredClone(payload));
+      for (const { expected, row } of entries) {
+        const current = organisationRemote[table].find(item => item.id === row.id);
+        if (!current || current.subject_id !== expected.subjectId || current.folder_id !== expected.folderId ||
+          (current.data.position ?? null) !== expected.position) {
+          return { error: Object.assign(new Error('stale organisation'), { code: '40001' }) };
+        }
+      }
+      for (const { row } of entries) {
+        const index = organisationRemote[table].findIndex(current => current.id === row.id);
+        organisationRemote[table][index] = structuredClone(row);
+      }
+      return { error: null };
+    }
+    organisationRequests.push({ name, payload: structuredClone(payload) });
+    if (organisationError) return { error: organisationError };
+    for (const table of organisationTables) {
+      for (const change of payload.p_changes[table]) {
+        const row = organisationRemote[table].find(item => item.id === change.id);
+        Object.assign(row.data, change);
+        if (table !== 'subjects') row.subject_id = change.subjectId;
+        if (table === 'sets') row.folder_id = change.folderId;
+      }
+    }
+    return { error: null };
+  },
+  from(table) {
+    return { async upsert(records) { organisationWrites.push({ table, records }); return { error: null }; } };
+  }
+};
+const organisationWriter = createLibraryWriter({ client: organisationClient });
+const staleOrganisationWriter = createLibraryWriter({ client: organisationClient });
+const organisationBefore = normalizeLibrary(legacyOrganisation);
+const organisationAfter = structuredClone(organisationBefore);
+assert.equal(moveLibraryItem(organisationAfter, { type: 'set', id: 'moving', subjectId: 'destination', folderId: null }), true);
+organisationWriter.prime(organisationOwner, organisationBefore, organisationRemote);
+staleOrganisationWriter.prime(organisationOwner, organisationBefore, organisationRemote);
+
+organisationError = Object.assign(new Error('organisation changed on another device'), { code: '40001' });
+await assert.rejects(organisationWriter.organise(organisationBefore, organisationAfter, organisationOwner), { code: '40001' });
+assert.equal(organisationRemote.sets.find(row => row.id === 'moving').folder_id, 'origin');
+assert.deepEqual(organisationWrites, [], 'a rejected organisation does not fall back to ordinary writes');
+organisationError = null;
+await organisationWriter.organise(organisationBefore, organisationAfter, organisationOwner);
+assert.deepEqual(organisationRequests[1], organisationRequests[0], 'a failed transaction leaves its baseline intact');
+const { name: organisationProcedure, payload: organisationPayload } = organisationRequests[1];
+assert.equal(organisationProcedure, 'organise_library');
+assert.deepEqual(Object.keys(organisationPayload.p_changes), organisationTables);
+assert.equal(organisationPayload.p_expected.sets.find(record => record.id === 'target-set').position, null, 'the expected state uses stored positions, including missing positions');
+assert.deepEqual(organisationPayload.p_changes.sets, [
+  { id: 'remaining', subjectId: 'source', folderId: 'origin', position: 0 },
+  { id: 'target-set', subjectId: 'destination', folderId: null, position: 0 },
+  { id: 'moving', subjectId: 'destination', folderId: null, position: 1 }
+]);
+assert.deepEqual(organisationPayload.p_changes.subjects, []);
+assert.deepEqual(organisationPayload.p_changes.folders, []);
+assert.equal(organisationRemote.sets.find(row => row.id === 'unrelated-set').data.position, undefined);
+assert.equal(organisationRemote.sets.find(row => row.id === 'moving').data.name, 'Verben');
+assert.deepEqual(organisationAfter.cards, organisationBefore.cards);
+
+await organisationWriter.save(organisationAfter, organisationOwner);
+assert.deepEqual(organisationWrites, [], 'an ordinary save must not repeat a committed move or a legacy-position repair');
+const afterLearning = structuredClone(organisationAfter);
+afterLearning.cards[0].correctCount += 1;
+await organisationWriter.save(afterLearning, organisationOwner);
+assert.deepEqual(organisationWrites.map(write => write.table), ['cards'], 'learning after a move updates only the card');
+
+const staleStudy = structuredClone(organisationBefore);
+staleStudy.sets.find(set => set.id === 'moving').lastStudiedAt = '2026-11-14T10:00:00.000Z';
+await assert.rejects(staleOrganisationWriter.save(staleStudy, organisationOwner), { code: '40001' });
+assert.deepEqual(checkedOrganisationWrites[0].p_rows[0].expected,
+  { id: 'moving', subjectId: 'source', folderId: 'origin', position: null });
+assert.equal(organisationRemote.sets.find(row => row.id === 'moving').subject_id, 'destination', 'a stale learning tab cannot move the set back');
+assert.deepEqual(organisationWrites.map(write => write.table), ['cards'], 'a stale metadata update never falls back to an unconditional upsert');
+
+const reloadedOrganisation = normalizeLibrary(Object.fromEntries(organisationTables.map(table => [table, organisationRemote[table].map(row => row.data)])));
+staleOrganisationWriter.prime(organisationOwner, reloadedOrganisation, organisationRemote);
+reloadedOrganisation.sets.find(set => set.id === 'moving').lastStudiedAt = '2026-11-14T10:00:00.000Z';
+await staleOrganisationWriter.save(reloadedOrganisation, organisationOwner);
+assert.equal(organisationRemote.sets.find(row => row.id === 'moving').data.lastStudiedAt, '2026-11-14T10:00:00.000Z');
+assert.equal(organisationRemote.sets.find(row => row.id === 'moving').subject_id, 'destination', 'retry after reload keeps the current location');
+
+const organisationReturn = structuredClone(afterLearning);
+assert.equal(moveLibraryItem(organisationReturn, { type: 'set', id: 'moving', subjectId: 'source', folderId: 'origin' }), true);
+organisationAccount = 'someone-else';
+await assert.rejects(organisationWriter.organise(afterLearning, organisationReturn, organisationOwner), /aktive Sitzung hat sich geändert/);
+assert.equal(organisationRequests.length, 2, 'an account switch cannot start a move');
+organisationAccount = organisationOwner;
+await organisationWriter.organise(afterLearning, organisationReturn, organisationOwner);
+assert.deepEqual(organisationRequests[2].payload.p_expected.sets.find(record => record.id === 'moving'),
+  { id: 'moving', subjectId: 'destination', folderId: null, position: 1 }, 'the next move compares against the committed location and position');
+
 const lifecycle = [];
 const lifecycleWriter = createLibraryWriter({ client: writerClient, onStart: state => lifecycle.push(['start', state.pending]), onSuccess: state => lifecycle.push(['success', state.pending]), onError: (_error, state) => lifecycle.push(['error', state.pending]) });
 await Promise.all([lifecycleWriter.save({ cards: [] }, currentUser), lifecycleWriter.save({ cards: [] }, currentUser)]);
@@ -277,6 +402,12 @@ assert.equal(recoveryAfterReload.get('offline-owner').savedAt, '2026-11-04T18:00
 assert.deepEqual(recoveryAfterReload.get('offline-owner').library, recoveryLibrary, 'unsynced work survives a fresh repository instance');
 recoveryAfterReload.acknowledge('offline-owner', latestPending);
 assert.equal(recoveryAfterReload.get('offline-owner'), null, 'only successful persistence of the newest snapshot clears its pending marker');
+const staleOrganisationRecovery = recovery.stage('offline-owner', recoveryLibrary);
+recovery.preserveOrganisation('offline-owner');
+assert.equal(recoveryAfterReload.get('offline-owner').preserveOrganisation, true, 'an organisation conflict survives a fresh repository instance');
+assert.equal(recoveryAfterReload.get('offline-owner').token, staleOrganisationRecovery);
+assert.equal(recoveryAfterReload.get('offline-owner').savedAt, '2026-11-04T18:00:00.000Z');
+recoveryAfterReload.acknowledge('offline-owner', staleOrganisationRecovery);
 recovery.stage('offline-owner', recoveryLibrary);
 recovery.discard('another-owner');
 assert.notEqual(recovery.get('offline-owner'), null);
@@ -311,6 +442,12 @@ assert.equal(mergedRecovery.studySessions['remote-set'].id, 'other-session');
 assert.equal(mergedRecovery.studyHistory[0].id, 'remote-completion', 'recovery never replays deletion of server-only data');
 assert.equal(remoteRecoveryLibrary.sets[0].name, 'Remote name');
 assert.deepEqual(mergedRecovery.recent.map(entry => entry.setId), ['shared-set', 'remote-set']);
+const preservedRecovery = mergePendingLibrary(organisationAfter, staleStudy, { preserveOrganisation: true });
+const preservedSet = preservedRecovery.sets.find(set => set.id === 'moving');
+assert.equal(preservedSet.subjectId, 'destination');
+assert.equal(preservedSet.folderId, null);
+assert.equal(preservedSet.position, 1);
+assert.equal(preservedSet.lastStudiedAt, '2026-11-14T10:00:00.000Z', 'recovery restores learning activity while preserving the server location');
 const recentLibrary = { sets: [{ id: 'from-set', lastStudiedAt: '2026-11-04T10:00:00Z' }, { id: 'from-session' }, { id: 'from-history' }, { id: 'invalid', lastStudiedAt: 'invalid date' }],
   studySessions: { 'from-session': { setId: 'from-session', startedAt: '2026-11-03T10:00:00Z' } },
   studyHistory: [{ setId: 'from-history', completedAt: '2026-11-02T10:00:00Z' }, { setId: 'deleted-set', completedAt: '2026-11-05T10:00:00Z' }],

@@ -12,11 +12,25 @@ export const userLibraryCacheKey = userId => `${LIBRARY_STORAGE_KEY}:${userId}`;
 export const userLibraryPendingKey = userId => `${userLibraryCacheKey(userId)}:pending`;
 const recordList = value => Array.isArray(value) ? value.filter(record => record && typeof record === 'object') : [];
 
-export function mergePendingLibrary(server = {}, pending = {}) {
+export function mergePendingLibrary(server = {}, pending = {}, { preserveOrganisation = false } = {}) {
   const merged = { ...server };
+  const organisationFields = { subjects: ['position'], folders: ['position', 'subjectId', 'parentId'], sets: ['position', 'subjectId', 'folderId'] };
   for (const key of ['subjects', 'folders', 'sets', 'cards', 'studyHistory']) {
     const records = new Map(recordList(server[key]).filter(record => record.id).map(record => [record.id, record]));
-    for (const record of recordList(pending[key])) if (record.id) records.set(record.id, record);
+    for (const record of recordList(pending[key])) {
+      if (!record.id) continue;
+      const current = records.get(record.id);
+      if (!preserveOrganisation || !current || !organisationFields[key]) {
+        records.set(record.id, record);
+        continue;
+      }
+      const restored = { ...record };
+      for (const field of organisationFields[key]) {
+        if (Object.hasOwn(current, field)) restored[field] = current[field];
+        else delete restored[field];
+      }
+      records.set(record.id, restored);
+    }
     merged[key] = [...records.values()];
   }
   merged.studySessions = { ...(server.studySessions || {}), ...(pending.studySessions || {}) };
@@ -43,11 +57,11 @@ export function createPendingRecovery({ storage, now = () => new Date().toISOStr
   let sequence = 0;
   const instance = Math.random().toString(36).slice(2);
   return {
-    stage(userId, library) {
+    stage(userId, library, { preserveOrganisation = false } = {}) {
       if (!userId) return null;
       const token = `${instance}:${++sequence}`;
       try {
-        storage?.setItem(userLibraryPendingKey(userId), JSON.stringify({ version: 1, token, savedAt: now(), library }));
+        storage?.setItem(userLibraryPendingKey(userId), JSON.stringify({ version: 1, token, savedAt: now(), library, ...(preserveOrganisation && { preserveOrganisation }) }));
         return storage ? token : null;
       } catch (error) {
         console.warn('Ungespeicherter Lernstand konnte nicht zusätzlich im Browser gesichert werden.', error);
@@ -59,8 +73,17 @@ export function createPendingRecovery({ storage, now = () => new Date().toISOStr
       try {
         const pending = JSON.parse(storage?.getItem(userLibraryPendingKey(userId)) || 'null');
         return pending?.version === 1 && pending.token && pending.library && typeof pending.library === 'object' && !Array.isArray(pending.library)
-          ? { library: pending.library, savedAt: pending.savedAt, token: pending.token } : null;
+          ? { library: pending.library, savedAt: pending.savedAt, token: pending.token, ...(pending.preserveOrganisation === true && { preserveOrganisation: true }) } : null;
       } catch { return null; }
+    },
+    preserveOrganisation(userId) {
+      const pending = this.get(userId);
+      if (!pending || pending.preserveOrganisation) return;
+      try {
+        storage?.setItem(userLibraryPendingKey(userId), JSON.stringify({ version: 1, ...pending, preserveOrganisation: true }));
+      } catch (error) {
+        console.warn('Der gesicherte Lernstand konnte nicht aktualisiert werden.', error);
+      }
     },
     acknowledge(userId, token) {
       if (token && this.get(userId)?.token === token) this.discard(userId);
@@ -96,18 +119,86 @@ export function createLibraryLoadGuard() {
   };
 }
 
+const organisationTables = ['subjects', 'folders', 'sets'];
+
+function organisationRecord(table, row) {
+  const location = table === 'subjects' ? {} : { subjectId: row.subject_id };
+  if (table === 'folders') location.parentId = typeof row.data.parentId === 'string' ? row.data.parentId || null : null;
+  if (table === 'sets') location.folderId = row.folder_id || null;
+  return { id: row.id, ...location, position: row.data.position ?? null };
+}
+
+function organisationScope({ subjectId, parentId, folderId }) {
+  return JSON.stringify([subjectId, parentId ?? folderId]);
+}
+
+export function libraryOrganisationChanges(before, after, rawRows, userId) {
+  const expected = {};
+  const changes = {};
+  for (const table of organisationTables) {
+    const previousRows = toLibraryRows(table, before, userId);
+    const original = new Map(previousRows.map(row => [row.id, organisationRecord(table, row)]));
+    const next = toLibraryRows(table, after, userId).map(row => organisationRecord(table, row));
+    const nextIds = new Set(next.map(record => record.id));
+    const scopes = new Set();
+    if (original.size !== previousRows.length || nextIds.size !== next.length ||
+      next.length !== original.size || next.some(record => !original.has(record.id))) {
+      throw new Error('Beim Verschieben dürfen keine Bibliothekseinträge erstellt oder gelöscht werden.');
+    }
+    for (const record of next) {
+      const previous = original.get(record.id);
+      if (JSON.stringify(previous) === JSON.stringify(record)) continue;
+      scopes.add(organisationScope(previous));
+      scopes.add(organisationScope(record));
+    }
+    expected[table] = [...rawRows.get(table).values()];
+    changes[table] = next.filter(record => scopes.has(organisationScope(record)) &&
+      JSON.stringify(rawRows.get(table).get(record.id)) !== JSON.stringify(record));
+  }
+  return { p_expected: expected, p_changes: changes };
+}
+
 // Compare with the library this browser actually loaded. A snapshot from an
 // older tab must not delete records that another tab added in the meantime.
 export function createLibraryWriter({ client, onStart = () => {}, onSuccess = () => {}, onError = () => {} }) {
   let queue = Promise.resolve();
   let pending = 0;
   const baselines = new Map();
+  const organisationBaselines = new Map();
   const encode = (library, userId) => new Map(LIBRARY_TABLES.map(table => [table,
     new Map(toLibraryRows(table, library, userId).map(row => [row.id, { row, serialized: JSON.stringify(row) }]))
   ]));
   const baseline = encoded => new Map([...encoded].map(([table, records]) => [table, new Map([...records].map(([id, record]) => [id, record.serialized]))]));
   return {
-    prime(userId, library) { baselines.set(userId, baseline(encode(library, userId))); },
+    prime(userId, library, rawRows) {
+      baselines.set(userId, baseline(encode(library, userId)));
+      organisationBaselines.set(userId, new Map(organisationTables.map(table => [table, new Map(
+        (rawRows?.[table] || toLibraryRows(table, library, userId)).map(row => [row.id, organisationRecord(table, row)])
+      )])));
+    },
+    organise(before, after, userId) {
+      const operation = queue.then(async () => {
+        const raw = organisationBaselines.get(userId);
+        if (!raw) throw new Error('Die Bibliothek muss neu geladen werden.');
+        const { data: { user }, error: ownerError } = await client.auth.getUser();
+        if (ownerError || user?.id !== userId) throw ownerError || new Error('Die aktive Sitzung hat sich geändert.');
+        const payload = libraryOrganisationChanges(before, after, raw, userId);
+        const { error } = await client.rpc('organise_library', payload);
+        if (error) throw error;
+        const known = baselines.get(userId);
+        for (const table of organisationTables) {
+          const next = new Map(toLibraryRows(table, after, userId).map(row => [row.id, row]));
+          for (const change of payload.p_changes[table]) {
+            raw.get(table).set(change.id, change);
+            // Compare subsequent saves with the in-memory shape. Old records may
+            // omit a location key that the RPC stores explicitly as null.
+            known.get(table).set(change.id, JSON.stringify(next.get(change.id)));
+          }
+        }
+      });
+      queue = operation.catch(() => {});
+      return operation;
+    },
     flush() { return queue; },
     save(library, userId) {
       const snapshot = JSON.parse(JSON.stringify(library));
@@ -118,17 +209,32 @@ export function createLibraryWriter({ client, onStart = () => {}, onSuccess = ()
         const { data: { user }, error } = await client.auth.getUser();
         if (error || user?.id !== userId) throw error || new Error('Die aktive Sitzung hat sich geändert. Bitte lade deine Bibliothek erneut.');
         const next = encode(snapshot, userId);
+        const organisation = organisationBaselines.get(userId) || new Map(organisationTables.map(table => [table, new Map()]));
+        organisationBaselines.set(userId, organisation);
         const previous = baselines.get(userId) || new Map(LIBRARY_TABLES.map(table => [table, new Map()]));
         baselines.set(userId, previous);
         for (const table of LIBRARY_TABLES) {
           const known = previous.get(table) || new Map();
+          const raw = organisation.get(table);
           const rows = [...next.get(table).values()].filter(record => known.get(record.row.id) !== record.serialized).map(record => record.row);
-          for (let offset = 0; offset < rows.length; offset += LIBRARY_PAGE_SIZE) {
-            const batch = rows.slice(offset, offset + LIBRARY_PAGE_SIZE);
-            const { error } = await client.from(table).upsert(batch, { onConflict: 'user_id,id' });
-            if (error) throw error;
-            for (const row of batch) known.set(row.id, next.get(table).get(row.id).serialized);
-            previous.set(table, known);
+          const existing = raw ? rows.filter(row => raw.has(row.id)) : [];
+          const ordinary = raw ? rows.filter(row => !raw.has(row.id)) : rows;
+          for (const [group, compare] of [[existing, true], [ordinary, false]]) {
+            for (let offset = 0; offset < group.length; offset += LIBRARY_PAGE_SIZE) {
+              const batch = group.slice(offset, offset + LIBRARY_PAGE_SIZE);
+              const { error } = compare
+                ? await client.rpc('save_library_organisation_rows', {
+                  p_table: table,
+                  p_rows: batch.map(row => ({ expected: raw.get(row.id), row }))
+                })
+                : await client.from(table).upsert(batch, { onConflict: 'user_id,id' });
+              if (error) throw error;
+              for (const row of batch) {
+                known.set(row.id, next.get(table).get(row.id).serialized);
+                raw?.set(row.id, organisationRecord(table, row));
+              }
+              previous.set(table, known);
+            }
           }
         }
         for (const table of [...LIBRARY_TABLES].reverse()) {
@@ -136,7 +242,10 @@ export function createLibraryWriter({ client, onStart = () => {}, onSuccess = ()
           for (let offset = 0; offset < removed.length; offset += LIBRARY_PAGE_SIZE) {
             const { error } = await client.from(table).delete().eq('user_id', userId).in('id', removed.slice(offset, offset + LIBRARY_PAGE_SIZE));
             if (error) throw error;
-            for (const id of removed.slice(offset, offset + LIBRARY_PAGE_SIZE)) previous.get(table).delete(id);
+            for (const id of removed.slice(offset, offset + LIBRARY_PAGE_SIZE)) {
+              previous.get(table).delete(id);
+              organisation.get(table)?.delete(id);
+            }
           }
         }
         // Successful batches are tracked even after a later failure. A retry

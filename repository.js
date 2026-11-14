@@ -13,7 +13,10 @@ const failedWrites = new Set();
 export function resetLibraryOwner() { loadGuard.reset(); }
 export function getPendingRecovery() { return recovery.get(loadGuard.activeUserId); }
 export function discardPendingRecovery() { recovery.discard(loadGuard.activeUserId); }
-export function stagePendingRecovery(library) { return recovery.stage(loadGuard.activeUserId, library); }
+export function stagePendingRecovery(library) {
+  const userId = loadGuard.activeUserId;
+  return recovery.stage(userId, library, { preserveOrganisation: recovery.get(userId)?.preserveOrganisation });
+}
 function emitSaveState(name, detail) {
   if (loadGuard.activeUserId && detail.userId === loadGuard.activeUserId) window.dispatchEvent(new CustomEvent(name, { detail }));
 }
@@ -37,15 +40,16 @@ export async function loadLibrary(normalize, { client = supabase, storage = brow
   const user = await loadGuard.verifyOwner(ticket, client);
   const tableResults = await Promise.all(tables.map(async table => {
     const rows = await readAllRows(client.from(table).select('*').eq('user_id', user.id).order('id', { ascending: true }));
-    return [fieldMap[table] || table, rows.map(fromRow)];
+    return [table, rows];
   }));
-  const result = Object.fromEntries(tableResults);
+  const rawRows = Object.fromEntries(tableResults);
+  const result = Object.fromEntries(tableResults.map(([table, rows]) => [fieldMap[table] || table, rows.map(fromRow)]));
   const hasRemote = tables.some(table => result[fieldMap[table] || table].length > 0);
   result.studySessions = Object.fromEntries(result.studySessions.map(record => [record.setId, record]));
   const remote = normalize(result);
   remote.recent = deriveRecentStudySets(remote);
   await loadGuard.verifyOwner(ticket, client, user.id);
-  writer.prime(user.id, remote);
+  writer.prime(user.id, remote, rawRows);
   let localRaw = null;
   let migrationOwner = null;
   try {
@@ -65,8 +69,18 @@ export async function loadLibrary(normalize, { client = supabase, storage = brow
 
 export function saveLibrary(library, suppliedUserId) {
   const userId = suppliedUserId || loadGuard.activeUserId;
-  const token = recovery.stage(userId, library);
-  return writer.save(library, userId).then(() => { recovery.acknowledge(userId, token); });
+  const token = recovery.stage(userId, library, { preserveOrganisation: recovery.get(userId)?.preserveOrganisation });
+  return writer.save(library, userId).then(() => {
+    recovery.acknowledge(userId, token);
+  }, error => {
+    if (error?.code === '40001') recovery.preserveOrganisation(userId);
+    throw error;
+  });
+}
+
+export async function saveLibraryOrganisation(before, after) {
+  const userId = await flushLibraryWrites();
+  return writer.organise(before, after, userId);
 }
 
 export async function flushLibraryWrites() {

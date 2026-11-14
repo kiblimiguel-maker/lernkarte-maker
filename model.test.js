@@ -455,4 +455,68 @@ assert.equal(moveLibraryItem(corruptMoveTarget, { type: 'set', id: 'loose', fold
 corruptMoveTarget.folders.push({ id: 'broken-target', subjectId: 'french', parentId: 'not-present' });
 assert.equal(moveLibraryItem(corruptMoveTarget, { type: 'set', id: 'loose', folderId: 'broken-target' }), false);
 
+const crossSubjectLibrary = normalizeLibrary({
+  subjects: [{ id: 'french' }, { id: 'history' }],
+  folders: [
+    { id: 'root', subjectId: 'french' },
+    { id: 'child', subjectId: 'french', parentId: 'root' },
+    { id: 'leaf', subjectId: 'french', parentId: 'child' },
+    { id: 'remaining', subjectId: 'french' },
+    { id: 'destination', subjectId: 'history' },
+    { id: 'second', subjectId: 'history' }
+  ],
+  sets: [
+    { id: 'study-set', subjectId: 'french', folderId: 'leaf', cardThemeId: 'original' },
+    { id: 'loose', subjectId: 'french' },
+    { id: 'already-there', subjectId: 'history', folderId: 'destination' },
+    { id: 'in-root', subjectId: 'french', folderId: 'root' }
+  ],
+  cards: [{ id: 'card', setId: 'study-set', front: 'une table', back: 'ein Tisch', correctCount: 2, attemptCount: 3 }],
+  studySessions: { 'study-set': { id: 'active', setId: 'study-set', cardIds: ['card'], results: [true], index: 0 } },
+  recent: [{ setId: 'study-set' }]
+});
+const cardsBeforeCrossSubjectMove = crossSubjectLibrary.cards;
+const sessionsBeforeCrossSubjectMove = crossSubjectLibrary.studySessions;
+const untouchedCrossSubjectLibrary = JSON.stringify(crossSubjectLibrary);
+const moveFolderAcross = { type: 'folder', id: 'root', subjectId: 'history', folderId: null, targetId: 'destination', placement: 'before' };
+assert.equal(canMoveLibraryItem(crossSubjectLibrary, moveFolderAcross), true);
+for (const invalid of [
+  { ...moveFolderAcross, subjectId: 'outside-library' },
+  { ...moveFolderAcross, folderId: 'child' },
+  { ...moveFolderAcross, subjectId: 'french', folderId: 'leaf', targetId: undefined },
+  { ...moveFolderAcross, targetId: 'remaining' },
+  { type: 'set', id: 'loose', subjectId: 'history', folderId: 'leaf' },
+  { type: 'set', id: 'loose', subjectId: 'history', folderId: 'destination', targetId: 'study-set' }
+]) {
+  assert.equal(canMoveLibraryItem(crossSubjectLibrary, invalid), false);
+  assert.equal(moveLibraryItem(crossSubjectLibrary, invalid), false);
+}
+assert.equal(JSON.stringify(crossSubjectLibrary), untouchedCrossSubjectLibrary, 'checking or rejecting a drop does not change records');
+
+assert.equal(moveLibraryItem(crossSubjectLibrary, moveFolderAcross), true);
+assert.deepEqual(getLibrarySiblings(crossSubjectLibrary, 'folder', 'root').map(({ id, position }) => [id, position]), [
+  ['root', 0], ['destination', 1], ['second', 2]
+]);
+assert.deepEqual(getLibrarySiblings(crossSubjectLibrary, 'folder', 'remaining').map(({ id, position }) => [id, position]), [['remaining', 0]]);
+const reloadedCrossSubjectLibrary = normalizeLibrary(JSON.parse(JSON.stringify(crossSubjectLibrary)));
+assert.deepEqual(reloadedCrossSubjectLibrary.folders.filter(record => ['root', 'child', 'leaf'].includes(record.id)).map(({ id, subjectId, parentId }) => [id, subjectId, parentId]), [
+  ['root', 'history', null], ['child', 'history', 'root'], ['leaf', 'history', 'child']
+]);
+assert.deepEqual(reloadedCrossSubjectLibrary.sets.filter(record => ['study-set', 'in-root'].includes(record.id)).map(({ id, subjectId, folderId }) => [id, subjectId, folderId]), [
+  ['study-set', 'history', 'leaf'], ['in-root', 'history', 'root']
+]);
+assert.equal(reloadedCrossSubjectLibrary.sets.find(record => record.id === 'study-set').cardThemeId, 'original');
+assert.equal(crossSubjectLibrary.cards, cardsBeforeCrossSubjectMove);
+assert.equal(crossSubjectLibrary.studySessions, sessionsBeforeCrossSubjectMove);
+assert.equal(reloadedCrossSubjectLibrary.cards[0].attemptCount, 3);
+
+const moveSetAcross = { type: 'set', id: 'loose', subjectId: 'history', folderId: 'destination', targetId: 'already-there', placement: 'before' };
+assert.equal(moveLibraryItem(crossSubjectLibrary, moveSetAcross), true);
+assert.deepEqual(getLibrarySiblings(crossSubjectLibrary, 'set', 'loose').map(({ id }) => id), ['loose', 'already-there']);
+assert.equal(canMoveLibraryItem(crossSubjectLibrary, moveSetAcross), false, 'dropping on the same insertion point is a no-op');
+assert.equal(moveLibraryItem(crossSubjectLibrary, { ...moveSetAcross, placement: 'after' }), true, 'an insertion target also sorts within the current folder');
+assert.deepEqual(getLibrarySiblings(crossSubjectLibrary, 'set', 'loose').map(({ id }) => id), ['already-there', 'loose']);
+assert.equal(moveLibraryItem(crossSubjectLibrary, { type: 'set', id: 'loose', subjectId: 'french', folderId: null }), true);
+assert.equal(crossSubjectLibrary.sets.find(record => record.id === 'loose').subjectId, 'french');
+
 console.log('Data checks passed: storage and session restore, learning progress, library organization, auto-naming, independent missed-card copies, side swapping, and 50,000-card import batches.');
