@@ -25,14 +25,8 @@ function promptPanel(format, index, theme, cardSideMarkup) {
   return `
     <section class="guide-panel" id="guide-panel-${id}" role="tabpanel" aria-labelledby="guide-tab-${id}"${index ? ' hidden' : ''}>
       <div class="guide-panel-head">
-        <div>
-          <h3>${label}</h3>
-          <p>${purpose}</p>
-        </div>
-        <div class="guide-panel-action">
-          <button type="button" class="primary-button" data-guide-copy>Prompt kopieren</button>
-          <p class="guide-copy-status" role="status"></p>
-        </div>
+        <h3>${label}</h3>
+        <p>${purpose}</p>
       </div>
       <figure class="guide-result">
         <figcaption class="guide-result-caption">So sieht die fertige Karte aus</figcaption>
@@ -41,18 +35,24 @@ function promptPanel(format, index, theme, cardSideMarkup) {
           ${previewCard(card, 'back', theme, cardSideMarkup)}
         </div>
       </figure>
-      <div class="guide-panel-tools">
-        <div class="guide-panel-details">
-          <details class="guide-disclosure">
-            <summary>Prompt ansehen</summary>
-            <label class="sr-only" for="guide-prompt-${id}">KI-Prompt für ${label}</label>
-            <textarea readonly spellcheck="false" class="guide-prompt" rows="7" id="guide-prompt-${id}">${escapeText(prompt)}</textarea>
-          </details>
-          <details class="guide-disclosure">
-            <summary>Importtext ansehen</summary>
-            <pre class="guide-example" data-guide-source><code>${escapeText(source)}</code></pre>
-          </details>
+      <div class="guide-prompt-box">
+        <div class="guide-prompt-toolbar">
+          <div>
+            <label for="guide-prompt-${id}">KI-Prompt<span class="sr-only"> für ${label}</span></label>
+            <p class="guide-copy-status" role="status"></p>
+          </div>
+          <button type="button" class="primary-button" data-guide-copy>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 4H6a2 2 0 0 0-2 2v10"/></svg>
+            Prompt kopieren
+          </button>
         </div>
+        <textarea readonly spellcheck="false" class="guide-prompt" rows="7" id="guide-prompt-${id}">${escapeText(prompt)}</textarea>
+      </div>
+      <div class="guide-panel-tools">
+        <details class="guide-disclosure">
+          <summary>Importtext ansehen</summary>
+          <pre class="guide-example" data-guide-source><code>${escapeText(source)}</code></pre>
+        </details>
         <button type="button" class="quiet-button" data-guide-import="${id}">Beispiel im Import öffnen</button>
       </div>
     </section>`;
@@ -165,7 +165,6 @@ export function bindImportGuide(root, { showCopyConfirmation, onImport }) {
         if (prompt.isConnected) showCopyConfirmation(status, 'Prompt kopiert.');
       } catch {
         if (!prompt.isConnected || panel.hidden) return;
-        prompt.closest('details').open = true;
         prompt.focus();
         prompt.select();
         status.textContent = 'Der Prompt ist markiert. Du kannst ihn jetzt kopieren.';
