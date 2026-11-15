@@ -5,8 +5,10 @@ import { studyKeyboardAction } from './study-keyboard.mjs';
 import { createStudySpeech, frenchSpeechForms, frenchSpeechSide } from './study-speech.mjs';
 import { getAppAppearance } from './appearance.mjs';
 import { createLibraryShare, libraryShareUrl } from './library-sharing.mjs';
-import { frenchImportPrompt, importGuideExamples } from './import-guide.mjs';
-import { detectImportFormat, formatFrenchVerbSide, frenchVerbExample, frenchVerbFormLabels, frenchVerbPrompt, parseFrenchVerbImport, parseFrenchVerbSide, validateFrenchVerbSide } from './french-verbs.mjs';
+import { learningGoalPrompt, learningGoalImportExample } from './import-guide.mjs';
+import { renderImportGuide, bindImportGuide } from './import-guide-view.mjs';
+import { detectLearningGoalImport, formatLearningGoalBullets, parseLearningGoalBullets, parseLearningGoalImport } from './learning-goals.mjs';
+import { detectImportFormat, formatFrenchVerbSide, frenchVerbExample, frenchVerbFormLabels, parseFrenchVerbImport, parseFrenchVerbSide, validateFrenchVerbSide } from './french-verbs.mjs';
 import { frenchVerbCardMarkup } from './french-verb-card.mjs';
 import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown, parseDonationAmountCents, shouldShowDonationWelcome, setDonationReminderEnabled, isDonationReminderEnabled } from './donation-values.mjs';
 
@@ -84,15 +86,21 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
     const savedExample=String(card?.[`${side}ExampleSentence`]??'').trim();
     const verb=parseFrenchVerbSide(text);
     if(verb)return{term:verb.infinitive,exampleSentence:savedExample,verb};
-    if(savedExample)return{term:text,exampleSentence:savedExample};
+    const bullets=parseLearningGoalBullets(text);
+    if(bullets||savedExample)return{term:text,exampleSentence:savedExample,bullets};
     return window.WortwerkParser.parseExampleSide(text)||{term:text,exampleSentence:''};
   }
   function verbCardMarkup(card,side,verb){
     return frenchVerbCardMarkup(verb,cardSideContent(card,side==='front'?'back':'front').term);
   }
+  function bulletMarkup(items,inline=false){
+    const list=inline?'span':'ul',item=inline?'span':'li';
+    return `<${list} class="card-bullet-list"${inline?' role="list"':''}>${items.map(text=>`<${item}${inline?' role="listitem"':''}>${esc(text)}</${item}>`).join('')}</${list}>`;
+  }
   function cardSideMarkup(card,side){
     const content=cardSideContent(card,side);
-    const main=content.verb?verbCardMarkup(card,side,content.verb):`<span class="card-content-main">${genderMarkup(content.term)}</span>`;
+    const main=content.verb?verbCardMarkup(card,side,content.verb)
+      :content.bullets?bulletMarkup(content.bullets):`<span class="card-content-main">${genderMarkup(content.term)}</span>`;
     return main+(content.exampleSentence?`<span class="card-example">(${esc(content.exampleSentence)})</span>`:'');
   }
   function genderMarkup(value){return window.WortwerkPresentation.genderSegments(value).map(segment=>`<span${segment.gender?` class="gender-${segment.gender==='m'?'masculine':'feminine'}"`:''}>${esc(segment.text)}</span>`).join('')}
@@ -108,14 +116,16 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
       ].filter(Boolean).join('. ');
       return `${side==='back'?'Rückseite':'Vorderseite'}: ${description}`;
     }
-    return `${side==='back'?'Rückseite':'Vorderseite'}: ${content.term}${content.exampleSentence?`. Beispielsatz: ${content.exampleSentence}`:''}`;
+    const spokenTerm=content.bullets?.join('; ')||content.term;
+    return `${side==='back'?'Rückseite':'Vorderseite'}: ${spokenTerm}${content.exampleSentence?`. Beispielsatz: ${content.exampleSentence}`:''}`;
   }
   function populateStudyCard(slot,card){
     for(const side of ['front','back']){
-      const {term,exampleSentence,verb}=cardSideContent(card,side);
+      const {term,exampleSentence,verb,bullets}=cardSideContent(card,side);
       const copy=slot[`${side}Text`],example=slot[`${side}ExampleText`];
       copy.classList.toggle('is-verb-card',Boolean(verb));
-      copy.innerHTML=verb?verbCardMarkup(card,side,verb):genderMarkup(term);
+      copy.classList.toggle('is-bullet-card',Boolean(bullets));
+      copy.innerHTML=verb?verbCardMarkup(card,side,verb):bullets?bulletMarkup(bullets,true):genderMarkup(term);
       example.textContent=exampleSentence?`(${exampleSentence})`:'';
       example.hidden=!exampleSentence;
     }
@@ -202,103 +212,15 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
   }
 
   function renderGuide(){
-    $('#content').innerHTML=`
-      <section class="guide-page" aria-labelledby="guide-title">
-        <header class="page-heading">
-          <div>
-            <h1 class="page-title" id="guide-title" tabindex="-1">Anleitung</h1>
-            <p class="page-subtitle">Lernkarten importieren und französische Vokabeln und Verben lernen.</p>
-          </div>
-        </header>
-        <nav class="guide-index" aria-label="In dieser Anleitung">
-          <a href="#guide-format-title" data-guide-section="guide-format-title">Textimport</a>
-          <a href="#guide-prompt-title" data-guide-section="guide-prompt-title">Vokabel-Prompt</a>
-          <a href="#guide-verb-title" data-guide-section="guide-verb-title">Verben-Prompt</a>
-          <a href="#guide-speech-title" data-guide-section="guide-speech-title">Aussprache</a>
-        </nav>
-        <section class="guide-section" aria-labelledby="guide-format-title">
-          <h2 id="guide-format-title" tabindex="-1">Lernkarten aus Text importieren</h2>
-          <p>Schreibe pro Zeile eine Karte. Das erste Gleichheitszeichen trennt Vorder- und Rückseite.</p>
-          <pre class="guide-example"><code>Vorderseite ((Beispielsatz vorne)) = Rückseite ((Beispielsatz hinten))</code></pre>
-          <dl class="guide-format">
-            <dt>Vorderseite</dt>
-            <dd>Links vom <code>=</code> steht der Begriff oder die Frage, die du zuerst siehst.</dd>
-            <dt>Rückseite</dt>
-            <dd>Rechts vom <code>=</code> steht die Übersetzung oder Antwort.</dd>
-            <dt><code>((Beispielsatz))</code></dt>
-            <dd>Setze einen optionalen Beispielsatz ans Ende der jeweiligen Seite. Auf der Karte erscheint er kleiner unter dem Begriff und in einfachen Klammern.</dd>
-            <dt>Französische Nomen</dt>
-            <dd><code>(m)</code> steht für maskulin, <code>(f)</code> für feminin. <code>(m pl)</code> und <code>(f pl)</code> kennzeichnen die Mehrzahl. Bei <code>le</code>, <code>la</code>, <code>un</code> und <code>une</code> genügt der Artikel.</dd>
-          </dl>
-          <ol class="guide-steps">
-            <li>Öffne einen Lernstapel und wähle <strong>Karten importieren</strong>.</li>
-            <li>Füge deine Liste ein und wähle <strong>Import prüfen</strong>.</li>
-            <li>Kontrolliere die Vorschau und wähle <strong>Lernkarten erstellen</strong>.</li>
-          </ol>
-        </section>
-        <section class="guide-section" aria-labelledby="guide-prompt-title">
-          <div class="guide-prompt-heading">
-            <div>
-              <h2 id="guide-prompt-title" tabindex="-1">KI-Prompt für französische Vokabeln</h2>
-              <p>Lade deine Vokabelliste in der KI deiner Wahl hoch und sende ihr den Prompt. Füge ihre Antwort danach im Importfeld ein.</p>
-            </div>
-            <div class="guide-copy-actions">
-              <button type="button" class="primary-button" id="guide-copy-prompt">Prompt kopieren</button>
-              <p class="guide-copy-status" id="guide-copy-status" role="status"></p>
-            </div>
-          </div>
-          <label class="sr-only" for="guide-prompt">KI-Prompt für französische Vokabeln</label>
-          <textarea id="guide-prompt" class="guide-prompt" readonly spellcheck="false" rows="8"></textarea>
-          <details class="guide-examples">
-            <summary>Beispielausgabe ansehen</summary>
-            <pre class="guide-example"><code>${esc(importGuideExamples.join('\n'))}</code></pre>
-          </details>
-        </section>
-        <section class="guide-section" aria-labelledby="guide-verb-title">
-          <div class="guide-prompt-heading">
-            <div>
-              <h2 id="guide-verb-title" tabindex="-1">KI-Prompt für französische Verben</h2>
-              <p>Lade deine Verbenliste in der KI deiner Wahl hoch und sende ihr diesen Prompt. Füge die Antwort unter <strong>Karten importieren</strong> ein. Das Verbformat wird automatisch erkannt.</p>
-            </div>
-            <div class="guide-copy-actions">
-              <button type="button" class="primary-button" id="guide-copy-verb-prompt">Prompt kopieren</button>
-              <p class="guide-copy-status" id="guide-verb-copy-status" role="status"></p>
-            </div>
-          </div>
-          <label class="sr-only" for="guide-verb-prompt">KI-Prompt für französische Verben</label>
-          <textarea id="guide-verb-prompt" class="guide-prompt" readonly spellcheck="false" rows="8"></textarea>
-          <details class="guide-examples">
-            <summary>Beispielausgabe ansehen</summary>
-            <pre class="guide-example"><code>${esc(frenchVerbExample)}</code></pre>
-          </details>
-        </section>
-        <section class="guide-section" aria-labelledby="guide-speech-title">
-          <h2 id="guide-speech-title" tabindex="-1">Französische Aussprache</h2>
-          <p>Wähle auf der französischen Kartenseite <strong>Begriff</strong> oder <strong>Beispielsatz</strong>. Bei Konjugationskarten findest du unter <strong>Verbformen</strong> die einzelnen Präsensformen. Erneutes Antippen stoppt die Wiedergabe.</p>
-          <p>Unter <strong>Lernstapel bearbeiten</strong> kannst du die Seite für die Aussprache wählen. Die App nutzt eine lokale französische Stimme. Falls sie fehlt, aktiviere eine in den Bedienungshilfen deines Geräts.</p>
-        </section>
-      </section>`;
-    document.querySelectorAll('[data-guide-section]').forEach(link=>link.onclick=event=>{
-      event.preventDefault();
-      const title=document.getElementById(link.dataset.guideSection);
-      title.focus({preventScroll:true});
-      title.scrollIntoView({block:'start'});
+    const content=$('#content');
+    const example=window.WortwerkParser.parseImport(learningGoalImportExample).rows[0];
+    content.innerHTML=renderImportGuide({
+      cardSideMarkup,theme:cardThemes.getTheme(activeCardThemeId),learningGoalPrompt,
+      learningGoalExample:{...example,source:learningGoalImportExample},
     });
-    bindGuidePrompt($('#guide-prompt'),$('#guide-copy-prompt'),$('#guide-copy-status'),frenchImportPrompt);
-    bindGuidePrompt($('#guide-verb-prompt'),$('#guide-copy-verb-prompt'),$('#guide-verb-copy-status'),frenchVerbPrompt);
-  }
-  function bindGuidePrompt(prompt,button,status,value){
-    prompt.value=value;
-    button.addEventListener('click',async()=>{
-      try{
-        await navigator.clipboard.writeText(prompt.value);
-        if(prompt.isConnected)showCopyConfirmation(status,'Prompt kopiert.');
-      }catch{
-        if(!prompt.isConnected)return;
-        prompt.focus();
-        prompt.select();
-        status.textContent='Der Prompt ist markiert. Du kannst ihn jetzt kopieren.';
-      }
+    bindImportGuide(content,{
+      showCopyConfirmation,
+      onImport:(source,format)=>openImport(activeSet,{source,format}),
     });
   }
   function showCopyConfirmation(status,message){
@@ -1088,7 +1010,7 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
     if(type==='card'){
       fields=cardSideFields(entity,'front','Vorderseite','Begriff, Frage oder Wort')+
         cardSideFields(entity,'back','Rückseite','Übersetzung, Antwort oder Erklärung')+
-        '<div class="field-hint">Beispielsätze werden beim Lernen kleiner unter dem Begriff angezeigt.</div>';
+        '<div class="field-hint">Für eine Liste beginne jeden Stichpunkt auf einer neuen Zeile mit «•».</div>';
     }
     $('#form-fields').innerHTML=fields;if(type==='subject'||type==='folder')bindColourPicker();if(type==='subject')bindSubjectAppearance();if(type==='set'){bindSetSubject();bindSetDesign()}$('#form-submit').onclick=e=>{e.preventDefault();submitEntity()};$('#entity-form').onsubmit=e=>{e.preventDefault();submitEntity()}}
   function bindSetSubject(){const selector=$('#f-subject');if(!selector)return;selector.addEventListener('change',()=>{$('#f-folder').innerHTML=`<option value="">Ohne Ordner</option>${subjectFolders(selector.value).map(item=>`<option value="${esc(item.id)}">${esc(folderLabel(item))}</option>`).join('')}`})}
@@ -1156,7 +1078,7 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
       const card=formContext.key?data.cards.find(c=>c.id===formContext.key):null;
       const v={},examples={frontExampleSentence:fd.get('frontExampleSentence').trim(),backExampleSentence:fd.get('backExampleSentence').trim()},timestamp=new Date().toISOString();
       for(const side of ['front','back']){
-        if(fd.has(side)){v[side]=fd.get(side).trim();continue}
+        if(fd.has(side)){const text=fd.get(side).trim(),bullets=parseLearningGoalBullets(text);v[side]=bullets?formatLearningGoalBullets(bullets):text;continue}
         const names=['infinitive','stem','auxiliary','participle',...frenchVerbFormLabels.map((_,index)=>`form-${index}`)];
         const {verb,reason}=validateFrenchVerbSide(names.map(name=>fd.get(`${side}-${name}`)).join(' | '));
         if(!verb){toast(reason);return}
@@ -1219,14 +1141,17 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
     const input=$('#import-text');
     updateImportReloadLabel();
     const mode=$('#import-mode input:checked').value;
-    const format=mode==='auto'?detectImportFormat(input.value):mode;
-    const descriptions={vocabulary:'import-vocabulary-description','french-verbs':'import-verb-description'};
+    const detected=mode==='auto'?detectImportFormat(input.value):null;
+    const format=mode!=='auto'?mode:detected==='french-verbs'?detected:detectLearningGoalImport(input.value)?'learning-goals':detected;
+    const descriptions={vocabulary:'import-vocabulary-description','french-verbs':'import-verb-description','learning-goals':'import-goal-description'};
     const description=descriptions[format]||'import-auto-description';
     for(const id of ['import-auto-description',...Object.values(descriptions)])$('#'+id).hidden=id!==description;
     input.setAttribute('aria-describedby',description);
-    input.placeholder=mode==='french-verbs'?frenchVerbExample:mode==='vocabulary'?'das Haus = la maison\nder Hund = le chien':'Liste einfügen oder eine Textdatei wählen';
+    const samples={'french-verbs':frenchVerbExample,vocabulary:'das Haus = la maison\nder Hund = le chien','learning-goals':learningGoalImportExample};
+    input.placeholder=samples[mode]||'Liste einfügen oder eine Textdatei wählen';
     const status=$('#import-format-status');
-    const message=mode!=='auto'||!format?'':format==='french-verbs'?'Französische Verben erkannt.':'Vokabelformat erkannt.';
+    const labels={'french-verbs':'Französische Verben erkannt.',vocabulary:'Textkarten erkannt.','learning-goals':'Lernziele mit Stichpunkten erkannt.'};
+    const message=mode==='auto'?(labels[format]||''):'';
     if(status.textContent!==message)status.textContent=message;
     return format;
   }
@@ -1235,6 +1160,9 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
     importRemovedLines.clear();
     $('#import-preview').replaceChildren();
     updateImportActionState();
+  }
+  function invalidGoalAnswers(){
+    return importRows.some(row=>row.requireBullets&&!parseLearningGoalBullets(row.back));
   }
   function updateImportActionState(){
     const button=$('#import-submit'),hint=$('#import-action-hint');
@@ -1249,14 +1177,16 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
     }
     if(!importRows.length){button.textContent='Keine Karten zum Erstellen';button.disabled=true;hint.textContent='Es sind keine gültigen Karten in der Vorschau.';return}
     if(importRows.some(row=>!row.front.trim()||!row.back.trim())){button.textContent='Leere Seiten beheben';button.disabled=true;hint.textContent='Ergänze Vorder- und Rückseite in der Vorschau.';return}
+    if(invalidGoalAnswers()){button.textContent='Stichpunkte ergänzen';button.disabled=true;hint.textContent='Beginne jeden Stichpunkt in der Vorschau mit «•».';return}
     button.textContent='Lernkarten erstellen';button.disabled=false;hint.textContent=`Vorschau geprüft · ${importRows.length} ${importRows.length===1?'Karte':'Karten'} bereit.`;
   }
-  function openImport(targetSet){
+  function openImport(targetSet,{source='',format='auto'}={}){
     if(!data.sets.length){toast('Erstelle zuerst einen Lernstapel für den Import.');return}
-    $('#import-text').value='';
+    $('#import-text').value=source;
     $('#import-file').value='';
     $('#import-file-name').textContent='TXT · UTF-8';
-    $('#import-mode input[value="auto"]').checked=true;
+    const choice=[...$('#import-mode').querySelectorAll('input')].find(input=>input.value===format);
+    (choice||$('#import-mode input[value="auto"]')).checked=true;
     $('#import-set').innerHTML=data.sets.map(s=>`<option value="${esc(s.id)}" ${targetSet===s.id?'selected':''}>${esc(subject(s.subjectId)?.name||'Fach')} · ${esc(s.name)}</option>`).join('');
     updateImportFormat();
     resetImportPreview();
@@ -1266,7 +1196,11 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
   function updateImportPreview({preserveRemovals=false,reveal=false}={}){
     const text=$('#import-text').value;
     importPreviewFormat=updateImportFormat();
-    const result=importPreviewFormat==='french-verbs'?parseFrenchVerbImport(text):window.WortwerkParser.parseImport(text);
+    const mode=$('#import-mode input:checked').value;
+    const parseText=window.WortwerkParser.parseImport;
+    const result=importPreviewFormat==='french-verbs'?parseFrenchVerbImport(text)
+      :importPreviewFormat==='learning-goals'?parseLearningGoalImport(text,parseText,{requireBullets:mode==='learning-goals'})
+      :parseText(text);
     if(!preserveRemovals)importRemovedLines.clear();
     importRows=result.rows.filter(row=>!importRemovedLines.has(row.line));importErrors=result.errors;importChecked=true;importHasErrors=result.errors.length>0;importPreviewLimit=100;
     renderImportPreview();
@@ -1286,19 +1220,28 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
   }
   function renderImportPreview(){
     const preview=$('#import-preview'),verbs=importPreviewFormat==='french-verbs';
-    const rows=importRows.slice(0,importPreviewLimit).map((row,index)=>verbs?importVerbPreview(row,index):`
-      <div class="preview-line editable-preview">
+    const rows=importRows.slice(0,importPreviewLimit).map((row,index)=>{
+      if(verbs)return importVerbPreview(row,index);
+      const goal=row.requireBullets;
+      const frontLabel=goal?'Lernziel':'Vorderseite';
+      const backLabel=goal?'Stichpunkte':'Rückseite';
+      const frontId=`import-front-${index}`,backId=`import-back-${index}`;
+      return `
+      <div class="preview-line editable-preview${goal?' preview-goal':''}">
         <span class="preview-index">${row.line}</span>
         <div class="preview-side preview-front">
-          <input aria-label="Vorderseite Zeile ${row.line}" data-import-front="${index}" value="${esc(row.front)}">
-          <input aria-label="Beispielsatz auf der Vorderseite Zeile ${row.line} (optional)" placeholder="Beispielsatz vorne" data-import-front-example="${index}" value="${esc(row.frontExampleSentence||'')}">
+          ${goal?`<label for="${frontId}">Lernziel</label>`:''}
+          <input id="${frontId}" aria-label="${frontLabel} Zeile ${row.line}" data-import-front="${index}" value="${esc(row.front)}">
+          ${!goal||row.frontExampleSentence?`<input aria-label="Beispielsatz auf der Vorderseite Zeile ${row.line} (optional)" placeholder="Beispielsatz vorne" data-import-front-example="${index}" value="${esc(row.frontExampleSentence||'')}">`:''}
         </div>
         <div class="preview-side preview-back">
-          <input aria-label="Rückseite Zeile ${row.line}" data-import-back="${index}" value="${esc(row.back)}">
-          <input aria-label="Beispielsatz auf der Rückseite Zeile ${row.line} (optional)" placeholder="Beispielsatz hinten" data-import-back-example="${index}" value="${esc(row.backExampleSentence||'')}">
+          ${goal?`<label for="${backId}">Stichpunkte</label><textarea id="${backId}" rows="4" aria-label="${backLabel} Zeile ${row.line}" data-import-back="${index}">${esc(row.back)}</textarea>`
+            :`<input aria-label="${backLabel} Zeile ${row.line}" data-import-back="${index}" value="${esc(row.back)}">`}
+          ${goal?'':`<input aria-label="Beispielsatz auf der Rückseite Zeile ${row.line} (optional)" placeholder="Beispielsatz hinten" data-import-back-example="${index}" value="${esc(row.backExampleSentence||'')}">`}
         </div>
         <button type="button" class="row-remove" data-import-remove="${index}" aria-label="Karte aus Vorschau entfernen">×</button>
-      </div>`).join('');
+      </div>`;
+    }).join('');
     const errors=importErrors.slice(0,100).map((error,index)=>`<div class="preview-line bad">
       <span class="preview-index">Zeile ${error.line}</span>
       <div class="preview-error"><strong>${esc(error.reason)}</strong><br><code>${esc(error.text)}</code>
@@ -1359,7 +1302,24 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
   document.querySelectorAll('#entity-form [value="cancel"]').forEach(button=>button.addEventListener('click',cancelEntityForm));
   $('#form-dialog').addEventListener('close',()=>{if(formContext?.copyCards?.length&&session?.id===formContext.sourceSessionId){session.missedSetPending=false;updateMissedSetActions()}formContext=null});
   $('#import-form').querySelectorAll('[value="cancel"]').forEach(button=>button.addEventListener('click',()=>$('#import-dialog').close()));
-  $('#import-submit').addEventListener('click',e=>{e.preventDefault();if(!importChecked){updateImportPreview({reveal:true});return}const setId=$('#import-set').value;if(!setById(setId)||!importRows.length||importHasErrors||importRows.some(row=>!row.front.trim()||!row.back.trim()))return;const timestamp=new Date().toISOString(),position=setCards(setId).length,newCards=window.WortwerkModel.createImportedCards(importRows,{setId,position,timestamp,createId:id});data.cards=data.cards.concat(newCards);setById(setId).updatedAt=timestamp;save();$('#import-dialog').close();if(activeSet===setId)render();toast(`${newCards.length} Karten erstellt`)});
+  $('#import-submit').addEventListener('click',event=>{
+    event.preventDefault();
+    if(!importChecked){updateImportPreview({reveal:true});return}
+    const setId=$('#import-set').value,deck=setById(setId);
+    if(!deck||!importRows.length||importHasErrors||invalidGoalAnswers()||importRows.some(row=>!row.front.trim()||!row.back.trim()))return;
+    const rows=importRows.map(row=>{
+      const bullets=row.requireBullets&&parseLearningGoalBullets(row.back);
+      return bullets?{...row,back:formatLearningGoalBullets(bullets)}:row;
+    });
+    const timestamp=new Date().toISOString(),position=setCards(setId).length;
+    const newCards=window.WortwerkModel.createImportedCards(rows,{setId,position,timestamp,createId:id});
+    data.cards=data.cards.concat(newCards);
+    deck.updatedAt=timestamp;
+    save();
+    $('#import-dialog').close();
+    if(activeSet===setId)render();
+    toast(`${newCards.length} ${newCards.length===1?'Karte':'Karten'} erstellt`);
+  });
   function sessionForSet(key){return data.studySessions?.[key]||null}
   function studyActionLabel(key){return sessionForSet(key)?'Lernen fortsetzen':'Lernen starten'}
   let resetSetId = null;

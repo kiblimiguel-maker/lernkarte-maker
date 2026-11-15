@@ -160,13 +160,15 @@
           <legend class="field-label">Importformat</legend>
           <div class="import-format-options">
             <label><input class="sr-only" type="radio" name="import-mode" value="auto" checked><span>Automatisch erkennen</span></label>
-            <label><input class="sr-only" type="radio" name="import-mode" value="vocabulary"><span>Vokabeln</span></label>
+            <label><input class="sr-only" type="radio" name="import-mode" value="vocabulary"><span>Textkarten</span></label>
+            <label><input class="sr-only" type="radio" name="import-mode" value="learning-goals"><span>Lernziele &amp; Stichpunkte</span></label>
             <label><input class="sr-only" type="radio" name="import-mode" value="french-verbs"><span>Französische Verben</span></label>
           </div>
         </fieldset>
         <p class="import-format-status" id="import-format-status" role="status"></p>
-        <p class="import-description" id="import-auto-description">Die App erkennt Vokabeln mit <code>=</code> und französische Verben mit <code>|</code>.</p>
+        <p class="import-description" id="import-auto-description">Die App erkennt Textkarten und Lernziele mit <code>=</code> sowie französische Verben mit <code>|</code>.</p>
         <p class="import-description" id="import-vocabulary-description" hidden>Eine Karte pro Zeile. Trenne Vorder- und Rückseite mit <code>=</code>. Einen Beispielsatz kannst du ans Ende der jeweiligen Seite setzen, z. B. <code>((Beispielsatz.))</code>.</p>
+        <p class="import-description" id="import-goal-description" hidden>Ein Lernziel pro Zeile. Links vom <code>=</code> steht das Lernziel, rechts beginnt jeder Stichpunkt mit <code>•</code>. Die Punkte erscheinen als Liste auf der Rückseite.</p>
         <p class="import-description" id="import-verb-description" hidden>Ein Verb pro Zeile. Trenne die elf Felder mit <code>|</code>. Zuerst kommen die deutsche Bedeutung, der französische Infinitiv und der Imparfait-Stamm. Ein Strich markiert eine Lücke. Einen fehlenden Stamm ergänzt die App nach Möglichkeit. Den KI-Prompt findest du unter «Anleitung».</p>
       </div>
       <div class="import-source">
