@@ -1,6 +1,7 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const { nextCardPosition, moveCardInOrder } = require('./model.js');
 const { normalizeLibrary, getLibrarySiblings, reorderLibraryItems, canMoveLibraryItem, moveLibraryItem, nextLibraryPosition, getFolderDescendantIds, createImportedCards, createCopiedCards, nextSetName, swapSetCardSides, recordCardAnswer, updateCardAnswer, createStudySession, getStudyResults, getStudyResult, getStudyCurrentIndex, getStudyCard, getNextStudyCardId, navigateStudySession, shuffleStudyCards, setStudyAnswer, getSetProgress, resetSetProgress, summarizeResults, summarizeSession, nextUnratedIndex } = require('./model.js');
 
 assert.deepEqual(normalizeLibrary(null), { subjects: [], folders: [], sets: [], cards: [], recent: [], studySessions: {}, studyHistory: [] });
@@ -519,4 +520,17 @@ assert.deepEqual(getLibrarySiblings(crossSubjectLibrary, 'set', 'loose').map(({ 
 assert.equal(moveLibraryItem(crossSubjectLibrary, { type: 'set', id: 'loose', subjectId: 'french', folderId: null }), true);
 assert.equal(crossSubjectLibrary.sets.find(record => record.id === 'loose').subjectId, 'french');
 
-console.log('Data checks passed: storage and session restore, learning progress, library organization, auto-naming, independent missed-card copies, side swapping, and 50,000-card import batches.');
+const largeOrder=Array.from({length:50000},(_,index)=>({id:`order-${index}`,setId:'deck',position:index*2,updatedAt:'before',correctCount:index%3}));
+assert.equal(nextCardPosition([...largeOrder,{setId:'other',position:200000}],'deck'),99999);
+assert.equal(nextCardPosition(largeOrder,'empty'),0);
+assert.equal(moveCardInOrder(largeOrder,'order-25000',-1,'after'),true);
+assert.deepEqual(largeOrder.filter(card=>card.updatedAt==='after').map(card=>[card.id,card.position,card.correctCount]),[
+  ['order-24999',50000,0],['order-25000',49998,1]
+], 'adjacent reorder marks only two card records, even after deletions left sparse positions');
+assert.equal(moveCardInOrder(largeOrder,'missing',1,'ignored'),false);
+const tiedOrder=[{id:'a',position:0},{id:'b',position:0},{id:'c',position:2}];
+assert.equal(moveCardInOrder(tiedOrder,'b',-1,'after'),true);
+assert.deepEqual(tiedOrder.slice().sort((a,b)=>a.position-b.position).map(card=>card.id),['b','a','c']);
+assert.equal(tiedOrder[2].updatedAt,undefined);
+
+console.log('Data checks passed: session restore, learning progress, library organization, sparse card order, two-row reorder in a 50,000-card set, independent copies and large imports.');

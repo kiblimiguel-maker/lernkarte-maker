@@ -1,0 +1,27 @@
+{
+  "id": "/",
+  "name": "Lernkarten Maker",
+  "short_name": "Lernkarten",
+  "description": "Deine Lernkarten, Fächer und Lernfortschritte für den Unterricht.",
+  "lang": "de-CH",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#101216",
+  "theme_color": "#101216",
+  "prefer_related_applications": false,
+  "icons": [
+    {
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

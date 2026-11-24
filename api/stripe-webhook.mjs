@@ -18,9 +18,8 @@ export function createStripeWebhookHandler({ getStripeClient = getStripe, persis
   return async function POST(request) {
     const signature = request.headers.get('stripe-signature');
     const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET?.trim();
-    if (!signature || !endpointSecret) {
-      return json({ error: 'Stripe-Webhook ist nicht vollständig konfiguriert.' }, 400);
-    }
+    if (!signature) return json({ error: 'Webhook-Signatur fehlt.' }, 400);
+    if (!endpointSecret) return json({ error: 'Stripe-Webhook ist nicht vollständig konfiguriert.' }, 503);
 
     let stripe;
     try {
@@ -44,13 +43,13 @@ export function createStripeWebhookHandler({ getStripeClient = getStripe, persis
       return json({ error: 'Webhook-Signatur ungültig.' }, 400);
     }
 
-    if (!HANDLED_DONATION_EVENTS.has(event.type) || !isWortwerkDonationEvent(event)) {
+    if (!HANDLED_DONATION_EVENTS.has(event?.type) || !isWortwerkDonationEvent(event)) {
       return json({ received: true, ignored: true });
     }
 
     const record = classifyDonationWebhookEvent(event);
     if (!record) {
-      console.error('Stripe-Spendenereignis hatte ungültige Zahlungsdaten.', { type: event.type, eventId: event.id });
+      console.error('Stripe-Spendenereignis hatte ungültige Zahlungsdaten.', event.type);
       return json({ error: 'Das Spendenereignis enthält ungültige Zahlungsdaten.' }, 400);
     }
 

@@ -1,5 +1,5 @@
 import { supabase } from './supabaseClient.js';
-import { cardListPage, libraryCardCounts, searchLibrary } from './library-view.mjs';
+import { cardListPage, libraryCardsBySet, searchLibrary } from './library-view.mjs';
 import { bindLibraryDrag } from './library-drag.mjs';
 import { studyKeyboardAction } from './study-keyboard.mjs';
 import { createStudySpeech, frenchSpeechForms, frenchSpeechSide } from './study-speech.mjs';
@@ -40,11 +40,10 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
   ];
   const icons = ['📚','🌐','📐','🏛️','🧪','🎨'];
   const $ = (s, root=document) => root.querySelector(s);
-  const STUDY_SWIPE_MS = (() => {
-    const value = getComputedStyle(document.documentElement).getPropertyValue('--study-swipe-duration').trim();
-    const duration = Number.parseFloat(value);
-    return Number.isFinite(duration) ? duration * (value.endsWith('ms') ? 1 : 1000) : 510;
-  })();
+  function openFormDialog(dialog){
+    dialog.showModal();
+    $('.dialog-body',dialog).scrollTop=0;
+  }
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const id = () => crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const initial = () => ({subjects:[],folders:[],sets:[],cards:[],recent:[],studySessions:{},studyHistory:[]});
@@ -60,16 +59,19 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
     return { type, sessionId };
   })();
   let donationPayment = donationReturn?.type === 'success' ? { status: 'checking' } : null;
-  let donationStatusChecking = false;
+  let donationStatusChecking = null;
   let donationAmountCents = 1000;
   let donationSubmitting = false;
   let donationCheckoutAvailable = null;
+  let donationReadinessFailed = false;
   let donationReadinessRequest = null;
   let donationCheckoutRequestId = null;
   let donationGreetingDismissed = false;
+  let workspaceAccountVersion = 0;
   let data = initial(), activeSubject = null, activeFolder = null, activeSet = null, view = donationReturn ? 'donations' : 'library';
-  let librarySorting = false, librarySortSaving = false, entitySaving = false;
-  let cardCounts=new Map(),cardListSetId=null,cardListQuery='',cardListLimit=100,recoveryAwaitingChoice=false;
+  let librarySorting = false, librarySortSaving = false, entitySaving = false, libraryLoading = false;
+  let libraryLoadFailed = false;
+  let cardsBySet=new Map(),cardListSetId=null,cardListQuery='',cardListLimit=100,recoveryAwaitingChoice=false;
   let librarySearchScope='',librarySearchQuery='',librarySearchLimit=100;
   // Sidebar disclosure is independent from the current library location.
   const expandedSidebarSubjects = new Set();
@@ -79,6 +81,7 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
   const folder = key => data.folders.find(x=>x.id===key);
   const setById = key => data.sets.find(x=>x.id===key);
   const setCards = key => data.cards.filter(x=>x.setId===key).sort((a,b)=>(a.position??0)-(b.position??0));
+  const countSetCards = key => cardsBySet.get(key)?.length ?? 0;
   const subjectSets = key => data.sets.filter(x=>x.subjectId===key);
   const subjectFolders = key => data.folders.filter(x=>x.subjectId===key);
   function cardSideContent(card,side){
@@ -130,7 +133,42 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
       example.hidden=!exampleSentence;
     }
   }
-  function toast(message){const inline=$('#form-save-error');if($('#form-dialog')?.open&&inline){inline.textContent=message;inline.hidden=false;return}const el=document.createElement('div');el.className='toast';el.setAttribute('role','status');el.textContent=message;document.body.append(el);setTimeout(()=>el.remove(),2400)}
+  const notification=document.createElement('div');
+  const notificationIcon=document.createElement('span');
+  const notificationText=document.createElement('span');
+  notification.className='toast';
+  notificationIcon.className='toast-icon';
+  notificationIcon.setAttribute('aria-hidden','true');
+  notificationText.setAttribute('role','status');
+  notification.append(notificationIcon,notificationText);
+  const canShowNotification=typeof notification.showPopover==='function';
+  if(canShowNotification)notification.setAttribute('popover','manual');
+  let notificationTimer;
+  function clearNotification(){
+    clearTimeout(notificationTimer);
+    if(canShowNotification&&notification.matches(':popover-open'))notification.hidePopover();
+    notification.remove();
+    notificationText.textContent='';
+  }
+  function toast(message,tone='notice'){
+    if($('#form-dialog').open){
+      const inline=$('#form-save-error');
+      inline.textContent=message;
+      inline.hidden=false;
+      return;
+    }
+    const host=document.activeElement?.closest('dialog[open]')||$('dialog[open]')||document.body;
+    if(notification.parentElement!==host){clearNotification();host.append(notification);}
+    notification.dataset.tone=tone;
+    notificationIcon.textContent=tone==='success'?'✓':tone==='error'?'!':'i';
+    if(canShowNotification&&!notification.matches(':popover-open'))notification.showPopover();
+    if(notificationText.textContent!==message)notificationText.textContent=message;
+    clearTimeout(notificationTimer);
+    notificationTimer=setTimeout(clearNotification,tone==='error'?3800:2600);
+  }
+  document.addEventListener('close',event=>{
+    if(event.target===notification.parentElement&&!event.target.open)clearNotification();
+  },true);
   function cardThemePreview(theme){
     return `<span class="card-theme-preview" aria-hidden="true">${['front','back'].map(side=>{const color=theme[side];return `<span class="card-theme-preview-face" style="--preview-surface:${color.surface};--preview-text:${color.text};--preview-muted:${color.muted};--preview-border:${color.border};--preview-gender-m:${color['gender-masculine']};--preview-gender-f:${color['gender-feminine']}"><span class="card-theme-preview-label">${side==='front'?'Vorderseite':'Rückseite'}</span><span class="card-theme-preview-term"><span class="gender-${side==='front'?'masculine':'feminine'}">${side==='front'?'un':'une'}</span> ${side==='front'?'livre':'maison'}</span><span class="card-theme-preview-example">(${side==='front'?'un livre ancien':'une maison calme'})</span></span>`}).join('')}</span>`;
   }
@@ -151,16 +189,20 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
   function render(){
     const location=view==='donations'?'donations':`${view}:${activeSubject||''}:${activeFolder||''}:${activeSet||''}`;
     const changedLocation=location!==renderedLocation;
-    const restorePageFocus=changedLocation&&Boolean(renderedLocation)&&$('#app-shell').contains(document.activeElement);
+    const navigating=changedLocation&&Boolean(renderedLocation);
+    const restorePageFocus=navigating&&$('#app-shell').contains(document.activeElement);
+    if(renderedLocation==='donations'&&changedLocation&&donationSubmitting)donationCheckoutRequestId=null;
     renderedLocation=location;
-    cardCounts=libraryCardCounts(data.cards);
+    cardsBySet=libraryCardsBySet(data.cards);
     if(view!=='library'||activeSet)librarySorting=false;
     renderNav();
-    $('#content').classList.toggle('is-sorting',librarySorting);$('#content').inert=librarySortSaving||recoveryAwaitingChoice;$('#content').setAttribute('aria-busy',String(librarySortSaving));
+    $('#content').classList.toggle('is-sorting',librarySorting);syncLibraryInteractivity();
     if(view==='donations'){
       activeSubject=null;activeFolder=null;activeSet=null;renderDonations();
     }else if(view==='guide'){
       renderGuide();
+    }else if(libraryLoadFailed){
+      renderLibraryLoadError();
     }else if(activeSet&&setById(activeSet)){
       renderSet();
     }else if(activeFolder&&folder(activeFolder)){
@@ -172,7 +214,10 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
       if(view==='library')renderDonationWelcome();
       renderLibrarySearch();
     }
-    if(changedLocation)window.scrollTo({top:0,left:0,behavior:'instant'});
+    if(changedLocation){
+      window.scrollTo({top:0,left:0,behavior:'instant'});
+      if(navigating&&!document.body.classList.contains('is-organising'))$('#content h1')?.classList.add('page-title-arrival');
+    }
     if(restorePageFocus&&document.activeElement===document.body&&!$('dialog[open]')){
       const heading=$('#content h1');
       if(heading){
@@ -180,6 +225,15 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
         heading.focus({preventScroll:true});
       }
     }
+  }
+  function renderLibraryLoadError(){
+    $('#content').innerHTML='<section class="empty-state"><h2>Deine Bibliothek konnte nicht geladen werden.</h2><p>Bitte prüfe deine Verbindung und versuche es erneut.</p><button type="button" class="quiet-button" id="retry-library-load">Erneut laden</button></section>';
+    $('#retry-library-load').onclick=window.WortwerkReloadLibrary;
+  }
+  function syncLibraryInteractivity(){
+    const content=$('#content');
+    content.inert=libraryLoading||librarySortSaving||recoveryAwaitingChoice;
+    content.setAttribute('aria-busy',String(libraryLoading||librarySortSaving));
   }
   function renderNav(){
     document.querySelectorAll('[data-view]').forEach(button=>button.onclick=event=>{
@@ -191,10 +245,17 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
       const current=button.dataset.view===view&&(view!=='library'||atLibraryRoot);
       if(current)button.setAttribute('aria-current','page');else button.removeAttribute('aria-current');
     });
+    const folderBranches=new Map();
+    for(const item of data.folders){
+      if(!folderBranches.has(item.subjectId))folderBranches.set(item.subjectId,new Map());
+      const branch=folderBranches.get(item.subjectId),parentId=item.parentId||null;
+      if(!branch.has(parentId))branch.set(parentId,[]);
+      branch.get(parentId).push(item);
+    }
     $('#sidebar-subjects').innerHTML=data.subjects.map((item,index)=>{
-      const hasFolders=subjectFolders(item.id).length>0,expanded=hasFolders&&expandedSidebarSubjects.has(item.id),listId=`sidebar-folders-${index}`;
+      const branch=folderBranches.get(item.id),expanded=Boolean(branch)&&expandedSidebarSubjects.has(item.id),listId=`sidebar-folders-${index}`;
       const isCurrent=view==='library'&&activeSubject===item.id&&!activeFolder&&!activeSet;
-      return `<div class="sidebar-subject-group"><div class="sidebar-subject-row${view==='library'&&activeSubject===item.id?' is-current-branch':''}"><button class="sidebar-subject-open" data-sidebar-subject="${esc(item.id)}" data-drop-folder="" data-drop-subject="${esc(item.id)}" ${isCurrent?'aria-current="page"':''}><span class="sidebar-dot" style="--dot:${safeColor(item.color)}"></span><span>${esc(item.name)}</span></button>${hasFolders?`<button class="sidebar-subject-toggle" type="button" data-sidebar-toggle="${esc(item.id)}" aria-expanded="${expanded}" aria-controls="${listId}" aria-label="Ordner in ${esc(item.name)} ${expanded?'einklappen':'anzeigen'}" title="Ordner ${expanded?'einklappen':'anzeigen'}"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m6 3 5 5-5 5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button>`:''}</div>${hasFolders?`<div class="sidebar-folder-list" id="${listId}"${expanded?'':' hidden'}>${sidebarFolders(item.id)}</div>`:''}</div>`;
+      return `<div class="sidebar-subject-group"><div class="sidebar-subject-row${view==='library'&&activeSubject===item.id?' is-current-branch':''}"><button class="sidebar-subject-open" data-sidebar-subject="${esc(item.id)}" data-drop-folder="" data-drop-subject="${esc(item.id)}" ${isCurrent?'aria-current="page"':''}><span class="sidebar-dot" style="--dot:${safeColor(item.color)}"></span><span>${esc(item.name)}</span></button>${branch?`<button class="sidebar-subject-toggle" type="button" data-sidebar-toggle="${esc(item.id)}" aria-expanded="${expanded}" aria-controls="${listId}" aria-label="Ordner in ${esc(item.name)} ${expanded?'einklappen':'anzeigen'}" title="Ordner ${expanded?'einklappen':'anzeigen'}"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m6 3 5 5-5 5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button>`:''}</div>${branch?`<div class="sidebar-folder-list" id="${listId}"${expanded?'':' hidden'}>${sidebarFolders(item.id,branch)}</div>`:''}</div>`;
     }).join('')||'<p class="sidebar-empty">Deine Fächer erscheinen hier.</p>';
     document.querySelectorAll('[data-sidebar-subject]').forEach(button=>button.onclick=()=>{
       const subjectId=button.dataset.sidebarSubject,alreadyHere=view==='library'&&activeSubject===subjectId&&!activeFolder&&!activeSet;
@@ -202,10 +263,13 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
       closeNavigation();librarySorting=false;view='library';activeSubject=subjectId;activeFolder=null;activeSet=null;render();
     });
     document.querySelectorAll('[data-sidebar-toggle]').forEach(button=>button.onclick=()=>{
-      const subjectId=button.dataset.sidebarToggle;
-      if(expandedSidebarSubjects.has(subjectId))expandedSidebarSubjects.delete(subjectId);else expandedSidebarSubjects.add(subjectId);
-      render();
-      document.querySelector(`[data-sidebar-toggle="${CSS.escape(subjectId)}"]`)?.focus();
+      const subjectId=button.dataset.sidebarToggle,expanded=!expandedSidebarSubjects.has(subjectId);
+      if(expanded)expandedSidebarSubjects.add(subjectId);else expandedSidebarSubjects.delete(subjectId);
+      document.getElementById(button.getAttribute('aria-controls')).hidden=!expanded;
+      button.setAttribute('aria-expanded',String(expanded));
+      const action=expanded?'einklappen':'anzeigen';
+      button.setAttribute('aria-label',`Ordner in ${subject(subjectId)?.name??''} ${action}`);
+      button.title=`Ordner ${action}`;
     });
     document.querySelectorAll('[data-sidebar-folder]').forEach(button=>button.onclick=()=>{closeNavigation();librarySorting=false;view='library';activeFolder=button.dataset.sidebarFolder;activeSubject=folder(activeFolder)?.subjectId;activeSet=null;render()});
     crumbs(view==='guide'?['Anleitung']:view==='recent'?['Zuletzt gelernt']:view==='donations'?['Bibliothek','Spenden']:['Bibliothek']);
@@ -247,7 +311,7 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
       if(accountMenu.open){
         const restoreFocus=accountMenu.contains(document.activeElement);
         accountMenu.open=false;
-        if(restoreFocus)$('summary',accountMenu).focus();
+        if(restoreFocus)$('summary',accountMenu).focus({preventScroll:true});
       }
     }
     if(event.key==='Tab'&&$('#app-shell').classList.contains('navigation-open')&&mobileNavigation.matches){const controls=[...$('#app-navigation').querySelectorAll('a,button')].filter(element=>!element.disabled&&element.getClientRects().length),first=controls[0],last=controls[controls.length-1];if(event.shiftKey&&document.activeElement===first){event.preventDefault();last.focus()}else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus()}}
@@ -284,7 +348,7 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
     $('#donation-library')?.addEventListener('click',()=>{donationReturn=null;donationPayment=null;view='library';render()});
     $('#donation-recheck')?.addEventListener('click',refreshDonationPaymentStatus);
     updateDonationButton();
-    checkDonationReadiness();
+    if(!donationReadinessFailed)checkDonationReadiness();
     if(donationReturn?.type==='success'&&donationPayment?.status==='checking'&&!donationStatusChecking)refreshDonationPaymentStatus();
   }
   function renderDonationWelcome(){
@@ -305,69 +369,86 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
     const button=$('#donation-submit');if(!button)return;
     const valid=Number.isSafeInteger(donationAmountCents)&&donationAmountCents>=50&&donationAmountCents<=99_999_999;
     const available=donationCheckoutAvailable===true;
-    button.disabled=!valid||!available||donationSubmitting;
-    button.setAttribute('aria-busy',String(donationSubmitting));
-    button.textContent=donationSubmitting?'Weiter zu Stripe …':!available?(donationCheckoutAvailable===false?'Spenden derzeit nicht verfügbar':'Zahlungsanbindung wird geprüft …'):valid?`Sicher spenden · ${formatDonationAmount(donationAmountCents)}`:'Betrag ab CHF 0.50 eingeben';
+    const retry=donationReadinessFailed&&!donationReadinessRequest;
+    button.disabled=donationSubmitting||!(retry||valid&&available);
+    button.setAttribute('aria-busy',String(donationSubmitting||Boolean(donationReadinessRequest)));
+    button.textContent=donationSubmitting?'Weiter zu Stripe …':retry?'Zahlungsanbindung erneut prüfen':!available?(donationCheckoutAvailable===false?'Spenden derzeit nicht verfügbar':'Zahlungsanbindung wird geprüft …'):valid?`Sicher spenden · ${formatDonationAmount(donationAmountCents)}`:'Betrag ab CHF 0.50 eingeben';
     const note=$('#donation-setup-note');
-    if(note){note.hidden=available;note.textContent=donationCheckoutAvailable===false?'Spenden sind derzeit noch nicht verfügbar, weil die sichere Zahlungsanbindung eingerichtet wird. Lernkarten Maker bleibt vollständig kostenlos.':'Die Verfügbarkeit der sicheren Zahlungsanbindung wird geprüft …'}
+    if(note){note.hidden=available;note.textContent=retry?'Die Zahlungsanbindung ist gerade nicht erreichbar.':donationCheckoutAvailable===false?'Spenden sind derzeit noch nicht verfügbar, weil die sichere Zahlungsanbindung eingerichtet wird. Lernkarten Maker bleibt vollständig kostenlos.':'Die Verfügbarkeit der sicheren Zahlungsanbindung wird geprüft …'}
   }
   function checkDonationReadiness(){
     if(donationCheckoutAvailable!==null)return Promise.resolve(donationCheckoutAvailable);
     if(donationReadinessRequest)return donationReadinessRequest;
+    donationReadinessFailed=false;
     donationReadinessRequest=(async()=>{
       try{
         const response=await fetch('/api/support-readiness',{cache:'no-store'});
         if(!response.ok)throw new Error('Spendenstatus nicht verfügbar');
         const payload=await response.json();
-        donationCheckoutAvailable=payload.configured===true;
+        if(typeof payload?.configured!=='boolean')throw new Error('Ungültiger Spendenstatus');
+        donationCheckoutAvailable=payload.configured;
       }catch{
-        donationCheckoutAvailable=false;
+        donationReadinessFailed=true;
       }finally{
         donationReadinessRequest=null;
       }
       if(view==='donations')updateDonationButton();
       return donationCheckoutAvailable;
     })();
+    updateDonationButton();
     return donationReadinessRequest;
   }
   async function startDonationCheckout(){
+    if(donationReadinessFailed){void checkDonationReadiness();return}
     if(donationSubmitting||donationCheckoutAvailable!==true||!Number.isSafeInteger(donationAmountCents)||donationAmountCents<50||donationAmountCents>99_999_999)return;
-    const button=$('#donation-submit'),error=$('#donation-error');
-    donationSubmitting=true;button.disabled=true;button.setAttribute('aria-busy','true');button.textContent='Weiter zu Stripe …';error.hidden=true;error.textContent='';
+    const owner=workspaceAccountVersion,amountCents=donationAmountCents;
+    const requestId=donationCheckoutRequestId ||= id();
+    const current=()=>owner===workspaceAccountVersion&&view==='donations'&&donationCheckoutRequestId===requestId;
+    const error=$('#donation-error');error.hidden=true;error.textContent='';
+    donationSubmitting=true;updateDonationButton();
+    let redirecting=false;
     try{
       const {data:{session},error:sessionError}=await supabase.auth.getSession();
+      if(!current())return;
       if(sessionError||!session?.access_token)throw new Error('Melde dich an, um eine Spende zu geben.');
-      donationCheckoutRequestId ||= id();
-      const response=await fetch('/api/support-checkout',{method:'POST',headers:{'Content-Type':'application/json','Authorization':`Bearer ${session.access_token}`},body:JSON.stringify({amountCents:donationAmountCents,requestId:donationCheckoutRequestId})});
+      const response=await fetch('/api/support-checkout',{method:'POST',headers:{'Content-Type':'application/json','Authorization':`Bearer ${session.access_token}`},body:JSON.stringify({amountCents,requestId})});
       const payload=await response.json().catch(()=>({}));
+      if(!current())return;
       if(!response.ok)throw new Error(payload.error||'Der Checkout konnte gerade nicht gestartet werden. Bitte versuche es später erneut.');
       if(typeof payload.url!=='string')throw new Error('Stripe konnte keine Checkout-Adresse zurückgeben. Bitte versuche es später erneut.');
       const checkoutUrl=new URL(payload.url);
       if(checkoutUrl.origin!=='https://checkout.stripe.com')throw new Error('Stripe hat keine gültige Checkout-Adresse zurückgegeben.');
       window.location.assign(checkoutUrl.toString());
+      redirecting=true;
     }catch(cause){
-      error.textContent=cause.message||'Der Checkout konnte gerade nicht gestartet werden. Bitte versuche es später erneut.';error.hidden=false;
-      donationSubmitting=false;updateDonationButton();
+      const message=current()&&$('#donation-error');
+      if(message){message.textContent=cause.message||'Der Checkout konnte gerade nicht gestartet werden. Bitte versuche es später erneut.';message.hidden=false;}
+    }finally{
+      if(!redirecting&&owner===workspaceAccountVersion){donationSubmitting=false;updateDonationButton()}
     }
   }
   async function refreshDonationPaymentStatus(){
-    if(donationStatusChecking)return;
-    donationStatusChecking=true;
-    if(!donationReturn?.sessionId){donationPayment={status:'failed'};donationStatusChecking=false;renderDonations();return}
+    const request=donationReturn;
+    if(view!=='donations'||request?.type!=='success'||donationStatusChecking===request)return;
+    if(!request.sessionId){donationPayment={status:'failed'};renderDonations();return}
+    donationStatusChecking=request;
+    const current=()=>view==='donations'&&donationReturn===request;
     donationPayment={status:'checking'};renderDonations();
+    let payment;
     try{
       const {data:{session},error:sessionError}=await supabase.auth.getSession();
+      if(!current())return;
       if(sessionError||!session?.access_token)throw new Error('Sitzung fehlt');
-      const response=await fetch(`/api/support-status?session_id=${encodeURIComponent(donationReturn.sessionId)}`,{headers:{'Authorization':`Bearer ${session.access_token}`}});
+      const response=await fetch(`/api/support-status?session_id=${encodeURIComponent(request.sessionId)}`,{headers:{'Authorization':`Bearer ${session.access_token}`}});
       const payload=await response.json().catch(()=>({}));
-      if(!response.ok)throw new Error(payload.error||'Der Spendenstatus konnte nicht geprüft werden.');
-      donationPayment={status:payload.status,amountCents:payload.amountCents};
-    }catch(error){
-      console.error('Stripe-Spendenstatus konnte nicht abgerufen werden.',error);
-      donationPayment={status:'unavailable'};
+      if(!response.ok||!['paid','pending','failed','expired'].includes(payload.status))throw new Error('Der Spendenstatus konnte nicht geprüft werden.');
+      payment={status:payload.status,amountCents:payload.amountCents};
+    }catch{
+      payment={status:'unavailable'};
+    }finally{
+      if(donationStatusChecking===request)donationStatusChecking=null;
+      if(current()&&payment){donationPayment=payment;renderDonations()}
     }
-    donationStatusChecking=false;
-    renderDonations();
   }
   function subjectSymbol(item,fallback='📚'){
     const icon=item.emoji||item.icon||fallback;
@@ -381,17 +462,18 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
   }
   function subjectCardContents(item,fallbackIcon){
     const sets=item.id?subjectSets(item.id):[];
-    const count=sets.reduce((sum,set)=>sum+(cardCounts.get(set.id)||0),0);
+    const count=sets.reduce((sum,set)=>sum+countSetCards(set.id),0);
     return `<div class="subject-card-top">${subjectSymbol(item,fallbackIcon)}<span class="card-arrow" aria-hidden="true"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12h15m-6-6 6 6-6 6"/></svg></span></div><div class="subject-card-copy"><h2>${esc(item.name)}</h2><p>${sets.length} Lernstapel · ${count} ${count===1?'Karte':'Karten'}</p></div>`;
   }
   function folderSymbol(){
     return '<svg viewBox="0 0 64 52" fill="none" aria-hidden="true"><path d="M4 13a6 6 0 0 1 6-6h15l6 6h23a6 6 0 0 1 6 6v25a5 5 0 0 1-5 5H9a5 5 0 0 1-5-5V13Z" fill="currentColor"/><path d="M4 20a5 5 0 0 1 5-5h46a5 5 0 0 1 5 5v24a5 5 0 0 1-5 5H9a5 5 0 0 1-5-5V20Z" fill="currentColor" stroke="white" stroke-opacity=".22"/><path d="M10 18h44" stroke="white" stroke-opacity=".28" stroke-linecap="round"/></svg>';
   }
   function dropAttributes(subjectId,folderId){return `data-drop-subject="${esc(subjectId)}" data-drop-folder="${esc(folderId||'')}"`}
-  function sidebarFolders(subjectId,parentId=null,depth=0,seen=new Set()){
-    return subjectFolders(subjectId).filter(item=>(item.parentId||null)===parentId&&!seen.has(item.id)).map(item=>{
+  function sidebarFolders(subjectId,branch,parentId=null,depth=0,seen=new Set()){
+    return (branch.get(parentId)??[]).map(item=>{
+      if(seen.has(item.id))return '';
       seen.add(item.id);
-      return `<button class="sidebar-folder" data-sidebar-folder="${esc(item.id)}" ${dropAttributes(subjectId,item.id)} style="--folder-depth:${Math.min(depth,6)};--dot:${safeColor(item.color,defaultFolderColor)}" ${activeFolder===item.id?'aria-current="page"':''}>${folderSymbol()}<span>${esc(item.name)}</span></button>${sidebarFolders(subjectId,item.id,depth+1,seen)}`;
+      return `<button class="sidebar-folder" data-sidebar-folder="${esc(item.id)}" ${dropAttributes(subjectId,item.id)} style="--folder-depth:${Math.min(depth,6)};--dot:${safeColor(item.color,defaultFolderColor)}" ${activeFolder===item.id?'aria-current="page"':''}>${folderSymbol()}<span>${esc(item.name)}</span></button>${sidebarFolders(subjectId,branch,item.id,depth+1,seen)}`;
     }).join('');
   }
   function itemActions(type,item){
@@ -427,7 +509,36 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
     menu.open=false;
     menu.querySelector('summary').focus({preventScroll:true});
   }
+  const openActionMenus=':is(.management-menu, .item-menu)[open]';
+  function positionActionMenu(menu){
+    const trigger=menu.querySelector('summary').getBoundingClientRect();
+    const panel=menu.querySelector(':is(.management-menu-panel, .item-menu-panel)');
+    const viewport=window.visualViewport;
+    const top=viewport?.offsetTop??0;
+    const bottom=top+(viewport?.height??window.innerHeight);
+    const visibleTop=Math.max(top,$('.topbar').getBoundingClientRect().bottom);
+    const above=trigger.top-visibleTop-14;
+    const below=bottom-trigger.bottom-14;
+    const opensUp=panel.scrollHeight+2>below&&above>below;
+    menu.classList.toggle('opens-up',opensUp);
+    menu.style.setProperty('--action-menu-space',`${Math.max(48,Math.floor(opensUp?above:below))}px`);
+  }
+  function openActionMenu(menu){
+    accountMenu.open=false;
+    menu.open=true;
+    // Read the uncollapsed menu during activation, before it can paint offscreen.
+    positionActionMenu(menu);
+  }
+  window.addEventListener('resize',()=>{
+    const menu=$(openActionMenus,$('#content'));
+    if(menu)positionActionMenu(menu);
+  },{passive:true});
   $('#content').addEventListener('click',event=>{
+    const summary=event.target.closest(':is(.management-menu,.item-menu) > summary');
+    if(!event.defaultPrevented&&summary&&!summary.parentElement.open){
+      event.preventDefault();
+      openActionMenu(summary.parentElement);
+    }
     const action=event.target.closest('.management-menu-panel button:not(:disabled)');
     // Restore the trigger's focus before the action opens a modal.
     if(action)closeLibraryMenu(action.closest('.management-menu'));
@@ -441,7 +552,11 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
   });
   $('#content').addEventListener('contextmenu',event=>{
     const tile=event.target.closest('.set-card,.folder-card'),menu=tile?.querySelector('.item-menu');
-    if(menu&&!librarySortSaving){event.preventDefault();document.querySelectorAll('.item-menu[open]').forEach(item=>item.removeAttribute('open'));menu.open=true;menu.querySelector('button')?.focus()}
+    if(!menu||librarySorting||librarySortSaving)return;
+    event.preventDefault();
+    document.querySelectorAll(openActionMenus).forEach(item=>{item.open=false});
+    openActionMenu(menu);
+    menu.querySelector('button')?.focus({preventScroll:true});
   });
 
   let shareContext=null;
@@ -475,7 +590,7 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
     shareCreate.textContent='Link erstellen';
     shareStatus.textContent='';
     setShareError();
-    shareDialog.showModal();
+    openFormDialog(shareDialog);
     shareCreate.focus();
   }
   function isCurrentShare(context){
@@ -579,7 +694,7 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
       }).join('');
       return options?`<optgroup label="${esc(destination.name)}">${options}</optgroup>`:'';
     }).join('');
-    updateMoveDestination();moveDialog.showModal();
+    updateMoveDestination();openFormDialog(moveDialog);
   }
   function updateMoveDestination(){
     const move=moveContext?.destinations.get($('#move-destination').value);
@@ -587,7 +702,7 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
   }
   $('#move-destination').addEventListener('change',updateMoveDestination);
   moveDialog.querySelectorAll('[data-cancel-move]').forEach(button=>button.onclick=()=>moveDialog.close());
-  moveDialog.addEventListener('close',()=>{moveContext=null});
+  moveDialog.addEventListener('close',()=>{if(!moveDialog.open)moveContext=null});
   $('#move-form').addEventListener('submit',event=>{
     event.preventDefault();if(!moveContext||moveContext.owner!==data||$('#move-submit').disabled)return;
     const move=moveContext.destinations.get($('#move-destination').value);
@@ -631,10 +746,14 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
   }
   function visibleDragTargets(source){
     if(source.type==='subject')return [];
-    return [...document.querySelectorAll('[data-drop-folder]')].filter(element=>element.getClientRects().length&&destinationMove(source,element));
+    const width=window.innerWidth,height=window.innerHeight;
+    return [...document.querySelectorAll('[data-drop-folder]')].filter(element=>{
+      const bounds=element.getBoundingClientRect();
+      return bounds.width&&bounds.height&&bounds.bottom>0&&bounds.top<height&&bounds.right>0&&bounds.left<width&&destinationMove(source,element);
+    });
   }
   function dragDestinationBar(source){
-    if(source.type==='subject')return null;
+    if(source.type==='subject'||(!mobileNavigation.matches&&!sidebarCollapsed))return null;
     const bar=document.createElement('div');
     bar.className='library-drag-destinations';
     bar.setAttribute('aria-label','Ablageziele');
@@ -774,7 +893,7 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
     try{
       await window.WortwerkRepository.saveLibraryOrganisation(before,after);
       if(data!==owner)return false;
-      saved=true;toast(message);return true;
+      saved=true;toast(message,'success');return true;
     }catch(error){
       if(data!==owner)return false;
       Object.assign(data,before);
@@ -790,7 +909,7 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
         if(data!==owner)render();
         return false;
       }else {
-        toast('Die Verschiebung konnte nicht gespeichert werden. Prüfe deine Verbindung und versuche es erneut.');
+        toast('Die Verschiebung konnte nicht gespeichert werden. Prüfe deine Verbindung und versuche es erneut.','error');
       }
       return false;
     }finally{
@@ -849,10 +968,10 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
     const found=searchLibrary(data,librarySearchQuery,{subjectId:activeSubject,folderId:activeFolder,setIds:recentIds,limit:librarySearchLimit});
     const count=found.subjects.length+found.folders.length+found.sets.length;
     $('.library-search-summary').textContent=`${count<found.total?`${count} von `:''}${found.total} Treffer`;
-    const group=(entries,type,label)=>entries.length?`<section class="library-search-group"><h2>${label}<span class="count-label">${entries.length}</span></h2>${entries.map(({item,path})=>`<button type="button" class="library-search-result" data-open-${type}="${esc(item.id)}"><span class="library-search-result-icon" style="--dot:${safeColor(item.color)}" aria-hidden="true">${type==='folder'?folderSymbol():type==='subject'?'▤':'<svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><path d="M6 18H5a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><rect x="8" y="6" width="13" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>'}</span><span class="library-search-result-copy"><strong>${esc(item.name)}</strong><small>${esc(path)}</small></span><span class="library-search-result-kind">${type==='set'?`${cardCounts.get(item.id)||0} ${(cardCounts.get(item.id)||0)===1?'Karte':'Karten'}`:type==='subject'?'Fach':'Ordner'}</span><span aria-hidden="true">→</span></button>`).join('')}</section>`:'';
+    const group=(entries,type,label)=>entries.length?`<section class="library-search-group"><h2>${label}<span class="count-label">${entries.length}</span></h2>${entries.map(({item,path})=>`<button type="button" class="library-search-result" data-open-${type}="${esc(item.id)}"><span class="library-search-result-icon" style="--dot:${safeColor(item.color)}" aria-hidden="true">${type==='folder'?folderSymbol():type==='subject'?'▤':'<svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><path d="M6 18H5a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><rect x="8" y="6" width="13" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>'}</span><span class="library-search-result-copy"><strong>${esc(item.name)}</strong><small>${esc(path)}</small></span><span class="library-search-result-kind">${type==='set'?`${countSetCards(item.id)} ${countSetCards(item.id)===1?'Karte':'Karten'}`:type==='subject'?'Fach':'Ordner'}</span><span aria-hidden="true">→</span></button>`).join('')}</section>`:'';
     results.innerHTML=group(found.subjects,'subject','Fächer')+group(found.folders,'folder','Ordner')+group(found.sets,'set','Lernstapel')+(!found.total?'<div class="library-search-empty"><h2>Keine passenden Inhalte</h2><p>Versuche einen anderen Namen oder Ablageort.</p></div>':'')+(count<found.total?'<button class="quiet-button" type="button" id="library-search-more">Weitere 100 Ergebnisse anzeigen</button>':'');
     $('#library-search-more')?.addEventListener('click',()=>{librarySearchLimit+=100;refreshLibrarySearch()});
-    bindSubjectCards();bindFolderCards();bindSetCards();
+    bindSubjectCards(results);bindFolderCards(results);bindSetCards(results);
   }
   function renderLibrary(){
     activeSubject=null;activeFolder=null;activeSet=null;
@@ -871,30 +990,47 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
   function empty(title,copy,showLibraryLink=false){
     return `<div class="empty-state"><h2>${title}</h2><p>${copy}</p>${showLibraryLink?'<button type="button" class="quiet-button" id="empty-to-library">Zur Bibliothek</button>':''}</div>`;
   }
-  function bindSubjectCards(){
-    document.querySelectorAll('[data-open-subject]').forEach(element=>{
+  function bindSubjectCards(root=document){
+    root.querySelectorAll('[data-open-subject]').forEach(element=>{
       const open=()=>{activeSubject=element.dataset.openSubject;expandedSidebarSubjects.add(activeSubject);activeFolder=null;activeSet=null;view='library';render()};
       element.onclick=event=>{if((event.target.closest('button,details')&&event.target.closest('button,details')!==element)||librarySorting)return;open()};element.onkeydown=event=>{if(event.target===element&&!librarySorting&&(event.key==='Enter'||event.key===' ')){event.preventDefault();open()}};
     });
   }
-  function setCard(set){
-    const parent=folder(set.folderId),sub=subject(set.subjectId),count=cardCounts.get(set.id)||0,theme=cardThemes.getTheme(cardThemes.resolveSetThemeId(set,activeCardThemeId));
-    return `<article class="set-card" ${sortAttributes('set',set)} tabindex="0" data-open-set="${esc(set.id)}" style="--set-front:${theme.front.surface};--set-back:${theme.back.surface}"><div class="set-card-top"><span class="set-cover" data-organise-handle aria-hidden="true"><span></span><span></span></span>${itemActions('set',set)}</div><div class="set-card-meta">${esc(view==='recent'&&sub?[sub.name,parent?.name].filter(Boolean).join(' / '):parent?.name||sub?.name||'Fach')}</div><h2>${esc(set.name)}</h2><div class="set-card-bottom"><span>${count} ${count===1?'Karte':'Karten'}</span><span class="set-actions"><button type="button" class="quiet-button" data-quick-study="${esc(set.id)}" ${count?'':'disabled'}>${studyActionLabel(set.id)}</button><button type="button" class="quiet-button" data-quick-edit="${esc(set.id)}">Öffnen</button></span></div>${sortControls('set',set)}</article>`;
+  function libraryProgressBar(percentage,label='Sicher beherrschte Karten'){
+    return `<div class="library-progress" role="progressbar" aria-label="${esc(label)}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${percentage}"><span style="width:${percentage}%"></span></div>`;
   }
-  function bindSetCards(){
-    document.querySelectorAll('[data-open-set]').forEach(element=>{
+  function setCard(set){
+    const parent=folder(set.folderId),sub=subject(set.subjectId),theme=cardThemes.getTheme(cardThemes.resolveSetThemeId(set,activeCardThemeId));
+    const {total,percentage}=window.WortwerkModel.getSetProgress(cardsBySet.get(set.id)??[]);
+    return `<article class="set-card" ${sortAttributes('set',set)} tabindex="0" data-open-set="${esc(set.id)}" style="--set-front:${theme.front.surface};--set-back:${theme.back.surface}">
+      <div class="set-card-top"><span class="set-cover" data-organise-handle aria-hidden="true"><span></span><span></span></span>${itemActions('set',set)}</div>
+      <div class="set-card-meta">${esc(view==='recent'&&sub?[sub.name,parent?.name].filter(Boolean).join(' / '):parent?.name||sub?.name||'Fach')}</div>
+      <h2>${esc(set.name)}</h2>
+      <div class="set-card-bottom">
+        <div class="set-card-stats">
+          <span>${total} ${total===1?'Karte':'Karten'}</span>
+          <span class="set-card-progress-text" aria-hidden="true">${percentage}&nbsp;% sicher</span>
+          ${libraryProgressBar(percentage,`Sicher beherrschte Karten in ${set.name}`)}
+        </div>
+        <span class="set-actions"><button type="button" class="quiet-button" data-quick-study="${esc(set.id)}" ${total?'':'disabled'}>${studyActionLabel(set.id)}</button><button type="button" class="quiet-button" data-quick-edit="${esc(set.id)}">Öffnen</button></span>
+      </div>
+      ${sortControls('set',set)}
+    </article>`;
+  }
+  function bindSetCards(root=document){
+    root.querySelectorAll('[data-open-set]').forEach(element=>{
       const open=()=>{activeSet=element.dataset.openSet;const set=setById(activeSet);activeSubject=set?.subjectId||null;activeFolder=set?.folderId||null;view='library';if(element.classList.contains('library-search-result')&&activeSubject)expandedSidebarSubjects.add(activeSubject);render()};
       element.onclick=event=>{if((event.target.closest('button,details')&&event.target.closest('button,details')!==element)||librarySorting)return;open()};element.onkeydown=event=>{if(event.target===element&&!librarySorting&&(event.key==='Enter'||event.key===' ')){event.preventDefault();open()}};
     });
-    document.querySelectorAll('[data-quick-study]').forEach(button=>button.onclick=event=>{event.stopPropagation();beginStudy(button.dataset.quickStudy)});
-    document.querySelectorAll('[data-quick-edit]').forEach(button=>button.onclick=event=>{event.stopPropagation();(()=>{activeSet=button.dataset.quickEdit;const item=setById(activeSet);activeSubject=item?.subjectId;activeFolder=item?.folderId;view='library';render()})()});
+    root.querySelectorAll('[data-quick-study]').forEach(button=>button.onclick=event=>{event.stopPropagation();beginStudy(button.dataset.quickStudy)});
+    root.querySelectorAll('[data-quick-edit]').forEach(button=>button.onclick=event=>{event.stopPropagation();(()=>{activeSet=button.dataset.quickEdit;const item=setById(activeSet);activeSubject=item?.subjectId;activeFolder=item?.folderId;view='library';render()})()});
   }
   function folderCard(item){
     const count=subjectSets(item.subjectId).filter(set=>set.folderId===item.id).length,children=subjectFolders(item.subjectId).filter(child=>child.parentId===item.id).length;
     return `<article class="folder-card" ${sortAttributes('folder',item)} ${dropAttributes(item.subjectId,item.id)} tabindex="0" data-open-folder="${esc(item.id)}" style="--dot:${safeColor(item.color,defaultFolderColor)}"><span class="folder-icon" data-organise-handle aria-hidden="true">${folderSymbol()}</span><div class="folder-card-copy"><h3>${esc(item.name)}</h3><p>${count} Lernstapel${children?` · ${children} Unterordner`:''}</p></div>${itemActions('folder',item)}${sortControls('folder',item)}</article>`;
   }
-  function bindFolderCards(){
-    document.querySelectorAll('[data-open-folder]').forEach(element=>{
+  function bindFolderCards(root=document){
+    root.querySelectorAll('[data-open-folder]').forEach(element=>{
       const open=()=>{activeFolder=element.dataset.openFolder;activeSubject=folder(activeFolder)?.subjectId||null;activeSet=null;view='library';if(element.classList.contains('library-search-result')&&activeSubject)expandedSidebarSubjects.add(activeSubject);render()};
       element.onclick=event=>{if((event.target.closest('button,details')&&event.target.closest('button,details')!==element)||librarySorting)return;open()};element.onkeydown=event=>{if(event.target===element&&!librarySorting&&(event.key==='Enter'||event.key===' ')){event.preventDefault();open()}};
     });
@@ -909,7 +1045,7 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
     const item=subject(activeSubject);if(!item){activeSubject=null;return renderLibrary()}
     crumbs(['Bibliothek',item.name]);
     const folders=subjectFolders(item.id).filter(child=>!child.parentId),looseSets=subjectSets(item.id).filter(set=>!set.folderId);
-    const cardCount=subjectSets(item.id).reduce((sum,set)=>sum+(cardCounts.get(set.id)||0),0);
+    const cardCount=subjectSets(item.id).reduce((sum,set)=>sum+countSetCards(set.id),0);
     const folderSection=folders.length?`<div class="folder-grid">${folders.map(folderCard).join('')}</div>`:'';
     const looseSection=looseSets.length?`<section class="library-section"><div class="section-head"><h2>Lernstapel <span class="count-label">${looseSets.length}</span></h2></div><div class="set-grid">${looseSets.map(setCard).join('')}</div></section>`:'';
     $('#content').innerHTML=`<div class="subpage-heading">${backButton('Bibliothek')}<div class="subject-heading" ${dropAttributes(item.id,null)}>${subjectSymbol(item)}<div><h1 class="page-title">${esc(item.name)}</h1><p class="page-subtitle">${subjectSets(item.id).length} Lernstapel · ${cardCount} ${cardCount===1?'Karte':'Karten'}</p></div></div>${managementActions('<button id="edit-subject">Fach bearbeiten</button><button class="danger-action" id="delete-subject">Fach löschen</button>')}</div><div class="section-actions library-folder-actions">${sortingButton()}<button class="quiet-button" id="add-folder">＋ Ordner anlegen</button><button class="primary-button" id="subject-new-set">＋ Lernstapel erstellen</button></div><section class="library-section"><div class="section-head"><h2>Ordner <span class="count-label">${folders.length}</span></h2></div>${folderSection||'<p class="section-note">Ordner sind optional. Lege sie an, wenn du deine Lernstapel weiter gliedern möchtest.</p>'}</section>${looseSection}`;
@@ -932,27 +1068,47 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
     crumbs(libraryCrumbs(item,true));
     const previous=parentFolder?.name||parent?.name;
     const progress=window.WortwerkModel.getSetProgress(cards);
+    const positions=new Map(cards.map((card,index)=>[card.id,index]));
     const studyLabel=studyActionLabel(item.id);
-    $('#content').innerHTML=`<div class="subpage-heading">${backButton(previous,item.subjectId,item.folderId||null)}<div><div class="page-context">${esc(parentFolder?.name||parent?.name||'Lernstapel')}</div><h1 class="page-title">${esc(item.name)}</h1><p class="page-subtitle">${cards.length} ${cards.length===1?'Lernkarte':'Lernkarten'}</p></div>${libraryDetailActions('set',item,`<button id="edit-set">Lernstapel bearbeiten</button><button data-move-item="set" data-item-id="${esc(item.id)}">Lernstapel verschieben …</button><button id="swap-card-sides" ${cards.length?'':'disabled'}>Vorder- und Rückseiten tauschen</button><button class="danger-action" id="delete-set">Lernstapel löschen</button>`)}</div>${cards.length?`<section class="study-banner" aria-labelledby="learning-progress-title"><div class="learning-progress-copy"><h2 id="learning-progress-title">Lernfortschritt</h2><p>${cards.length} ${cards.length===1?'Karte':'Karten'} · ${progress.secure} sicher · ${progress.practice} zu üben · ${progress.new} neu</p><div class="library-progress" role="progressbar" aria-label="Sicher beherrschte Karten" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${progress.percentage}"><span style="width:${progress.percentage}%"></span></div><small class="study-progress-caption">${progress.percentage}% sicher beherrscht · mindestens zwei richtige Antworten.</small></div><div class="study-banner-actions"><button class="primary-button" id="start-study">${studyLabel}</button><button class="quiet-button" id="reset-progress">Lernfortschritt zurücksetzen</button></div></section>`:''}<section class="library-section"><div class="section-head"><h2>Lernkarten <span class="count-label">${cards.length}</span></h2><div class="section-actions"><button class="quiet-button" id="import-this">Karten importieren</button><button class="${cards.length?'quiet-button':'primary-button'}" id="add-card">＋ Karte erstellen</button></div></div>${cards.length?renderCardList(cards):empty('Noch keine Lernkarten','Erstelle deine erste Karte oder importiere mehrere Begriffe aus Text.')}</section>`;
+    $('#content').innerHTML=`<div class="subpage-heading">${backButton(previous,item.subjectId,item.folderId||null)}<div><div class="page-context">${esc(parentFolder?.name||parent?.name||'Lernstapel')}</div><h1 class="page-title">${esc(item.name)}</h1><p class="page-subtitle">${cards.length} ${cards.length===1?'Lernkarte':'Lernkarten'}</p></div>${libraryDetailActions('set',item,`<button id="edit-set">Lernstapel bearbeiten</button><button data-move-item="set" data-item-id="${esc(item.id)}">Lernstapel verschieben …</button><button id="swap-card-sides" ${cards.length?'':'disabled'}>Vorder- und Rückseiten tauschen</button><button class="danger-action" id="delete-set">Lernstapel löschen</button>`)}</div>${cards.length?`<section class="study-banner" aria-labelledby="learning-progress-title"><div class="learning-progress-copy"><h2 id="learning-progress-title">Lernfortschritt</h2><p>${cards.length} ${cards.length===1?'Karte':'Karten'} · ${progress.secure} sicher · ${progress.practice} zu üben · ${progress.new} neu</p>${libraryProgressBar(progress.percentage)}<small class="study-progress-caption">${progress.percentage}% sicher beherrscht · mindestens zwei richtige Antworten.</small></div><div class="study-banner-actions"><button class="primary-button" id="start-study">${studyLabel}</button><button class="quiet-button" id="reset-progress">Lernfortschritt zurücksetzen</button></div></section>`:''}<section class="library-section"><div class="section-head"><h2>Lernkarten <span class="count-label">${cards.length}</span></h2><div class="section-actions"><button class="quiet-button" id="import-this">Karten importieren</button><button class="${cards.length?'quiet-button':'primary-button'}" id="add-card">＋ Karte erstellen</button></div></div>${cards.length?renderCardList(cards,positions):empty('Noch keine Lernkarten','Erstelle deine erste Karte oder importiere mehrere Begriffe aus Text.')}</section>`;
     $('#go-back').onclick=()=>{librarySorting=false;activeSet=null;activeFolder=item.folderId||null;render()};$('#edit-set').onclick=()=>editEntity('set',item.id);$('#delete-set').onclick=()=>deleteSet(item.id);$('#start-study')?.addEventListener('click',()=>beginStudy(item.id));$('#reset-progress')?.addEventListener('click',()=>openResetProgress(item.id));$('#swap-card-sides').onclick=()=>swapSetSides(item.id);$('#add-card').onclick=()=>openEntity('card');$('#import-this').onclick=()=>openImport(item.id);
-    bindCardList();bindSubjectCards();
+    bindCardList(cards,positions);bindSubjectCards();
   }
-  function renderCardList(cards){
-    const page=cardListPage(cards,cardListQuery,cardListLimit),positions=new Map(cards.map((card,index)=>[card.id,index]));
+  function renderCardList(cards,positions){
+    const page=cardListPage(cards,cardListQuery,cardListLimit);
     return `<div class="card-list-toolbar"><label class="card-search">${searchIcon}<span class="sr-only">Lernkarten durchsuchen</span><input type="search" id="card-search" placeholder="Begriffe oder Beispielsätze suchen" value="${esc(cardListQuery)}"></label><span class="card-list-count" role="status">${page.cards.length} von ${page.total} ${cardListQuery?(page.total===1?'Treffer':'Treffern'):(page.total===1?'Karte':'Karten')}</span></div><div id="card-list-results">${cardRows(page,positions,cards.length)}</div>`;
   }
   function cardRows(page,positions,total){
     return `${page.total?'<div class="card-list-columns" aria-hidden="true"><span>Vorderseite</span><span>Rückseite</span><span></span></div>':''}<div class="card-list">${page.cards.map(card=>{const index=positions.get(card.id),progress=window.WortwerkModel.getCardProgress(card),label=progress.state==='secure'?'Sicher':progress.state==='practice'?'Zu üben':'Neu';return `<div class="flash-row"><div class="term">${cardSideMarkup(card,'front')}<small class="flash-progress">${label} · ${progress.attempts} ${progress.attempts===1?'Versuch':'Versuche'}</small></div><div class="definition">${cardSideMarkup(card,'back')}</div><div class="row-actions"><button data-move-card="${esc(card.id)}" data-direction="-1" aria-label="Karte nach oben verschieben" title="Karte nach oben verschieben" ${index===0?'disabled':''}>↑</button><button data-move-card="${esc(card.id)}" data-direction="1" aria-label="Karte nach unten verschieben" title="Karte nach unten verschieben" ${index===total-1?'disabled':''}>↓</button><button data-edit-card="${esc(card.id)}" aria-label="Karte bearbeiten" title="Karte bearbeiten">✎</button><button data-delete-card="${esc(card.id)}" aria-label="Karte löschen" title="Karte löschen">×</button></div></div>`}).join('')}</div>${!page.total?'<p class="section-note">Keine passenden Karten. Versuche einen anderen Suchbegriff.</p>':''}${page.cards.length<page.total?'<button type="button" class="quiet-button card-list-more" id="card-list-more">Weitere 100 Karten anzeigen</button>':''}`;
   }
-  function bindCardList(){
-    const search=$('#card-search');if(search)search.oninput=()=>{cardListQuery=search.value;cardListLimit=100;refreshCardRows()};
-    document.querySelectorAll('[data-move-card]').forEach(button=>button.onclick=()=>moveCard(button.dataset.moveCard,Number(button.dataset.direction)));
-    document.querySelectorAll('[data-edit-card]').forEach(button=>button.onclick=()=>editCard(button.dataset.editCard));document.querySelectorAll('[data-delete-card]').forEach(button=>button.onclick=()=>deleteCard(button.dataset.deleteCard));
-    $('#card-list-more')?.addEventListener('click',()=>{cardListLimit+=100;refreshCardRows()});
+  function bindCardList(cards,positions){
+    const search=$('#card-search'),results=$('#card-list-results'),count=$('.card-list-count');
+    if(!search||!results)return;
+    function refresh(){
+      const page=cardListPage(cards,cardListQuery,cardListLimit);
+      results.innerHTML=cardRows(page,positions,cards.length);
+      const unit=cardListQuery?(page.total===1?'Treffer':'Treffern'):(page.total===1?'Karte':'Karten');
+      count.textContent=`${page.cards.length} von ${page.total} ${unit}`;
+    }
+    search.oninput=()=>{cardListQuery=search.value;cardListLimit=100;refresh()};
+    results.addEventListener('click',event=>{
+      const button=event.target.closest('button');
+      if(!button||button.disabled)return;
+      const {moveCard:move,editCard:edit,deleteCard:remove}=button.dataset;
+      if(move)moveCard(move,Number(button.dataset.direction));
+      else if(edit)editCard(edit);
+      else if(remove)deleteCard(remove);
+      else if(button.id==='card-list-more'){
+        const fromKeyboard=event.detail===0;
+        const previousLimit=cardListLimit;
+        cardListLimit+=100;
+        refresh();
+        if(fromKeyboard)results.querySelectorAll('.flash-row')[previousLimit]?.querySelector('button:not(:disabled)')?.focus();
+      }
+    });
   }
-  function refreshCardRows(){const cards=setCards(activeSet),page=cardListPage(cards,cardListQuery,cardListLimit);$('#card-list-results').innerHTML=cardRows(page,new Map(cards.map((card,index)=>[card.id,index])),cards.length);$('.card-list-count').textContent=`${page.cards.length} von ${page.total} ${cardListQuery?(page.total===1?'Treffer':'Treffern'):(page.total===1?'Karte':'Karten')}`;bindCardList()}
-  function openEntity(type){formContext={type};fillForm(type);$('#form-dialog').showModal()}
-  function editEntity(type,key){formContext={type,key};fillForm(type, type==='subject'?subject(key):type==='folder'?folder(key):setById(key));$('#form-dialog').showModal()}
+  function openEntity(type){formContext={type};fillForm(type);openFormDialog($('#form-dialog'))}
+  function editEntity(type,key){formContext={type,key};fillForm(type, type==='subject'?subject(key):type==='folder'?folder(key):setById(key));openFormDialog($('#form-dialog'))}
   function verbSideFields(side,label,verb){
     const field=(name,caption,value,required=true)=>`<label class="verb-edit-field" for="f-${side}-${name}">
       <span>${caption}</span><input id="f-${side}-${name}" name="${side}-${name}" value="${esc(value)}" ${required?'required':''}>
@@ -1035,7 +1191,7 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
       grid.querySelectorAll('[data-emoji]').forEach(button=>{button.hidden=!!query&&!button.dataset.search.includes(query)});
     });
   }
-  async function submitEntity(){if(entitySaving||librarySortSaving)return;const type=formContext?.type;const form=$('#entity-form');if(!form.reportValidity())return;const awaitSave=['subject','folder'].includes(type)||(type==='set'&&!formContext.copyCards?.length),owner=data,snapshot=awaitSave?{subjects:structuredClone(data.subjects),folders:structuredClone(data.folders),sets:structuredClone(data.sets)}:null,previousLocation={activeSubject,activeFolder,activeSet};$('#form-save-error').hidden=true;const fd=new FormData(form);let successNotice=null;if(type==='subject'){const v={name:fd.get('name').trim(),color:fd.get('color'),emoji:fd.get('emoji')||'📚'};if(!v.name){toast('Der Fachname darf nicht leer sein.');return} if(formContext.key)Object.assign(subject(formContext.key),v,{updatedAt:new Date().toISOString()});else{const timestamp=new Date().toISOString();const s={id:id(),...v,icon:v.emoji,createdAt:timestamp,updatedAt:timestamp};s.position=window.WortwerkModel.nextLibraryPosition(data,'subject',s);data.subjects.push(s);activeSubject=s.id;activeFolder=null}}
+  async function submitEntity(){if(!formContext||entitySaving||librarySortSaving)return;const type=formContext.type;const form=$('#entity-form');if(!form.reportValidity())return;const awaitSave=['subject','folder'].includes(type)||(type==='set'&&!formContext.copyCards?.length),owner=data,snapshot=awaitSave?{subjects:structuredClone(data.subjects),folders:structuredClone(data.folders),sets:structuredClone(data.sets)}:null,previousLocation={activeSubject,activeFolder,activeSet};$('#form-save-error').hidden=true;const fd=new FormData(form);let successNotice=null;if(type==='subject'){const v={name:fd.get('name').trim(),color:fd.get('color'),emoji:fd.get('emoji')||'📚'};if(!v.name){toast('Der Fachname darf nicht leer sein.');return} if(formContext.key)Object.assign(subject(formContext.key),v,{updatedAt:new Date().toISOString()});else{const timestamp=new Date().toISOString();const s={id:id(),...v,icon:v.emoji,createdAt:timestamp,updatedAt:timestamp};s.position=window.WortwerkModel.nextLibraryPosition(data,'subject',s);data.subjects.push(s);activeSubject=s.id;activeFolder=null}}
     if(type==='folder'){const name=fd.get('name').trim();if(!name){toast('Der Ordnername darf nicht leer sein.');return}if(!activeSubject||!subject(activeSubject)){toast('Wähle zuerst ein Fach für den Ordner.');return}if(formContext.key)Object.assign(folder(formContext.key),{name,color:fd.get('color'),updatedAt:new Date().toISOString()});else{const timestamp=new Date().toISOString();const created={id:id(),name,color:fd.get('color'),subjectId:activeSubject,parentId:activeFolder||null,createdAt:timestamp,updatedAt:timestamp};created.position=window.WortwerkModel.nextLibraryPosition(data,'folder',created);data.folders.push(created)}}
     if(type==='set'){
       const existing=formContext.key?setById(formContext.key):null;
@@ -1086,23 +1242,23 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
       }
       if(!v.front||!v.back){toast('Vorder- und Rückseite dürfen nicht leer sein.');return}
       if(card){Object.assign(card,v,{updatedAt:timestamp});for(const [key,value] of Object.entries(examples)){if(value)card[key]=value;else delete card[key]}}
-      else data.cards.push({id:id(),setId:activeSet,...v,...Object.fromEntries(Object.entries(examples).filter(([,value])=>value)),position:setCards(activeSet).length,correctCount:0,incorrectCount:0,attemptCount:0,lastReviewedAt:null,nextReviewAt:null,createdAt:timestamp,updatedAt:timestamp});
+      else data.cards.push({id:id(),setId:activeSet,...v,...Object.fromEntries(Object.entries(examples).filter(([,value])=>value)),position:window.WortwerkModel.nextCardPosition(data.cards,activeSet),correctCount:0,incorrectCount:0,attemptCount:0,lastReviewedAt:null,nextReviewAt:null,createdAt:timestamp,updatedAt:timestamp});
       const s=setById(activeSet);if(s)s.updatedAt=timestamp;
     }
     if(type==='set'&&formContext?.copyCards?.length&&session?.id===formContext.sourceSessionId){session.missedSetPending=false;const record=data.studySessions?.[session.setId];if(record)record.missedCardIdsCopied=[...(session.missedCardIdsCopied||[])];updateMissedSetActions()}
     refreshLibraryOrder();const keepStudyView=type==='set'&&Boolean(formContext?.copyCards?.length);
     if(awaitSave){
       entitySaving=true;form.inert=true;form.setAttribute('aria-busy','true');const submitLabel=$('#form-submit').textContent;$('#form-submit').textContent='Wird gespeichert …';
-      try{await save();if(data!==owner)return;$('#form-dialog').close();render();toast(successNotice||'Änderungen gespeichert.');}
+      try{await save();if(data!==owner)return;$('#form-dialog').close();render();toast(successNotice||'Änderungen gespeichert.','success');}
       catch(error){if(data!==owner)return;Object.assign(data,snapshot);if(error?.code!=='40001')window.WortwerkRepository.stagePendingRecovery?.(data);activeSubject=previousLocation.activeSubject;activeFolder=previousLocation.activeFolder;activeSet=previousLocation.activeSet;toast(error?.code==='40001'?'Die Ablage wurde zwischenzeitlich geändert. Schliess den Dialog und lade den aktuellen Stand über den Hinweis oben.':'Speichern fehlgeschlagen. Deine Eingaben bleiben geöffnet. Bitte erneut versuchen.');}
       finally{entitySaving=false;form.inert=false;form.removeAttribute('aria-busy');$('#form-submit').textContent=submitLabel;}
     }else{save();$('#form-dialog').close();if(!keepStudyView)render();if(successNotice)toast(successNotice)}
   }
   $('#form-dialog').addEventListener('cancel',event=>{if(entitySaving)event.preventDefault()});
-  function moveCard(key,direction){const cards=setCards(activeSet),index=cards.findIndex(card=>card.id===key),next=index+direction;if(index<0||next<0||next>=cards.length)return;[cards[index],cards[next]]=[cards[next],cards[index]];const timestamp=new Date().toISOString();cards.forEach((card,position)=>{card.position=position;card.updatedAt=timestamp});save();render()}
-  function editCard(key){const c=data.cards.find(x=>x.id===key);if(!c)return;formContext={type:'card',key};fillForm('card',c);$('#form-dialog').showModal()}
-  function deleteCard(key){const card=data.cards.find(c=>c.id===key);if(!card||!confirm('Diese Lernkarte dauerhaft löschen?'))return;data.cards=data.cards.filter(c=>c.id!==key);setCards(card.setId).forEach((remaining,position)=>{remaining.position=position});save();render()}
-  function deleteSubject(key){const s=subject(key);if(!s||!confirm(`„${s.name}“ mit allen Ordnern, Sets und Karten löschen?`))return;const setIds=data.sets.filter(x=>x.subjectId===key).map(x=>x.id);data.subjects=data.subjects.filter(x=>x.id!==key);data.folders=data.folders.filter(x=>x.subjectId!==key);data.sets=data.sets.filter(x=>x.subjectId!==key);data.cards=data.cards.filter(x=>!setIds.includes(x.setId));data.recent=data.recent.filter(r=>!setIds.includes(r.setId));for(const setId of setIds)delete data.studySessions[setId];data.studyHistory=data.studyHistory.filter(entry=>!setIds.includes(entry.setId));activeSubject=null;activeFolder=null;activeSet=null;save();render();toast('Fach gelöscht')}
+  function moveCard(key,direction){if(!window.WortwerkModel.moveCardInOrder(setCards(activeSet),key,direction,new Date().toISOString()))return;save();render()}
+  function editCard(key){const c=data.cards.find(x=>x.id===key);if(!c)return;formContext={type:'card',key};fillForm('card',c);openFormDialog($('#form-dialog'))}
+  function deleteCard(key){const card=data.cards.find(c=>c.id===key);if(!card||!confirm('Diese Lernkarte dauerhaft löschen?'))return;data.cards=data.cards.filter(c=>c.id!==key);save();render()}
+  function deleteSubject(key){const s=subject(key);if(!s||!confirm(`„${s.name}“ mit allen Ordnern, Sets und Karten löschen?`))return;const setIds=new Set(subjectSets(key).map(x=>x.id));data.subjects=data.subjects.filter(x=>x.id!==key);data.folders=data.folders.filter(x=>x.subjectId!==key);data.sets=data.sets.filter(x=>x.subjectId!==key);data.cards=data.cards.filter(x=>!setIds.has(x.setId));data.recent=data.recent.filter(r=>!setIds.has(r.setId));for(const setId of setIds)delete data.studySessions[setId];data.studyHistory=data.studyHistory.filter(entry=>!setIds.has(entry.setId));activeSubject=null;activeFolder=null;activeSet=null;save();render();toast('Fach gelöscht')}
   function deleteFolder(key){const f=folder(key);if(!f||!confirm(`Ordner „${f.name}“ löschen? Lernstapel und Unterordner bleiben erhalten und werden eine Ebene nach oben verschoben.`))return;data.folders=data.folders.filter(x=>x.id!==key);data.sets.forEach(s=>{if(s.folderId===key){s.folderId=f.parentId||null;s.position=window.WortwerkModel.nextLibraryPosition(data,'set',s)}});data.folders.forEach(child=>{if(child.parentId===key){child.parentId=f.parentId||null;child.position=window.WortwerkModel.nextLibraryPosition(data,'folder',child)}});if(activeFolder===key)activeFolder=f.parentId||null;refreshLibraryOrder();save();render();toast('Ordner gelöscht')}
   function deleteSet(key){const s=setById(key);if(!s||!confirm(`„${s.name}“ und alle zugehörigen Karten löschen?`))return;data.sets=data.sets.filter(x=>x.id!==key);data.cards=data.cards.filter(c=>c.setId!==key);data.recent=data.recent.filter(r=>r.setId!==key);delete data.studySessions[key];data.studyHistory=data.studyHistory.filter(entry=>entry.setId!==key);activeSet=null;save();render();toast('Set gelöscht')}
   function swapSetSides(key){const item=setById(key),cards=setCards(key);if(!item)return;if(!cards.length){toast('In diesem Lernstapel gibt es keine Karten.');return}if(session?.setId===key){toast('Beende zuerst die laufende Lerneinheit, damit die Karten konsistent bleiben.');return}if(!confirm(`Vorder- und Rückseiten aller ${cards.length} Karten im Lernstapel „${item.name}“ vertauschen?`))return;const count=window.WortwerkModel.swapSetCardSides(data.cards,key,new Date().toISOString());if(!count)return;
@@ -1127,9 +1283,13 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
         const latestDocument=new DOMParser().parseFromString(await response.text(),'text/html');
         const latestEntry=$(selector,latestDocument)?.getAttribute('src');
         if(!latestEntry||latestEntry===currentEntry)return;
+        const dialog=$('#import-dialog'),review=$('#import-review');
+        const bodyTop=$('.dialog-body',dialog).getBoundingClientRect().top;
+        const followingPreview=dialog.open&&importChecked&&Math.abs(review.getBoundingClientRect().top-bodyTop)<=16;
         notice.hidden=false;
         $('#import-app-update-status').textContent='Eine neuere App-Version ist verfügbar.';
         updateImportReloadLabel();
+        if(followingPreview)review.scrollIntoView({block:'start'});
       })
       .catch(()=>{})
       .finally(()=>{importUpdateCheck=null});
@@ -1190,7 +1350,7 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
     $('#import-set').innerHTML=data.sets.map(s=>`<option value="${esc(s.id)}" ${targetSet===s.id?'selected':''}>${esc(subject(s.subjectId)?.name||'Fach')} · ${esc(s.name)}</option>`).join('');
     updateImportFormat();
     resetImportPreview();
-    $('#import-dialog').showModal();
+    openFormDialog($('#import-dialog'));
     checkImportAppVersion();
   }
   function updateImportPreview({preserveRemovals=false,reveal=false}={}){
@@ -1204,10 +1364,7 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
     if(!preserveRemovals)importRemovedLines.clear();
     importRows=result.rows.filter(row=>!importRemovedLines.has(row.line));importErrors=result.errors;importChecked=true;importHasErrors=result.errors.length>0;importPreviewLimit=100;
     renderImportPreview();
-    if(reveal&&$('#import-preview').childElementCount){
-      $('#import-preview').scrollTop=0;
-      $('#import-preview').scrollIntoView({block:'nearest'});
-    }
+    if(reveal&&$('#import-preview').childElementCount)$('#import-review').scrollIntoView({block:'start'});
     if(importHasErrors)checkImportAppVersion();
   }
   function importVerbPreview(row,index){
@@ -1300,7 +1457,11 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
   $('#import-file').addEventListener('change',async e=>{const file=e.target.files?.[0];if(!file)return;$('#import-file-name').textContent=file.name;const draft=$('#import-text').value;try{const text=await file.text();if(!$('#import-dialog').open||$('#import-file').files?.[0]!==file||$('#import-text').value!==draft)return;$('#import-text').value=text;updateImportPreview({reveal:true})}catch(error){console.error('Textdatei konnte nicht gelesen werden.',error);toast('Die Textdatei konnte nicht gelesen werden.')} });
   function cancelEntityForm(){if(formContext?.copyCards?.length&&session?.id===formContext.sourceSessionId){session.missedSetPending=false;updateMissedSetActions()}formContext=null;$('#form-dialog').close()}
   document.querySelectorAll('#entity-form [value="cancel"]').forEach(button=>button.addEventListener('click',cancelEntityForm));
-  $('#form-dialog').addEventListener('close',()=>{if(formContext?.copyCards?.length&&session?.id===formContext.sourceSessionId){session.missedSetPending=false;updateMissedSetActions()}formContext=null});
+  $('#form-dialog').addEventListener('close',event=>{
+    if(event.currentTarget.open)return;
+    if(formContext?.copyCards?.length&&session?.id===formContext.sourceSessionId){session.missedSetPending=false;updateMissedSetActions()}
+    formContext=null;
+  });
   $('#import-form').querySelectorAll('[value="cancel"]').forEach(button=>button.addEventListener('click',()=>$('#import-dialog').close()));
   $('#import-submit').addEventListener('click',event=>{
     event.preventDefault();
@@ -1311,7 +1472,7 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
       const bullets=row.requireBullets&&parseLearningGoalBullets(row.back);
       return bullets?{...row,back:formatLearningGoalBullets(bullets)}:row;
     });
-    const timestamp=new Date().toISOString(),position=setCards(setId).length;
+    const timestamp=new Date().toISOString(),position=window.WortwerkModel.nextCardPosition(data.cards,setId);
     const newCards=window.WortwerkModel.createImportedCards(rows,{setId,position,timestamp,createId:id});
     data.cards=data.cards.concat(newCards);
     deck.updatedAt=timestamp;
@@ -1326,19 +1487,19 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
   function openResetProgress(key){
     const item=setById(key),cards=setCards(key);if(!item||!cards.length)return;
     resetSetId=key;$('#reset-progress-copy').textContent=`Der Lernfortschritt für „${item.name}“ wird vollständig zurückgesetzt. Du beginnst danach wieder bei Karte 1. Karten, Reihenfolge, Inhalte und Set-Einstellungen bleiben erhalten.`;
-    $('#reset-progress-dialog').showModal();$('#reset-progress-cancel').focus();
+    openFormDialog($('#reset-progress-dialog'));$('#reset-progress-cancel').focus();
   }
   async function confirmResetProgress(){
     const key=resetSetId;if(!key||!setById(key))return;
     const count=window.WortwerkModel.resetSetProgress(data,key);resetSetId=null;
     $('#reset-progress-dialog').close();render();
-    try{await save();toast(`Lernstapel zurückgesetzt · ${count} ${count===1?'Karte':'Karten'} wieder neu`)}catch(error){console.error('Lernfortschritt konnte nicht dauerhaft zurückgesetzt werden.',error);toast('Zurücksetzen lokal angewendet, aber nicht mit Supabase gespeichert. Bitte Verbindung prüfen.')}
+    try{await save();toast(`Lernstapel zurückgesetzt · ${count} ${count===1?'Karte':'Karten'} wieder neu`,'success')}catch{toast('Zurücksetzen lokal angewendet, aber nicht mit Supabase gespeichert. Bitte Verbindung prüfen.','error')}
   }
   $('#reset-progress-form').addEventListener('submit',event=>event.preventDefault());
   $('#reset-progress-confirm').addEventListener('click',confirmResetProgress);
   $('#reset-progress-cancel').addEventListener('click',()=>{$('#reset-progress-dialog').close();resetSetId=null});
   $('#reset-progress-close').addEventListener('click',()=>{$('#reset-progress-dialog').close();resetSetId=null});
-  $('#reset-progress-dialog').addEventListener('close',()=>{resetSetId=null});
+  $('#reset-progress-dialog').addEventListener('close',event=>{if(!event.currentTarget.open)resetSetId=null});
   function completeSession(record){if(session?.completionRecorded)return;delete data.studySessions[record.setId];data.studyHistory.unshift(window.WortwerkModel.summarizeSession(record,new Date().toISOString()));data.studyHistory=data.studyHistory.slice(0,30);if(session)session.completionRecorded=true;save()}
   function saveSessionProgress(){
     if(!session)return;
@@ -1347,23 +1508,15 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
     data.studySessions[session.setId]=record;save();
   }
   let activeSlotIndex = 0;
-  let cancelActiveStudyTransition = null;
-  function clearActiveStudyTransition(){if(cancelActiveStudyTransition){const cleanup=cancelActiveStudyTransition;cancelActiveStudyTransition=null;cleanup()}}
-  function animateStudyTransition({owner,layer,startClass,stackSlot=null,delay=0,duration=STUDY_SWIPE_MS,syncStackDuration=false,complete}){
-    clearActiveStudyTransition();
-    let delayTimer=null,fallbackTimer=null,frame=0,finished=false;
-    const reduced=window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    const cleanup=()=>{if(delayTimer!==null)clearTimeout(delayTimer);if(fallbackTimer!==null)clearTimeout(fallbackTimer);if(frame)cancelAnimationFrame(frame);layer.removeEventListener('animationend',onAnimationEnd);layer.classList.remove(startClass)};
-    const finish=event=>{if(event&&event.target!==layer)return;if(finished)return;finished=true;cleanup();if(cancelActiveStudyTransition===cleanup)cancelActiveStudyTransition=null;if(session===owner)complete()};
-    const onAnimationEnd=event=>finish(event);
-    cancelActiveStudyTransition=cleanup;
-    const start=()=>{if(session!==owner){clearActiveStudyTransition();return}if(reduced){finish();return}layer.addEventListener('animationend',onAnimationEnd);layer.classList.add(startClass);if(stackSlot){if(syncStackDuration)stackSlot.classList.add('is-score-elevating');stackSlot.classList.remove('is-stack');stackSlot.classList.add('is-elevating')}fallbackTimer=setTimeout(()=>finish(),duration+100)};
-    if(reduced)start();else if(delay>0)delayTimer=setTimeout(()=>{frame=requestAnimationFrame(start)},delay);else frame=requestAnimationFrame(start);
-  }
-  function getSlot(idx){
-    const slot=$(`#study-slot-${idx}`);
-    return {
-      slot,
+  let studyTransition = null;
+  const reducedStudyMotion=window.matchMedia('(prefers-reduced-motion: reduce)');
+  const studyMotion=(()=>{
+    const styles=getComputedStyle(document.documentElement);
+    const duration=(name,fallback)=>Number.parseFloat(styles.getPropertyValue(`--study-${name}-duration`))||fallback;
+    return {step:duration('step',160),swipe:duration('swipe',220),flip:duration('flip',250),easing:styles.getPropertyValue('--motion-ease-out').trim()||'ease-out'};
+  })();
+  const studySlots=[0,1].map(idx=>({
+      slot:$(`#study-slot-${idx}`),
       swipeLayer:$(`#study-swipe-${idx}`),
       button:$(`#study-card-${idx}`),
       inner:$(`#study-card-inner-${idx}`),
@@ -1372,211 +1525,225 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
       backText:$(`#card-back-${idx}`),
       backExampleText:$(`#card-back-example-${idx}`),
       feedback:$(`#study-feedback-${idx}`),
-      feedbackText:$(`#study-feedback-text-${idx}`)
-    };
+      feedbackText:$(`#study-feedback-text-${idx}`),
+      card:null,
+      flipAnimation:null
+  }));
+  const getSlot=idx=>studySlots[idx];
+  const canAnimateStudy=()=>!reducedStudyMotion.matches&&typeof studySlots[0].slot.animate==='function';
+  function stopStudyTransition(settle=false){
+    if(!studyTransition)return;
+    const {exit,enter,outgoing,nextCardId}=studyTransition;
+    studyTransition=null;
+    exit.onfinish=null;
+    exit.cancel();
+    enter.cancel();
+    if(settle)prepareStudyStack(outgoing,nextCardId);
   }
+  function stopStudyFlip(slot){
+    slot.flipAnimation?.animation.cancel();
+    slot.flipAnimation=null;
+  }
+  reducedStudyMotion.addEventListener('change',event=>{
+    if(!event.matches)return;
+    stopStudyTransition(true);
+    studySlots.forEach(stopStudyFlip);
+  });
   function beginStudy(key){
     const cards=setCards(key);if(!cards.length){toast('Dieses Set enthält noch keine Karten.');return}
+    stopStudyTransition();
+    for(const slot of studySlots)slot.card=null;
     cardThemes.applyTheme(cardThemes.resolveSetThemeId(setById(key),activeCardThemeId));
     session=null;activeSlotIndex=0;
     const saved=sessionForSet(key);
     const sessionState=window.WortwerkModel.createStudySession(cards,saved);
     session={...sessionState,id:saved?.id||id(),setId:key,startedAt:saved?.startedAt||new Date().toISOString(),flipped:false,missedCardIdsCopied:new Set(Array.isArray(saved?.missedCardIdsCopied)?saved.missedCardIdsCopied:[]),missedSetPending:false};
-    const lastStudiedAt=new Date().toISOString();setById(key).lastStudiedAt=lastStudiedAt;data.recent=data.recent.filter(entry=>entry.setId!==key);data.recent.unshift({setId:key,at:lastStudiedAt});data.recent=data.recent.slice(0,30);saveSessionProgress();
+    const lastStudiedAt=new Date().toISOString();setById(key).lastStudiedAt=lastStudiedAt;data.recent=data.recent.filter(entry=>entry.setId!==key);data.recent.unshift({setId:key,at:lastStudiedAt});data.recent=data.recent.slice(0,30);
     $('#study-title').textContent=setById(key)?.name||'Lernsession';$('#study-complete').hidden=true;$('#shuffle-toggle').setAttribute('aria-pressed','false');$('#study-dialog').classList.remove('is-fullscreen');$('#study-dialog').showModal();renderStudyCard();
+    saveSessionProgress();
   }
   function updateStudyScoreCounts(){
-    if(!session)return;
-    const results=window.WortwerkModel.getStudyResults(session);
-    const known=results.filter(result=>result===true).length;
-    const missed=results.filter(result=>result===false).length;
-    const reviewed=known+missed,total=session.cards.length;
-    $('#known-count').textContent=String(known);
-    $('#missed-count').textContent=String(missed);
-    $('#study-progress-bar').style.width=`${total?Math.round(reviewed/total*100):0}%`;
+    const {known,missed,evaluated:reviewed}=window.WortwerkModel.summarizeResults(window.WortwerkModel.getStudyResults(session));
+    const total=session.cards.length;
+    for(const [selector,count] of [['#known-count',known],['#missed-count',missed]]){
+      const element=$(selector);
+      if(element.textContent!==String(count))element.textContent=String(count);
+    }
+    $('#study-progress-bar').style.setProperty('--reviewed-progress',String(total?reviewed/total:0));
     const track=$('#study-progress-track');
     track.setAttribute('aria-valuemax',String(total));
     track.setAttribute('aria-valuenow',String(reviewed));
     track.setAttribute('aria-valuetext',`${reviewed} von ${total} bewertet`);
     $('#answer-yes').setAttribute('aria-label',`Gewusst, bisher ${known}`);
     $('#answer-no').setAttribute('aria-label',`Nicht gewusst, bisher ${missed}`);
-    $('#shuffle-toggle').disabled=Boolean(session.transitioning);
-    updateMissedSetActions();
+    updateMissedSetActions(missed);
+    return reviewed;
   }
   function getUncopiedMissedCards(){if(!session)return[];const copied=session.missedCardIdsCopied||new Set();return session.cards.filter(card=>window.WortwerkModel.getStudyResult(session,card.id)===false&&!copied.has(card.id))}
-  function updateMissedSetActions(){if(!session)return;const results=window.WortwerkModel.getStudyResults(session),totalMissed=results.filter(result=>result===false).length,available=getUncopiedMissedCards().length,pending=Boolean(session.missedSetPending);const button=$('#create-missed-set');button.disabled=!available||pending||session.transitioning;button.textContent=available?`Lernstapel aus ${available} falschen Karten erstellen`:totalMissed?'Lernstapel erstellt':'Lernstapel aus falschen Karten erstellen';button.title=available?'Bisher falsch bewertete Karten in einen eigenen Lernstapel kopieren':totalMissed?'Alle bisher falschen Karten wurden bereits kopiert':'Bewerte zuerst eine Karte als Nicht gewusst';const resultButton=$('#create-missed-set-complete');resultButton.hidden=totalMissed===0;resultButton.disabled=!available||pending;resultButton.textContent=available?`Lernstapel aus ${available} falschen Karten erstellen`:totalMissed?'Lernstapel erstellt':'Lernstapel aus falschen Karten erstellen';resultButton.title=button.title}
-  function openMissedSetCreation(){if(!session||session.missedSetPending)return;const cards=getUncopiedMissedCards();if(!cards.length){toast('Bewerte zuerst Karten als „Nicht gewusst“.');return}const originalSet=setById(session.setId);session.missedSetPending=true;studySpeech.stop();speechForms.open=false;formContext={type:'set',defaultSubjectId:originalSet?.subjectId||activeSubject||data.subjects[0]?.id||'',defaultFolderId:originalSet?.folderId||null,copyCards:cards.slice(),sourceSessionId:session.id};fillForm('set');$('#form-submit').textContent='Lernstapel erstellen';$('#form-dialog').showModal();$('#f-name').focus();updateMissedSetActions()}
-  function resetSlotOrientation(slotObj){
-    if(!slotObj)return;
-    slotObj.button.setAttribute('aria-pressed','false');
-    slotObj.inner.classList.add('no-transition');
-    slotObj.inner.classList.remove('flipped');
-    void slotObj.inner.offsetWidth;
-    slotObj.inner.classList.remove('no-transition');
-  }
-  function renderStudyCard(){
+  function updateMissedSetActions(totalMissed){
     if(!session)return;
+    totalMissed??=window.WortwerkModel.summarizeResults(window.WortwerkModel.getStudyResults(session)).missed;
+    let available=totalMissed;
+    for(const cardId of session.missedCardIdsCopied){
+      if(window.WortwerkModel.getStudyResult(session,cardId)===false)available--;
+    }
+    const button=$('#create-missed-set'),resultButton=$('#create-missed-set-complete');
+    const label=available?`Lernstapel aus ${available} falschen Karten erstellen`:totalMissed?'Lernstapel erstellt':'Lernstapel aus falschen Karten erstellen';
+    const title=available?'Bisher falsch bewertete Karten in einen eigenen Lernstapel kopieren':totalMissed?'Alle bisher falschen Karten wurden bereits kopiert':'Bewerte zuerst eine Karte als Nicht gewusst';
+    for(const control of [button,resultButton]){
+      control.disabled=!available||session.missedSetPending;
+      control.textContent=label;
+      control.title=title;
+    }
+    resultButton.hidden=totalMissed===0;
+  }
+  function openMissedSetCreation(){if(!session||session.missedSetPending)return;const cards=getUncopiedMissedCards();if(!cards.length){toast('Bewerte zuerst Karten als „Nicht gewusst“.');return}const originalSet=setById(session.setId);session.missedSetPending=true;studySpeech.stop();speechForms.open=false;formContext={type:'set',defaultSubjectId:originalSet?.subjectId||activeSubject||data.subjects[0]?.id||'',defaultFolderId:originalSet?.folderId||null,copyCards:cards.slice(),sourceSessionId:session.id};fillForm('set');$('#form-submit').textContent='Lernstapel erstellen';openFormDialog($('#form-dialog'));$('#f-name').focus();updateMissedSetActions()}
+  function setStudySlotCard(slot,card){
+    if(slot.card===card)return;
+    populateStudyCard(slot,card);
+    slot.card=card;
+  }
+  function resetStudySlotFlip(slot){
+    stopStudyFlip(slot);
+    slot.inner.classList.remove('flipped');
+    slot.button.setAttribute('aria-pressed','false');
+  }
+  function prepareStudyStack(slot,nextCardId){
+    resetStudySlotFlip(slot);
+    slot.feedback.classList.remove('is-visible');
+    if(nextCardId)setStudySlotCard(slot,window.WortwerkModel.getStudyCard(session,nextCardId));
+    slot.slot.className=nextCardId?'study-card-slot is-stack':'study-card-slot is-hidden';
+  }
+  function renderStudyCard({outgoing=null,rating=null,restoreCardFocus=false}={}){
     const total=session.cards.length,index=window.WortwerkModel.getStudyCurrentIndex(session),card=window.WortwerkModel.getStudyCard(session);
-    const nextCardId=window.WortwerkModel.getNextStudyCardId(session),hasNext=Boolean(nextCardId);
+    const nextCardId=window.WortwerkModel.getNextStudyCardId(session);
     $('#study-progress-label').textContent=`Karte ${index+1} von ${total}`;
-    updateStudyScoreCounts();
+    const reviewed=updateStudyScoreCounts();
 
     const result=window.WortwerkModel.getStudyResult(session);
-    $('#session-stat').textContent=result===null?'Noch nicht bewertet':result?'Diese Karte: gewusst':'Diese Karte: noch üben';
-
-    const deckBase=$('#study-deck-base');
-    if(deckBase)deckBase.classList.toggle('is-empty',total<=1);
+    $('#session-stat').textContent=rating!==null
+      ? rating?'Letzte Karte: gewusst':'Letzte Karte: noch üben'
+      : result===null?'Noch nicht bewertet':result?'Diese Karte: gewusst':'Diese Karte: noch üben';
+    $('#study-deck-base').classList.toggle('is-empty',total<=1);
 
     const active=getSlot(activeSlotIndex);
-    const stack=getSlot(1-activeSlotIndex);
-
-    // Active slot
-    populateStudyCard(active,card);
-    active.button.setAttribute('aria-label',describeCardSide(card,session.flipped?'back':'front'));
-    active.button.setAttribute('aria-pressed',String(session.flipped));
+    const inactive=getSlot(1-activeSlotIndex);
+    resetStudySlotFlip(active);
+    setStudySlotCard(active,card);
+    active.slot.className='study-card-slot is-active';
+    active.slot.removeAttribute('aria-hidden');
+    active.feedback.classList.remove('is-visible');
+    active.button.setAttribute('aria-label',describeCardSide(card,'front'));
     active.button.disabled=false;
     active.button.tabIndex=0;
-    active.slot.className='study-card-slot is-active';
-    active.swipeLayer.className='study-card-swipe-layer';
-    active.feedback.classList.remove('is-visible');
-    if(!session.flipped){
-      resetSlotOrientation(active);
+    if(restoreCardFocus)active.button.focus({preventScroll:true});
+
+    inactive.button.disabled=true;
+    inactive.button.tabIndex=-1;
+    inactive.slot.setAttribute('aria-hidden','true');
+    if(outgoing){
+      inactive.slot.className='study-card-slot is-leaving';
+      if(rating!==null){
+        inactive.slot.classList.add(rating?'is-correct':'is-incorrect');
+        inactive.feedbackText.textContent=rating?'Gewusst':'Noch zu üben';
+        inactive.feedback.classList.add('is-visible');
+      }
     }else{
-      active.inner.classList.add('flipped');
+      prepareStudyStack(inactive,nextCardId);
     }
 
-    // Stack slot (preview of next card)
-    if(hasNext){
-      const nextCard=window.WortwerkModel.getStudyCard(session,nextCardId);
-      populateStudyCard(stack,nextCard);
-      stack.button.setAttribute('aria-label','Nächste Karte. '+describeCardSide(nextCard,'front'));
-      stack.button.disabled=true;
-      stack.button.tabIndex=-1;
-      resetSlotOrientation(stack);
-      stack.slot.className='study-card-slot is-stack';
-      stack.swipeLayer.className='study-card-swipe-layer';
-      stack.feedback.classList.remove('is-visible');
-    }else{
-      resetSlotOrientation(stack);
-      stack.slot.className='study-card-slot is-hidden';
-    }
-
-    $('#answer-no').disabled=false;
-    $('#answer-yes').disabled=false;
-    $('#study-prev').disabled=session.historyIndex<=0;
-    const canFinish=!hasNext&&window.WortwerkModel.getStudyResults(session).every(result=>result!==null);
-    $('#study-next').disabled=!hasNext&&!canFinish;
-    $('#study-next').setAttribute('aria-label',canFinish?'Lernrunde abschliessen':'Nächste Karte');
-    $('#study-next').title=canFinish?'Lernrunde abschliessen':'Nächste Karte';
-    $('#study-next .study-step-label').textContent=canFinish?'Abschliessen':'Weiter';
+    const canFinish=!nextCardId&&reviewed===total;
+    const previousButton=$('#study-prev'),nextButton=$('#study-next'),focused=document.activeElement;
+    previousButton.disabled=session.historyIndex<=0;
+    nextButton.disabled=!nextCardId&&!canFinish;
+    const nextLabel=canFinish?'Lernrunde abschliessen':'Nächste Karte';
+    nextButton.setAttribute('aria-label',nextLabel);
+    nextButton.title=nextLabel;
+    $('.study-step-label',nextButton).textContent=canFinish?'Abschliessen':'Weiter';
+    if((focused===previousButton||focused===nextButton)&&focused.disabled)active.button.focus({preventScroll:true});
     syncStudySpeech(card);
+    return nextCardId;
   }
   function flip(){
-    if(!session||session.transitioning||!$('#study-complete').hidden)return;
+    if(!session||!$('#study-complete').hidden)return;
+    const previousAngle=session.flipped?180:0;
     session.flipped=!session.flipped;
     const active=getSlot(activeSlotIndex);
     active.inner.classList.toggle('flipped',session.flipped);
+    if(canAnimateStudy()){
+      const moving=active.flipAnimation;
+      const progress=moving?.animation.effect.getComputedTiming().progress??0;
+      const from=moving&&moving.animation.playState!=='finished'?moving.from+(moving.to-moving.from)*progress:previousAngle;
+      const to=session.flipped?180:0;
+      stopStudyFlip(active);
+      if(Math.abs(to-from)>=1){
+        const animation=active.inner.animate([{transform:`rotateY(${from}deg)`},{transform:`rotateY(${to}deg)`}],{
+          duration:Math.max(70,studyMotion.flip*Math.abs(to-from)/180),easing:studyMotion.easing,fill:'backwards'
+        });
+        active.flipAnimation={animation,from,to};
+      }
+    }
     const card=window.WortwerkModel.getStudyCard(session);
     active.button.setAttribute('aria-label',describeCardSide(card,session.flipped?'back':'front'));
     active.button.setAttribute('aria-pressed',String(session.flipped));
     syncStudySpeech(card);
   }
-  function moveStudy(delta){
-    if(!session||session.transitioning||!$('#study-complete').hidden)return;
-    const previousCardId=session.currentCardId;
-    if(!window.WortwerkModel.navigateStudySession(session,delta))return;
-    const targetCard=window.WortwerkModel.getStudyCard(session);
-    if(!targetCard){session.currentCardId=previousCardId;return}
+  function showStudyCard(direction,rating=null){
+    stopStudyTransition();
+    const outgoing=getSlot(activeSlotIndex);
+    const animate=canAnimateStudy();
+    const restoreCardFocus=outgoing.button===document.activeElement;
     session.flipped=false;
-    saveSessionProgress();
-    const dialog=$('#study-dialog');
-    dialog.classList.add('is-instant-navigation');
     activeSlotIndex=1-activeSlotIndex;
-    renderStudyCard();
-    // Commit the new slot roles while transitions are disabled, so the next
-    // interaction can still use the independent rating swipe animation.
-    void dialog.offsetWidth;
-    dialog.classList.remove('is-instant-navigation');
+    const nextCardId=renderStudyCard({outgoing:animate?outgoing:null,rating,restoreCardFocus});
+    if(!animate)return;
+
+    // Reusing either slot cancels its visual animation before it changes role.
+    // The new card is already active, including for keyboard and touch input.
+    const scored=rating!==null;
+    const timing={duration:scored?studyMotion.swipe:studyMotion.step,easing:studyMotion.easing,fill:'both'};
+    const exit=outgoing.swipeLayer.animate([
+      {transform:'translate3d(0, 0, 0)',opacity:1},
+      {transform:`translate3d(${direction*(scored?105:8)}%, ${scored?-2:0}%, 0) rotate(${scored?direction*2:0}deg)`,opacity:0}
+    ],timing);
+    const enter=getSlot(activeSlotIndex).slot.animate([
+      {transform:`translate3d(${scored?0:-direction*2}%, 8px, 0) scale(.965)`,opacity:.86},
+      {transform:'translate3d(0, 0, 0) scale(1)',opacity:1}
+    ],timing);
+    studyTransition={exit,enter,outgoing,nextCardId};
+    exit.onfinish=()=>{if(studyTransition?.exit===exit)stopStudyTransition(true)};
+  }
+  function moveStudy(delta){
+    if(!session||!$('#study-complete').hidden)return false;
+    if(!window.WortwerkModel.navigateStudySession(session,delta))return false;
+    showStudyCard(-delta);
+    saveSessionProgress();
+    return true;
   }
   function nextStudyCard(){
-    if(!session||session.transitioning||!$('#study-complete').hidden)return;
-    if(window.WortwerkModel.getNextStudyCardId(session)){moveStudy(1);return}
+    if(!session||!$('#study-complete').hidden||moveStudy(1))return;
     if(window.WortwerkModel.getStudyResults(session).every(result=>result!==null))finishStudy();
   }
   function scoreCard(known){
-    if(!session||session.transitioning||!$('#study-complete').hidden)return;
-    const activeSession=session,card=window.WortwerkModel.getStudyCard(session),cardId=card?.id,previous=window.WortwerkModel.getStudyResult(session),timestamp=new Date().toISOString();
-    if(!card||!cardId)return;
-    session.transitioning=true;
-    syncStudySpeech();
-    window.WortwerkModel.updateCardAnswer(card,previous,known,timestamp);
-    window.WortwerkModel.setStudyAnswer(session,cardId,known);
+    if(!session||!$('#study-complete').hidden)return;
+    const card=window.WortwerkModel.getStudyCard(session);
+    if(!card)return;
+    window.WortwerkModel.updateCardAnswer(card,window.WortwerkModel.getStudyResult(session),known,new Date().toISOString());
+    window.WortwerkModel.setStudyAnswer(session,card.id,known);
     const remaining=session.shuffleRemainingCardIds.length>0||window.WortwerkModel.getStudyResults(session).some(result=>result===null);
-    const nextCardId=remaining?window.WortwerkModel.getNextStudyCardId(session):null,hasNext=Boolean(nextCardId);
-    if(hasNext)window.WortwerkModel.visitStudyCard(session,nextCardId);
-    saveSessionProgress();
-    updateStudyScoreCounts();
-
-    $('#session-stat').textContent=known?'Gewusst':'Noch zu üben';
-
-    const active=getSlot(activeSlotIndex);
-    const stack=getSlot(1-activeSlotIndex);
-
-    // Disable controls during transition
-    active.button.disabled=true;
-    $('#answer-no').disabled=true;
-    $('#answer-yes').disabled=true;
-    $('#study-prev').disabled=true;
-    $('#study-next').disabled=true;
-
-    // ── Phase 1: Show feedback overlay on current card ────────────────────────
-    if(known){
-      active.feedbackText.textContent='Gewusst';
-      active.slot.className='study-card-slot is-active is-correct';
+    const nextCardId=remaining?window.WortwerkModel.getNextStudyCardId(session):null;
+    if(nextCardId&&window.WortwerkModel.visitStudyCard(session,nextCardId)){
+      showStudyCard(known?1:-1,known);
+      saveSessionProgress();
     }else{
-      active.feedbackText.textContent='Noch zu üben';
-      active.slot.className='study-card-slot is-active is-incorrect';
-    }
-    active.feedback.classList.add('is-visible');
-
-    // Ensure stack card has the next card's content ready and cleanly upright
-    if(hasNext){
-      const nextCard=window.WortwerkModel.getStudyCard(session,nextCardId);
-      populateStudyCard(stack,nextCard);
-      resetSlotOrientation(stack);
-      stack.slot.className='study-card-slot is-stack';
-    }else{
-      resetSlotOrientation(stack);
-      stack.slot.className='study-card-slot is-hidden';
-    }
-
-    animateStudyTransition({owner:activeSession,layer:active.swipeLayer,startClass:'is-swiping',stackSlot:hasNext?stack.slot:null,duration:STUDY_SWIPE_MS,syncStackDuration:true,complete:completeCardTransition});
-
-    function completeCardTransition(){
-      if(session!==activeSession)return;
-      if(hasNext){
-        activeSlotIndex=1-activeSlotIndex;
-        session.flipped=false;
-
-        active.slot.className='study-card-slot is-hidden';
-        active.swipeLayer.className='study-card-swipe-layer';
-        active.feedback.classList.remove('is-visible');
-        resetSlotOrientation(active);
-
-        session.transitioning=false;
-        renderStudyCard();
-      }else{
-        active.slot.className='study-card-slot is-hidden';
-        active.swipeLayer.className='study-card-swipe-layer';
-        active.feedback.classList.remove('is-visible');
-        resetSlotOrientation(active);
-        session.transitioning=false;
-        finishStudy();
-      }
+      updateStudyScoreCounts();
+      finishStudy();
     }
   }
   function finishStudy(){
     if(!session)return;
+    stopStudyTransition(true);
+    studySlots.forEach(stopStudyFlip);
     syncStudySpeech();
     const results=window.WortwerkModel.getStudyResults(session);
     if(!session.completionRecorded)completeSession({id:session.id,setId:session.setId,startedAt:session.startedAt,cardIds:session.cards.map(card=>card.id),results});
@@ -1598,7 +1765,19 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
     updateMissedSetActions();
     $('#complete-title').focus({preventScroll:true});
   }
-  function retryMissed(){if(!session)return;const cards=session.cards.filter(card=>window.WortwerkModel.getStudyResult(session,card.id)===false);if(!cards.length)return;const retryState=window.WortwerkModel.createStudySession(cards);session={...retryState,id:id(),setId:session.setId,startedAt:new Date().toISOString(),flipped:false,missedCardIdsCopied:new Set(),missedSetPending:false};activeSlotIndex=0;saveSessionProgress();$('#study-title').textContent=`Wiederholung · ${setById(session.setId)?.name||'Lernsession'}`;$('#study-complete').hidden=true;$('#shuffle-toggle').setAttribute('aria-pressed','false');renderStudyCard()}
+  function retryMissed(){
+    if(!session)return;
+    const cards=session.cards.filter(card=>window.WortwerkModel.getStudyResult(session,card.id)===false);
+    if(!cards.length)return;
+    const retryState=window.WortwerkModel.createStudySession(cards);
+    session={...retryState,id:id(),setId:session.setId,startedAt:new Date().toISOString(),flipped:false,missedCardIdsCopied:new Set(),missedSetPending:false};
+    activeSlotIndex=0;
+    $('#study-title').textContent=`Wiederholung · ${setById(session.setId)?.name||'Lernsession'}`;
+    $('#study-complete').hidden=true;
+    $('#shuffle-toggle').setAttribute('aria-pressed','false');
+    renderStudyCard({restoreCardFocus:true});
+    saveSessionProgress();
+  }
   const studyDialog=$('#study-dialog');
   const settingsDialog=$('#settings-dialog');
   function syncAppearanceOptions(){
@@ -1611,7 +1790,7 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
     const result=appAppearance.setPreference(input.value);
     if(!result.persisted)toast('Die Darstellung wurde geändert, konnte aber in diesem Browser nicht gespeichert werden.');
   });
-  $('#card-theme-open').onclick=()=>{closeNavigation();syncAppearanceOptions();renderCardThemeOptions();$('#donation-reminder-enabled').checked=isDonationReminderEnabled();settingsDialog.showModal()};
+  $('#card-theme-open').onclick=()=>{closeNavigation();syncAppearanceOptions();renderCardThemeOptions();$('#donation-reminder-enabled').checked=isDonationReminderEnabled();openFormDialog(settingsDialog)};
   $('#donation-reminder-enabled').addEventListener('change',event=>{
     const saved=setDonationReminderEnabled(event.currentTarget.checked);
     if(!saved)toast('Diese Einstellung konnte in diesem Browser nicht gespeichert werden.');
@@ -1671,7 +1850,7 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
   }
   speechToolbar.addEventListener('click',event=>{
     const control=event.target.closest('button[data-study-speech-key]');
-    if(!control||speechToolbar.hidden||!session||session.transitioning)return;
+    if(!control||speechToolbar.hidden||!session)return;
     const key=control.dataset.studySpeechKey;
     studySpeech.play(key,speechContent.get(key));
   });
@@ -1685,16 +1864,47 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
   studyDialog.addEventListener('close',()=>{if(!studyDialog.open)studySpeech.stop()});
   function syncFullscreenButton(){const active=document.fullscreenElement===studyDialog||studyDialog.classList.contains('is-fullscreen'),button=$('#study-expand');button.setAttribute('aria-pressed',String(active));button.setAttribute('aria-label',active?'Vollbild verlassen':'Lernmodus im Vollbild öffnen');button.title=active?'Vollbild verlassen':'Vollbild';$('#study-expand-label').textContent=active?'Fenster':'Vollbild'}
   async function toggleStudyFullscreen(){if(document.fullscreenElement===studyDialog||studyDialog.classList.contains('is-fullscreen')){studyDialog.classList.remove('is-fullscreen');if(document.fullscreenElement===studyDialog){try{await document.exitFullscreen()}catch(error){console.warn('Vollbildmodus konnte nicht beendet werden.',error)}}syncFullscreenButton();return}try{if(studyDialog.requestFullscreen)await studyDialog.requestFullscreen();else studyDialog.classList.add('is-fullscreen')}catch(error){studyDialog.classList.add('is-fullscreen')}syncFullscreenButton()}
-  function endStudy(){const setId=session?.setId;syncStudySpeech();clearActiveStudyTransition();if(document.fullscreenElement===studyDialog)document.exitFullscreen().catch(()=>{});studyDialog.classList.remove('is-fullscreen');studyDialog.close();session=null;cardThemes.applyTheme(activeCardThemeId);syncFullscreenButton();if(setId){const label=studyActionLabel(setId);if(activeSet===setId){const button=$('#start-study');if(button)button.textContent=label}document.querySelectorAll('[data-quick-study]').forEach(button=>{if(button.dataset.quickStudy===setId)button.textContent=label});render()}}
+  function endStudy(){
+    const setId=session?.setId;
+    syncStudySpeech();
+    stopStudyTransition(true);
+    studySlots.forEach(stopStudyFlip);
+    if(document.fullscreenElement===studyDialog)document.exitFullscreen().catch(()=>{});
+    studyDialog.classList.remove('is-fullscreen');
+    studyDialog.close();
+    session=null;
+    cardThemes.applyTheme(activeCardThemeId);
+    syncFullscreenButton();
+    if(setId){
+      render();
+      const opener=activeSet===setId?$('#start-study'):$(`[data-quick-study="${CSS.escape(setId)}"]`);
+      opener?.focus({preventScroll:true});
+    }
+  }
   studyDialog.addEventListener('fullscreenchange',syncFullscreenButton);
   studyDialog.addEventListener('cancel',event=>{event.preventDefault();endStudy()});
   $('#study-expand').onclick=toggleStudyFullscreen;
-  $('#study-card-0').onclick=flip;$('#study-card-1').onclick=flip;$('#answer-no').onclick=()=>scoreCard(false);$('#answer-yes').onclick=()=>scoreCard(true);$('#study-prev').onclick=()=>moveStudy(-1);$('#study-next').onclick=nextStudyCard;$('#study-close').onclick=endStudy;$('#finish-study').onclick=endStudy;$('#retry-missed').onclick=retryMissed;$('#create-missed-set').onclick=openMissedSetCreation;$('#create-missed-set-complete').onclick=openMissedSetCreation;$('#study-manage').onclick=endStudy;$('#shuffle-toggle').onclick=()=>{if(!session||session.transitioning||!$('#study-complete').hidden)return;const shuffled=window.WortwerkModel.shuffleStudyCards(session);if(!shuffled){toast('Zum Mischen brauchst du mindestens zwei Karten.');return}session.flipped=false;$('#shuffle-toggle').setAttribute('aria-pressed','true');saveSessionProgress();studyDialog.classList.add('is-instant-navigation');activeSlotIndex=1-activeSlotIndex;renderStudyCard();void studyDialog.offsetWidth;studyDialog.classList.remove('is-instant-navigation');toast('Alle Karten neu gemischt. Bewertungen bleiben erhalten.')};
+  $('#study-card-0').onclick=flip;$('#study-card-1').onclick=flip;$('#answer-no').onclick=()=>scoreCard(false);$('#answer-yes').onclick=()=>scoreCard(true);$('#study-prev').onclick=()=>moveStudy(-1);$('#study-next').onclick=nextStudyCard;$('#study-close').onclick=endStudy;$('#finish-study').onclick=endStudy;$('#retry-missed').onclick=retryMissed;$('#create-missed-set').onclick=openMissedSetCreation;$('#create-missed-set-complete').onclick=openMissedSetCreation;$('#study-manage').onclick=endStudy;
+  $('#shuffle-toggle').onclick=()=>{
+    if(!session||!$('#study-complete').hidden)return;
+    if(!window.WortwerkModel.shuffleStudyCards(session)){
+      toast('Zum Mischen brauchst du mindestens zwei Karten.');
+      return;
+    }
+    stopStudyTransition();
+    const restoreCardFocus=getSlot(activeSlotIndex).button===document.activeElement;
+    session.flipped=false;
+    activeSlotIndex=1-activeSlotIndex;
+    renderStudyCard({restoreCardFocus});
+    $('#shuffle-toggle').setAttribute('aria-pressed','true');
+    saveSessionProgress();
+    toast('Alle Karten neu gemischt. Bewertungen bleiben erhalten.');
+  };
   document.addEventListener('keydown',event=>{
     const action=studyKeyboardAction(event,{
       open:studyDialog.open,
       blocked:Boolean(document.querySelector('dialog[open]:not(#study-dialog)')),
-      canInteract:Boolean(session&&!session.transitioning&&$('#study-complete').hidden&&window.WortwerkModel.getStudyCard(session))
+      canInteract:Boolean(session&&$('#study-complete').hidden&&session.currentCardId)
     });
     if(!action)return;
     event.preventDefault();
@@ -1708,48 +1918,106 @@ import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown,
   $('#import-form').onsubmit=e=>e.preventDefault();
   let unsavedChanges=false,saveFailed=false;
   const saveStatus=$('#save-status'),saveRetry=$('#save-retry');
-  function showSaveStatus(text,failed=false){saveStatus.textContent=text;saveStatus.parentElement.classList.toggle('is-error',failed);saveRetry.hidden=!failed}
-  window.addEventListener('library-save-start',()=>{unsavedChanges=true;showSaveStatus('Wird gespeichert …',saveFailed)});
-  window.addEventListener('library-save-success',event=>{if(event.detail?.pending)return;unsavedChanges=false;saveFailed=false;showSaveStatus('Gespeichert')});
+  function showSaveStatus(text,failed=false,state=failed?'error':'idle'){
+    if(saveStatus.textContent!==text)saveStatus.textContent=text;
+    if(saveStatus.dataset.state!==state)saveStatus.dataset.state=state;
+    saveStatus.parentElement.classList.toggle('is-error',failed);
+    saveRetry.hidden=!failed;
+  }
+  window.addEventListener('library-save-start',()=>{unsavedChanges=true;showSaveStatus('Wird gespeichert …',saveFailed,'pending')});
+  window.addEventListener('library-save-success',event=>{if(event.detail?.pending)return;unsavedChanges=false;saveFailed=false;showSaveStatus('Gespeichert',false,'saved')});
   window.addEventListener('library-save-error',event=>{unsavedChanges=true;saveFailed=true;showSaveStatus(event.detail?.error?.code==='40001'?'Ablage wurde geändert':'Nicht synchronisiert',true)});
-  saveRetry.onclick=()=>{if(recoveryAwaitingChoice){$('#recovery-notice [data-recover]')?.focus();return}if(entitySaving||librarySortSaving)return;if(window.WortwerkRepository.getPendingRecovery()?.preserveOrganisation){window.WortwerkReloadLibrary();return}save().catch(()=>{})};
-  window.addEventListener('online',()=>{if(saveFailed&&!entitySaving&&!librarySortSaving&&!recoveryAwaitingChoice&&!window.WortwerkRepository.getPendingRecovery()?.preserveOrganisation)save().catch(()=>{})});
+  function retryLibrarySave(){
+    if(recoveryAwaitingChoice){$('#recovery-notice [data-recover]')?.focus();return}
+    if(entitySaving||librarySortSaving||libraryLoading||session)return;
+    if(libraryLoadFailed||window.WortwerkRepository.getPendingRecovery()){void window.WortwerkReloadLibrary();return}
+    save().catch(()=>{});
+  }
+  saveRetry.onclick=retryLibrarySave;
+  window.addEventListener('online',()=>{if(saveFailed&&!recoveryAwaitingChoice)retryLibrarySave()});
   window.addEventListener('beforeunload',event=>{if(unsavedChanges){event.preventDefault();event.returnValue=''}});
   let libraryLoadVersion=0;
-  window.WortwerkResetWorkspace=()=>{libraryLoadVersion++;window.WortwerkRepository.resetLibraryOwner?.();if(session)endStudy();clearOrganisationPointer();document.querySelectorAll('dialog[open]').forEach(dialog=>dialog.close());data=initial();activeSubject=null;activeFolder=null;activeSet=null;view='library';expandedSidebarSubjects.clear();cardListSetId=null;librarySearchScope='';librarySearchQuery='';librarySearchLimit=100;formContext=null;librarySortSaving=false;entitySaving=false;$('#entity-form').inert=false;recoveryAwaitingChoice=false;$('#recovery-notice')?.remove();unsavedChanges=false;saveFailed=false;showSaveStatus('');closeNavigation();$('#content').innerHTML=''};
+  window.WortwerkResetWorkspace=()=>{libraryLoadVersion++;workspaceAccountVersion++;donationReturn=null;donationPayment=null;donationStatusChecking=null;donationSubmitting=false;donationCheckoutRequestId=null;window.WortwerkRepository.resetLibraryOwner?.();if(session)endStudy();clearOrganisationPointer();clearNotification();document.querySelectorAll('dialog[open]').forEach(dialog=>dialog.close());data=initial();activeSubject=null;activeFolder=null;activeSet=null;view='library';expandedSidebarSubjects.clear();cardListSetId=null;librarySearchScope='';librarySearchQuery='';librarySearchLimit=100;formContext=null;librarySortSaving=false;libraryLoading=false;libraryLoadFailed=false;entitySaving=false;$('#entity-form').inert=false;recoveryAwaitingChoice=false;$('#recovery-notice')?.remove();unsavedChanges=false;saveFailed=false;showSaveStatus('');closeNavigation();$('#content').innerHTML='';syncLibraryInteractivity()};
 
   function offerPendingRecovery(){
     $('#recovery-notice')?.remove();
-    const recovery=window.WortwerkRepository.getPendingRecovery?.();if(!recovery)return;
-    recoveryAwaitingChoice=true;$('#content').inert=true;unsavedChanges=true;saveFailed=true;showSaveStatus('Lokaler Stand nicht synchronisiert',true);
+    const repository=window.WortwerkRepository;
+    const recovery=repository.getPendingRecovery();
+    if(!recovery){
+      if(recoveryAwaitingChoice||saveFailed){unsavedChanges=false;saveFailed=false;showSaveStatus('Serverstand geladen')}
+      recoveryAwaitingChoice=false;syncLibraryInteractivity();return;
+    }
+    recoveryAwaitingChoice=true;syncLibraryInteractivity();unsavedChanges=true;saveFailed=true;showSaveStatus('Lokaler Stand nicht synchronisiert',true);
     const notice=document.createElement('aside');notice.id='recovery-notice';notice.className='recovery-notice';notice.setAttribute('aria-label','Nicht synchronisierte Änderungen');
-    notice.innerHTML='<h2>Ein lokaler Lernstand wartet auf dich.</h2><p>Ein früherer Speichervorgang wurde nicht abgeschlossen. Beim Wiederherstellen werden lokale Änderungen übernommen; zusätzlich auf dem Server vorhandene Inhalte bleiben erhalten. Lokale Löschungen werden nicht nachgeholt.</p><button type="button" class="primary-button" data-recover>Lokalen Stand wiederherstellen</button><button type="button" class="quiet-button" data-keep-server>Serverstand behalten</button>';
+    notice.innerHTML='<h2>Ein lokaler Lernstand wartet auf dich.</h2><p>Ein früherer Speichervorgang wurde nicht abgeschlossen. Du kannst ausstehende Änderungen wiederherstellen. Lokale Löschungen werden nicht nachgeholt.</p><p role="alert" data-recovery-error hidden></p><button type="button" class="primary-button" data-recover>Lokalen Stand wiederherstellen</button><button type="button" class="quiet-button" data-recovery-backup hidden>Lokalen Stand herunterladen</button><button type="button" class="quiet-button" data-keep-server>Serverstand behalten</button>';
+    if(recovery.inMemoryOnly)notice.querySelector('p').append(' Diese Sicherung bleibt verfügbar, solange dieser Tab offen ist.');
     $('#content').before(notice);
-    notice.querySelector('[data-recover]').onclick=async()=>{data=window.WortwerkModel.normalizeLibrary(window.WortwerkRepository.mergePendingLibrary(data,recovery.library,{preserveOrganisation:recovery.preserveOrganisation}));recoveryAwaitingChoice=false;notice.remove();render();try{await save();toast('Lokaler Lernstand wiederhergestellt.')}catch{toast('Der lokale Stand ist wieder geöffnet. Prüfe die Verbindung und speichere erneut.')}};
-    notice.querySelector('[data-keep-server]').onclick=()=>{window.WortwerkRepository.discardPendingRecovery();recoveryAwaitingChoice=false;unsavedChanges=false;saveFailed=false;showSaveStatus('Serverstand geladen');notice.remove();render()};
+    const download=notice.querySelector('[data-recovery-backup]');
+    const restore=notice.querySelector('[data-recover]');
+    const keep=notice.querySelector('[data-keep-server]');
+    const warning=notice.querySelector('[data-recovery-error]');
+    download.hidden=!recovery.inMemoryOnly;
+    download.onclick=()=>{
+      const link=document.createElement('a');
+      const url=URL.createObjectURL(new Blob([JSON.stringify(recovery,null,2)],{type:'application/json'}));
+      link.href=url;link.download='wortwerk-lokale-wiederherstellung.json';document.body.append(link);link.click();link.remove();
+      setTimeout(()=>URL.revokeObjectURL(url),1000);
+    };
+    restore.onclick=async()=>{
+      restore.disabled=true;keep.disabled=true;warning.hidden=true;
+      try{
+        const loaded=await window.WortwerkReloadLibrary({offerRecovery:false});
+        if(!notice.isConnected)return;
+        if(!loaded){warning.textContent='Der aktuelle Serverstand konnte nicht geprüft werden. Versuche es erneut.';warning.hidden=false;download.hidden=false;return;}
+        if(repository.getPendingRecovery()?.token!==recovery.token){offerPendingRecovery();return}
+        const restored=repository.mergePendingLibrary(data,recovery.library,{changes:recovery.changes,preserveOrganisation:recovery.preserveOrganisation});
+        data=window.WortwerkModel.normalizeLibrary(restored);
+      }catch(error){
+        warning.textContent=error?.code==='RECOVERY_CONFLICT'
+          ?recovery.changes
+            ?'Ein Teil dieser Inhalte wurde zwischenzeitlich auf einem anderen Gerät geändert oder gelöscht. Dein lokaler Stand ist weiterhin gesichert und kann heruntergeladen werden.'
+            :'Der älteren Sicherung fehlt ein Vergleichsstand. Du kannst sie herunterladen und mit dem aktuellen Stand abgleichen.'
+          :'Der lokale Stand konnte nicht geöffnet werden. Du kannst die Sicherung herunterladen.';
+        warning.hidden=false;download.hidden=false;return;
+      }finally{
+        restore.disabled=false;keep.disabled=false;
+      }
+      recoveryAwaitingChoice=false;notice.remove();render();
+      try{await save();toast('Lokaler Lernstand wiederhergestellt.','success')}catch{toast('Der lokale Stand ist wieder geöffnet. Prüfe die Verbindung und speichere erneut.','error')}
+    };
+    keep.onclick=()=>{
+      if(!repository.discardPendingRecovery(recovery.token)){void window.WortwerkReloadLibrary();return}
+      recoveryAwaitingChoice=false;unsavedChanges=false;saveFailed=false;showSaveStatus('Serverstand geladen');notice.remove();render();
+    };
   }
-  window.WortwerkReloadLibrary=async()=>{
+  window.WortwerkReloadLibrary=async({offerRecovery=true}={})=>{
     const version=++libraryLoadVersion;
+    libraryLoading=true;syncLibraryInteractivity();
     clearOrganisationPointer();
     moveDialog.close();
     try{
       const loaded=await window.WortwerkRepository.loadLibrary(window.WortwerkModel.normalizeLibrary);
       if(version!==libraryLoadVersion)return false;
+      libraryLoadFailed=false;
       data=loaded;
       render();
-      offerPendingRecovery();
+      if(offerRecovery)offerPendingRecovery();
       return true;
-    }catch(error){
+    }catch{
       if(version!==libraryLoadVersion)return false;
-      console.error('Lernbibliothek konnte nicht geladen werden.',error);
-      $('#content').innerHTML='<section class="empty-state"><h2>Deine Bibliothek konnte nicht geladen werden.</h2><p>Bitte prüfe deine Verbindung und lade die Seite erneut.</p><button class="quiet-button" onclick="location.reload()">Erneut laden</button></section>';
+      libraryLoadFailed=true;
+      console.error('Lernbibliothek konnte nicht geladen werden.');
+      renderLibraryLoadError();
       return false;
+    }finally{
+      if(version===libraryLoadVersion){libraryLoading=false;syncLibraryInteractivity()}
     }
   };
   window.WortwerkShareDestinations=()=>data.subjects.map(({id,name})=>({id,name}));
   window.WortwerkSaveSharedCopy=async (expectedUserId,saveCopy,isCurrent)=>{
     const version=libraryLoadVersion;
     try{
+      if(session)throw new Error('Beende zuerst die laufende Lernrunde, damit ihr Fortschritt erhalten bleibt.');
       const owner=await window.WortwerkRepository.flushLibraryWrites();
       if(owner!==expectedUserId||version!==libraryLoadVersion)throw new Error('Die aktive Sitzung hat sich geändert. Bitte versuche es erneut.');
     }catch(error){

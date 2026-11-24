@@ -1,10 +1,10 @@
-import { donationStatusFromStripeSession, isValidDonationAmountCents } from '../donation-values.mjs';
+import { donationStatusFromStripeSession, isDonationCheckoutSessionId, isValidDonationAmountCents } from '../donation-values.mjs';
 import { getAuthenticatedUser, getDonationEventStore, getStripe, json } from '../server/donation-utils.mjs';
 
 function isWortwerkDonationSession(session, userId) {
-  const newDonation = session.metadata?.purpose === 'voluntary_donation';
-  const legacyDonation = session.metadata?.support === 'voluntary';
-  return session.mode === 'payment' &&
+  const newDonation = session?.metadata?.purpose === 'voluntary_donation';
+  const legacyDonation = session?.metadata?.support === 'voluntary';
+  return session?.mode === 'payment' &&
     session.metadata?.app === 'wortwerk' &&
     (newDonation || legacyDonation) &&
     session.metadata?.user_id === userId &&
@@ -15,14 +15,14 @@ function isWortwerkDonationSession(session, userId) {
 
 export function createDonationStatusHandler({ authenticate = getAuthenticatedUser, stripeClient = getStripe, eventStore = getDonationEventStore } = {}) {
   return async function GET(request) {
-    const auth = await authenticate(request).catch(error => {
-      console.error('Spendenstatus-Supabase-Authentifizierung fehlgeschlagen.', error.message);
+    const auth = await authenticate(request).catch(() => {
+      console.error('Spendenstatus-Supabase-Authentifizierung fehlgeschlagen.');
       return { error: json({ error: 'Die sichere Zahlungsprüfung ist noch nicht vollständig konfiguriert.' }, 503) };
     });
     if (auth.error) return auth.error;
 
     const sessionId = new URL(request.url).searchParams.get('session_id') || '';
-    if (!/^cs_(?:test_|live_)?[A-Za-z0-9]+$/.test(sessionId)) {
+    if (!isDonationCheckoutSessionId(sessionId)) {
       return json({ error: 'Die Checkout-Referenz ist ungültig.' }, 400);
     }
 
@@ -35,14 +35,17 @@ export function createDonationStatusHandler({ authenticate = getAuthenticatedUse
 
     try {
       const session = await stripe.checkout.sessions.retrieve(sessionId, { expand: ['payment_intent'] });
-      if (!isWortwerkDonationSession(session, auth.user.id)) {
+      if (session?.id !== sessionId || !isWortwerkDonationSession(session, auth.user.id)) {
         return json({ error: 'Diese Checkout-Session gehört nicht zu deinem Konto.' }, 403);
       }
 
-      const paymentIntent = typeof session.payment_intent === 'string'
-        ? await stripe.paymentIntents.retrieve(session.payment_intent)
-        : session.payment_intent;
-      const status = donationStatusFromStripeSession(session, paymentIntent);
+      let status = donationStatusFromStripeSession(session);
+      if (status === 'pending' && session.payment_intent) {
+        const paymentIntent = typeof session.payment_intent === 'string'
+          ? await stripe.paymentIntents.retrieve(session.payment_intent)
+          : session.payment_intent;
+        status = donationStatusFromStripeSession(session, paymentIntent);
+      }
       if (status !== 'paid') return json({ status });
 
       // A success screen requires both Stripe's current paid state and a matching,
@@ -67,7 +70,7 @@ export function createDonationStatusHandler({ authenticate = getAuthenticatedUse
       }
       if (!confirmation) return json({ status: 'pending' });
       if (confirmation.currency !== 'chf' || confirmation.amount_total !== session.amount_total) {
-        console.error('Stripe- und Webhook-Spendenbetrag stimmen nicht überein.', { sessionId: session.id });
+        console.error('Stripe- und Webhook-Spendenbetrag stimmen nicht überein.');
         return json({ error: 'Der Zahlungsbetrag konnte nicht eindeutig bestätigt werden.' }, 502);
       }
 

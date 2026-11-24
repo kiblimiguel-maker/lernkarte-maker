@@ -229,6 +229,40 @@
     return library;
   }
 
+  function nextCardPosition(cards, setId) {
+    let next = 0;
+    for (const card of cards) {
+      if (card.setId === setId && Number.isSafeInteger(card.position)) next = Math.max(next, card.position + 1);
+    }
+    return next;
+  }
+
+  function moveCardInOrder(cards, id, direction, timestamp) {
+    if (direction !== -1 && direction !== 1) return false;
+    const index = cards.findIndex(card => card.id === id);
+    const destination = index + direction;
+    if (index < 0 || destination < 0 || destination >= cards.length) return false;
+
+    const distinctPositions = cards.every(({ position }, i) =>
+      Number.isSafeInteger(position) && (i === 0 || position > cards[i - 1].position));
+    const updatePosition = (card, position) => {
+      if (card.position === position) return;
+      card.position = position;
+      card.updatedAt = timestamp;
+    };
+    if (distinctPositions) {
+      const sourcePosition = cards[index].position;
+      updatePosition(cards[index], cards[destination].position);
+      updatePosition(cards[destination], sourcePosition);
+    } else {
+      // Repair tied or legacy positions so the new order survives a reload.
+      const ordered = cards.slice();
+      [ordered[index], ordered[destination]] = [ordered[destination], ordered[index]];
+      ordered.forEach(updatePosition);
+    }
+    return true;
+  }
+
   function createImportedCards(rows, { setId, position, timestamp, createId }) {
     return rows.map((row, index) => ({
       id: createId(),
@@ -494,8 +528,11 @@
   }
 
   function summarizeResults(results) {
-    const known = results.filter(result => result === true).length;
-    const missed = results.filter(result => result === false).length;
+    let known = 0, missed = 0;
+    for (const result of results) {
+      if (result === true) known++;
+      else if (result === false) missed++;
+    }
     const unrated = results.length - known - missed;
     const evaluated = known + missed;
     return { known, missed, unrated, evaluated, percentage: evaluated ? Math.round(known / evaluated * 100) : 0 };
@@ -520,7 +557,7 @@
     return -1;
   }
 
-  const api = { normalizeLibrary, getLibrarySiblings, reorderLibraryItems, canMoveLibraryItem, moveLibraryItem, nextLibraryPosition, getFolderDescendantIds, createImportedCards, createCopiedCards, nextSetName, swapSetCardSides, recordCardAnswer, updateCardAnswer, createStudySession, getStudyResults, getStudyResult, getStudyCurrentIndex, getStudyCard, getNextStudyCardId, visitStudyCard, navigateStudySession, shuffleStudyCards, setStudyAnswer, getCardProgress, getSetProgress, resetSetProgress, summarizeResults, summarizeSession, nextUnratedIndex };
+  const api = { normalizeLibrary, getLibrarySiblings, reorderLibraryItems, canMoveLibraryItem, moveLibraryItem, nextLibraryPosition, getFolderDescendantIds, nextCardPosition, moveCardInOrder, createImportedCards, createCopiedCards, nextSetName, swapSetCardSides, recordCardAnswer, updateCardAnswer, createStudySession, getStudyResults, getStudyResult, getStudyCurrentIndex, getStudyCard, getNextStudyCardId, visitStudyCard, navigateStudySession, shuffleStudyCards, setStudyAnswer, getCardProgress, getSetProgress, resetSetProgress, summarizeResults, summarizeSession, nextUnratedIndex };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (typeof globalThis !== 'undefined') globalThis.WortwerkModel = api;
 })();

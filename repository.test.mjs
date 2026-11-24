@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 const { normalizeLibrary, reorderLibraryItems, moveLibraryItem, getLibrarySiblings } = createRequire(import.meta.url)('./model.js');
-import { toLibraryRows, claimLegacyCache, createLibraryLoadGuard, createLibraryWriter, createPendingRecovery, deriveRecentStudySets, mergePendingLibrary, deleteStaleRows, LIBRARY_STORAGE_KEY, LEGACY_MIGRATION_KEY, readAllRows, userLibraryCacheKey, userLibraryPendingKey } from './repository-core.mjs';
+import { toLibraryRows, claimLegacyCache, createLibraryLoadGuard, createLibraryWriter, createPendingRecovery, deriveRecentStudySets, mergePendingLibrary, deleteStaleRows, LIBRARY_STORAGE_KEY, LEGACY_MIGRATION_KEY, readAllRows, readLibraryRows, userLibraryCacheKey, userLibraryPendingKey } from './repository-core.mjs';
 
 const rows = Array.from({ length: 50_251 }, (_, index) => ({ id: `card-${index}` }));
 const ranges = [];
@@ -17,6 +17,35 @@ assert.deepEqual(ranges.at(-1), [50_000, 50_499]);
 assert.equal(ranges.length, 101);
 await assert.rejects(readAllRows({ range: async () => ({ data: null, error: new Error('query failed') }) }), /query failed/);
 await assert.rejects(readAllRows(query, 0), RangeError);
+await assert.rejects(readAllRows({ range: async () => ({ data: null, error: null }) }), /nicht gelesen/);
+
+let remainingRows = Array.from({ length: 6 }, (_, index) => ({ id: `card-${index}`, data: { id: `card-${index}` } }));
+const cursors = [];
+const keyedReadClient = {
+  from(table) {
+    assert.equal(table, 'cards');
+    let after;
+    return {
+      select(columns) { assert.equal(columns, 'id,data'); return this; },
+      eq(key, owner) { assert.equal(key, 'user_id'); assert.equal(owner, 'owner-a'); return this; },
+      order(key, options) { assert.equal(key, 'id'); assert.deepEqual(options, { ascending: true }); return this; },
+      gt(key, value) { assert.equal(key, 'id'); after = value; return this; },
+      async range(start, end) {
+        assert.deepEqual([start, end], [0, 2]);
+        cursors.push(after);
+        const data = remainingRows.filter(row => after === undefined || row.id > after).slice(0, 3);
+        if (after === undefined) remainingRows = remainingRows.slice(1); // Another tab deletes an earlier record between pages.
+        return { data, error: null };
+      }
+    };
+  }
+};
+assert.deepEqual((await readLibraryRows(keyedReadClient, 'cards', 'owner-a', 3)).map(row => row.id),
+  ['card-0', 'card-1', 'card-2', 'card-3', 'card-4', 'card-5']);
+assert.deepEqual(cursors, [undefined, 'card-2', 'card-5'], 'a cursor advances without skipping rows when an earlier record is deleted');
+await assert.rejects(readLibraryRows({
+  from() { return { select() { return this; }, eq() { return this; }, order() { return this; }, async range() { return { data: [{ id: 'bad', data: null }] }; } }; }
+}, 'cards', 'owner-a'), /unvollständigen Serverantwort/);
 
 const existing = Array.from({ length: 1201 }, (_, index) => ({ id: `old-${index}` }));
 const deleteBatches = [];
@@ -184,9 +213,10 @@ const writes = [];
 let currentUser = 'writer-owner';
 let failNextWrite = false;
 let failTable = null;
+let ownerChecks = 0;
 const writerErrors = [];
 const writerClient = {
-  auth: { async getUser() { return { data: { user: { id: currentUser } }, error: null }; } },
+  auth: { async getUser() { ownerChecks += 1; return { data: { user: { id: currentUser } }, error: null }; } },
   async rpc(name, { p_table: table, p_rows: records }) {
     assert.equal(name, 'save_library_organisation_rows');
     for (const { row, expected } of records) {
@@ -226,8 +256,10 @@ const writeLibrary = normalizeLibrary({
 await writer.save(writeLibrary, currentUser);
 assert.deepEqual(writes.filter(write => write.table === 'cards').map(write => write.count), [500, 500, 201], 'large saves are batched');
 writes.length = 0;
+const ownerChecksBeforeNoop = ownerChecks;
 await writer.save(writeLibrary, currentUser);
 assert.equal(writes.length, 0, 'unchanged snapshots perform no database writes');
+assert.equal(ownerChecks, ownerChecksBeforeNoop, 'unchanged snapshots perform no network requests');
 writeLibrary.cards[0].correctCount = 1;
 await writer.save(writeLibrary, currentUser);
 assert.deepEqual(writes, [{ table: 'cards', action: 'upsert', count: 1 }], 'one answer updates only its changed card');
@@ -409,6 +441,7 @@ assert.equal(recoveryAfterReload.get('offline-owner').token, staleOrganisationRe
 assert.equal(recoveryAfterReload.get('offline-owner').savedAt, '2026-11-04T18:00:00.000Z');
 recoveryAfterReload.acknowledge('offline-owner', staleOrganisationRecovery);
 recovery.stage('offline-owner', recoveryLibrary);
+assert.equal(recovery.discard('offline-owner', 'outdated-notice'), false, 'an outdated notice cannot discard a newer recovery');
 recovery.discard('another-owner');
 assert.notEqual(recovery.get('offline-owner'), null);
 recovery.discard('offline-owner');
@@ -431,23 +464,94 @@ const localRecoveryLibrary = {
   studySessions: { 'shared-set': { id: 'local-session', setId: 'shared-set', startedAt: '2026-11-04T10:00:00Z' } },
   studyHistory: []
 };
-const mergedRecovery = mergePendingLibrary(remoteRecoveryLibrary, localRecoveryLibrary);
-assert.deepEqual(mergedRecovery.sets.map(set => set.id), ['shared-set', 'remote-set']);
-assert.equal(mergedRecovery.sets[0].name, 'Local edit');
-assert.deepEqual(mergedRecovery.cards.map(card => card.id), ['shared-card', 'remote-card', 'local-card']);
-assert.equal(mergedRecovery.cards[0].attemptCount, 3);
-assert.equal(mergedRecovery.folders[0].id, 'new-remote-folder', 'recovery preserves folders that were absent from the local snapshot');
-assert.equal(mergedRecovery.studySessions['shared-set'].id, 'local-session');
-assert.equal(mergedRecovery.studySessions['remote-set'].id, 'other-session');
-assert.equal(mergedRecovery.studyHistory[0].id, 'remote-completion', 'recovery never replays deletion of server-only data');
+assert.throws(() => mergePendingLibrary(remoteRecoveryLibrary, localRecoveryLibrary), { code: 'RECOVERY_CONFLICT' },
+  'a legacy draft cannot confirm which rows changed since it has no baseline');
 assert.equal(remoteRecoveryLibrary.sets[0].name, 'Remote name');
-assert.deepEqual(mergedRecovery.recent.map(entry => entry.setId), ['shared-set', 'remote-set']);
-const preservedRecovery = mergePendingLibrary(organisationAfter, staleStudy, { preserveOrganisation: true });
-const preservedSet = preservedRecovery.sets.find(set => set.id === 'moving');
-assert.equal(preservedSet.subjectId, 'destination');
-assert.equal(preservedSet.folderId, null);
-assert.equal(preservedSet.position, 1);
-assert.equal(preservedSet.lastStudiedAt, '2026-11-14T10:00:00.000Z', 'recovery restores learning activity while preserving the server location');
+const confirmedLegacy = mergePendingLibrary(remoteRecoveryLibrary, { cards: [remoteRecoveryLibrary.cards[0]] });
+assert.deepEqual(confirmedLegacy.cards, remoteRecoveryLibrary.cards, 'a legacy draft can be acknowledged when every contained row already matches the server');
+assert.deepEqual(confirmedLegacy.studyHistory, remoteRecoveryLibrary.studyHistory);
+
+const versionedBase = normalizeLibrary({
+  subjects: [{ id: 'recovery-subject', name: 'French' }],
+  sets: [{ id: 'recovery-set', subjectId: 'recovery-subject' }],
+  cards: [
+    { id: 'recovery-edited', setId: 'recovery-set', front: 'mot', back: 'Wort' },
+    { id: 'recovery-untouched', setId: 'recovery-set', front: 'école', back: 'Schule' },
+    { id: 'recovery-removed-remotely', setId: 'recovery-set', front: 'route', back: 'Strasse' }
+  ],
+  studySessions: { 'recovery-set': { id: 'old-round', setId: 'recovery-set', cardIds: ['recovery-edited'], results: [null], index: 0, startedAt: '2026-11-01T10:00:00Z' } }
+});
+const versionedWriter = createLibraryWriter({ client: writerClient });
+versionedWriter.prime('recovery-owner', versionedBase);
+const versionedLocal = structuredClone(versionedBase);
+versionedLocal.cards.find(card => card.id === 'recovery-edited').back = 'das Wort';
+versionedLocal.studySessions['recovery-set'].id = 'new-round';
+const changes = versionedWriter.recoveryChanges(versionedLocal, 'recovery-owner');
+assert.deepEqual(Object.keys(changes), ['cards', 'studySessions'], 'recovery stores changed records only');
+assert.equal(changes.cards.length, 1);
+assert.equal(changes.studySessions[0].before.id, 'old-round', 'replacement sessions are compared per deck');
+const versionedToken = recovery.stage('recovery-owner', versionedLocal, { changes });
+const versionedDraft = recoveryAfterReload.get('recovery-owner');
+assert.equal(versionedDraft.library, undefined, 'a versioned draft does not store the entire library');
+assert.deepEqual(versionedDraft.changes, changes);
+recovery.preserveOrganisation('recovery-owner');
+assert.equal(recoveryAfterReload.get('recovery-owner').preserveOrganisation, true);
+
+const freshServer = structuredClone(versionedBase);
+freshServer.cards.find(card => card.id === 'recovery-untouched').back = 'die Schule';
+freshServer.cards = freshServer.cards.filter(card => card.id !== 'recovery-removed-remotely');
+const previouslyEditedIndex = freshServer.cards.findIndex(card => card.id === 'recovery-edited');
+freshServer.cards[previouslyEditedIndex] = Object.fromEntries(Object.entries(freshServer.cards[previouslyEditedIndex]).reverse());
+const restoredDraft = mergePendingLibrary(freshServer, undefined, { changes: versionedDraft.changes });
+assert.equal(restoredDraft.cards.find(card => card.id === 'recovery-edited').back, 'das Wort');
+assert.equal(restoredDraft.cards.find(card => card.id === 'recovery-untouched').back, 'die Schule', 'another device’s edits to untouched cards survive recovery');
+assert.equal(restoredDraft.cards.some(card => card.id === 'recovery-removed-remotely'), false, 'recovery does not resurrect untouched cards removed on another device');
+assert.equal(restoredDraft.studySessions['recovery-set'].id, 'new-round');
+assert.deepEqual(mergePendingLibrary(restoredDraft, undefined, { changes: versionedDraft.changes }), restoredDraft, 'already-written recovery entries are idempotent');
+
+const sameCardConflict = structuredClone(freshServer);
+sameCardConflict.cards[previouslyEditedIndex].back = 'another device';
+assert.throws(() => mergePendingLibrary(sameCardConflict, undefined, { changes }), { code: 'RECOVERY_CONFLICT', conflictCount: 1 });
+assert.equal(sameCardConflict.cards[previouslyEditedIndex].back, 'another device');
+assert.equal(recoveryAfterReload.get('recovery-owner').token, versionedToken, 'a conflict leaves the browser draft intact');
+const deletedEditedCard = { ...freshServer, cards: freshServer.cards.filter(card => card.id !== 'recovery-edited') };
+assert.throws(() => mergePendingLibrary(deletedEditedCard, undefined, { changes }), { code: 'RECOVERY_CONFLICT' });
+const deletedParent = { ...freshServer, sets: [] };
+assert.throws(() => mergePendingLibrary(deletedParent, undefined, { changes: { cards: [{ before: null, after: { id: 'new-card', setId: 'recovery-set' } }] } }), { code: 'RECOVERY_CONFLICT' });
+
+const versionedStaleWriter = createLibraryWriter({ client: organisationClient });
+versionedStaleWriter.prime(organisationOwner, organisationBefore);
+const organisationDraft = versionedStaleWriter.recoveryChanges(staleStudy, organisationOwner);
+const repairedOrganisation = mergePendingLibrary(organisationAfter, undefined, { changes: organisationDraft, preserveOrganisation: true });
+assert.deepEqual(repairedOrganisation.sets.find(set => set.id === 'moving'),
+  { ...organisationAfter.sets.find(set => set.id === 'moving'), lastStudiedAt: '2026-11-14T10:00:00.000Z' });
+const capacityValues = new Map();
+let capacityFull = false;
+const capacityStorage = {
+  getItem: key => capacityValues.get(key),
+  setItem(key, value) {
+    if (capacityFull) throw new Error('quota exceeded');
+    capacityValues.set(key, value);
+  },
+  removeItem: key => capacityValues.delete(key)
+};
+const recoveringTab = createPendingRecovery({ storage: capacityStorage });
+const secondTab = createPendingRecovery({ storage: capacityStorage });
+const persistedDraft = recoveringTab.stage('capacity-owner', versionedLocal, { changes });
+const inMemoryChanges = structuredClone(changes);
+inMemoryChanges.cards[0].after.back = 'only in this tab';
+capacityFull = true;
+let memoryDraft;
+console.warn = () => {};
+try { memoryDraft = recoveringTab.stage('capacity-owner', versionedLocal, { changes: inMemoryChanges }); }
+finally { console.warn = originalWarn; }
+assert.equal(recoveringTab.get('capacity-owner').inMemoryOnly, true);
+assert.equal(recoveringTab.get('capacity-owner').changes.cards[0].after.back, 'only in this tab');
+assert.equal(secondTab.get('capacity-owner').token, persistedDraft, 'a failed storage write retains the prior durable draft');
+capacityFull = false;
+const otherTabsDraft = secondTab.stage('capacity-owner', versionedLocal, { changes });
+recoveringTab.acknowledge('capacity-owner', memoryDraft);
+assert.equal(secondTab.get('capacity-owner').token, otherTabsDraft, 'successful volatile recovery cannot clear a more recent draft from another tab');
 const recentLibrary = { sets: [{ id: 'from-set', lastStudiedAt: '2026-11-04T10:00:00Z' }, { id: 'from-session' }, { id: 'from-history' }, { id: 'invalid', lastStudiedAt: 'invalid date' }],
   studySessions: { 'from-session': { setId: 'from-session', startedAt: '2026-11-03T10:00:00Z' } },
   studyHistory: [{ setId: 'from-history', completedAt: '2026-11-02T10:00:00Z' }, { setId: 'deleted-set', completedAt: '2026-11-05T10:00:00Z' }],
@@ -471,6 +575,7 @@ assert.equal(loadGuard.activeUserId, 'account-b', 'an older getUser response can
 
 const fetchTicket = loadGuard.begin();
 assert.equal(loadGuard.activeUserId, null, 'an in-progress load cannot own new writes before data and authentication are verified');
+assert.equal(loadGuard.recoveryUserId, 'account-b', 'a previously verified owner may only keep a local draft during reload');
 await assert.rejects(loadGuard.verifyOwner(fetchTicket, clientB, 'account-a'), error => error.code === 'STALE_LIBRARY_LOAD');
 const logoutAuth = deferred();
 const pendingAfterLogout = loadGuard.verifyOwner(fetchTicket, { auth: { getUser: () => logoutAuth.promise } }, 'account-b');
@@ -478,6 +583,39 @@ loadGuard.reset();
 logoutAuth.resolve({ data: { user: { id: 'account-b' } }, error: null });
 await assert.rejects(pendingAfterLogout, error => error.code === 'STALE_LIBRARY_LOAD');
 assert.equal(loadGuard.activeUserId, null, 'logout invalidates responses and clears access to the former account recovery cache');
+assert.equal(loadGuard.recoveryUserId, null, 'logout cannot associate later drafts with the former account');
+
+for (const shouldLogout of [false, true]) {
+  const transitionGuard = createLibraryLoadGuard();
+  const owner = 'transition-owner';
+  transitionGuard.commit(transitionGuard.begin(), owner);
+  const epoch = transitionGuard.ownerVersion;
+  const authStarted = deferred(), authResult = deferred();
+  const transitionWrites = [];
+  const transitionWriter = createLibraryWriter({
+    client: {
+      auth: { getUser() { authStarted.resolve(); return authResult.promise; } },
+      from(table) { return { async upsert(batch) { transitionWrites.push({ table, batch }); return { error: null }; } }; }
+    }
+  });
+  const saving = transitionWriter.save({ subjects: [{ id: 'in-flight' }] }, owner, {
+    isCurrentOwner: () => transitionGuard.ownerVersion === epoch && transitionGuard.recoveryUserId === owner
+  });
+  await authStarted.promise;
+  const reload = transitionGuard.begin();
+  const flushed = transitionWriter.flush();
+  if (shouldLogout) transitionGuard.reset();
+  authResult.resolve({ data: { user: { id: owner } }, error: null });
+  if (shouldLogout) {
+    await assert.rejects(saving, /aktive Sitzung hat sich geändert/);
+    assert.equal(transitionWrites.length, 0, 'stale auth results cannot start a write after sign-out');
+  } else {
+    await saving;
+    transitionGuard.commit(reload, owner);
+    assert.equal(transitionWrites.length, 1, 'same-account reload allows saves already in progress to finish');
+  }
+  await flushed;
+}
 
 const migrationTicket = loadGuard.begin();
 const migrationPersist = deferred();

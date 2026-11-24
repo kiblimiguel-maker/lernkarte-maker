@@ -20,9 +20,13 @@
   </script>
   <title>Lernkarten Maker · Dein Lernraum</title>
   <meta name="application-name" content="Lernkarten Maker">
+  <meta name="description" content="Deine Lernkarten, Fächer und Lernfortschritte für den Unterricht – kostenlos im Browser lernen und Lernstapel mit anderen teilen.">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Lernkarten Maker">
-  <link rel="icon" type="image/png" sizes="1024x1024" href="assets/app-icon.png">
-  <link rel="apple-touch-icon" sizes="1024x1024" href="assets/app-icon.png">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
   <link rel="stylesheet" href="app.css">
   <link rel="stylesheet" href="french-verb-card.css">
 </head>
@@ -81,14 +85,16 @@
         </div>
         <button type="button" class="icon-button" data-dismiss-shared-library aria-label="Schliessen">×</button>
       </div>
-      <p class="shared-library-counts" id="shared-library-counts" hidden></p>
-      <p class="muted" id="shared-library-description" hidden>Du erhältst eine private, eigenständige Kopie in deiner Bibliothek.</p>
-      <div id="shared-library-destination" hidden>
-        <label class="field-label" for="shared-library-subject">Im Fach speichern</label>
-        <select id="shared-library-subject"></select>
+      <div class="dialog-body" tabindex="0">
+        <p class="shared-library-counts" id="shared-library-counts" hidden></p>
+        <p class="muted" id="shared-library-description" hidden>Du erhältst eine private, eigenständige Kopie in deiner Bibliothek.</p>
+        <div id="shared-library-destination" hidden>
+          <label class="field-label" for="shared-library-subject">Im Fach speichern</label>
+          <select id="shared-library-subject"></select>
+        </div>
+        <p class="field-hint" id="shared-library-status" role="status"></p>
+        <p class="auth-error" id="shared-library-error" role="alert" hidden></p>
       </div>
-      <p class="field-hint" id="shared-library-status" role="status"></p>
-      <p class="auth-error" id="shared-library-error" role="alert" hidden></p>
       <div class="dialog-actions">
         <button type="button" class="quiet-button" data-dismiss-shared-library>Schliessen</button>
         <button type="button" class="primary-button" id="shared-library-action" hidden></button>
@@ -110,16 +116,18 @@
       <header class="topbar">
         <button class="icon-button sidebar-toggle" id="navigation-toggle" aria-label="Seitenleiste ausblenden" aria-controls="app-navigation" aria-expanded="false"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h16v14H4zM9 5v14"/></svg></button>
         <nav class="breadcrumbs" id="breadcrumbs" aria-label="Bibliothekspfad"><span>Bibliothek</span></nav>
-        <div class="save-status-wrap" role="status" aria-live="polite"><span class="save-status" id="save-status"></span><button type="button" class="text-button save-retry" id="save-retry" hidden>Erneut speichern</button></div>
+        <div class="save-status-wrap"><span class="save-status" id="save-status" role="status"></span><button type="button" class="text-button save-retry" id="save-retry" hidden>Erneut speichern</button></div>
         <details class="account-menu">
           <summary aria-label="Konto">
             <span class="account-avatar" aria-hidden="true"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.25"/><path d="M5.5 19v-1.25A3.75 3.75 0 0 1 9.25 14h5.5a3.75 3.75 0 0 1 3.75 3.75V19"/></svg></span>
             <span class="account-label">Konto</span>
             <svg class="account-chevron" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 6 4 4 4-4"/></svg>
           </summary>
-          <div class="account-menu-panel">
-            <div class="account-identity"><span class="field-hint">Angemeldet als</span><span class="account-email" id="account-email"></span></div>
-            <button type="button" class="quiet-button sign-out-button" id="sign-out"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5H5v14h6m-2-7h11m-4-4 4 4-4 4"/></svg>Abmelden</button>
+          <div class="account-menu-body">
+            <div class="account-menu-panel">
+              <div class="account-identity"><span class="field-hint">Angemeldet als</span><span class="account-email" id="account-email"></span></div>
+              <button type="button" class="quiet-button sign-out-button" id="sign-out"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5H5v14h6m-2-7h11m-4-4 4 4-4 4"/></svg>Abmelden</button>
+            </div>
           </div>
         </details>
       </header>
@@ -127,21 +135,53 @@
     </main>
   </div>
 
-  <dialog id="form-dialog" class="dialog" aria-labelledby="form-title"><form method="dialog" id="entity-form"><div class="dialog-head"><div><div class="eyebrow" id="form-eyebrow">NEU</div><h2 id="form-title">Erstellen</h2></div><button type="button" class="icon-button" value="cancel" aria-label="Schliessen" title="Schliessen">×</button></div><div id="form-fields"></div><p id="form-save-error" class="form-save-error" role="alert" hidden></p><div class="dialog-actions"><button type="button" class="quiet-button" value="cancel">Abbrechen</button><button class="primary-button" id="form-submit" value="default">Erstellen</button></div></form></dialog>
-  <dialog id="move-dialog" class="dialog move-dialog" aria-labelledby="move-title"><form id="move-form"><div class="dialog-head"><div><div class="eyebrow">BIBLIOTHEK ORGANISIEREN</div><h2 id="move-title">Verschieben</h2></div><button type="button" class="icon-button" data-cancel-move aria-label="Schliessen">×</button></div><p class="move-item-name" id="move-item-name"></p><p class="field-hint" id="move-origin"></p><label class="field-label" for="move-destination">Neuer Speicherort</label><select id="move-destination" aria-describedby="move-help"></select><p class="field-hint" id="move-help">Der Inhalt und dein Lernfortschritt bleiben erhalten.</p><div class="dialog-actions"><button type="button" class="quiet-button" data-cancel-move>Abbrechen</button><button type="submit" class="primary-button" id="move-submit">Hierher verschieben</button></div></form></dialog>
+  <dialog id="form-dialog" class="dialog" aria-labelledby="form-title">
+    <form method="dialog" id="entity-form">
+      <div class="dialog-head">
+        <div><div class="eyebrow" id="form-eyebrow">NEU</div><h2 id="form-title">Erstellen</h2></div>
+        <button type="button" class="icon-button" value="cancel" aria-label="Schliessen" title="Schliessen">×</button>
+      </div>
+      <div class="dialog-body" tabindex="0"><div id="form-fields"></div></div>
+      <div class="dialog-actions">
+        <p id="form-save-error" class="form-save-error" role="alert" hidden></p>
+        <button type="button" class="quiet-button" value="cancel">Abbrechen</button>
+        <button class="primary-button" id="form-submit" value="default">Erstellen</button>
+      </div>
+    </form>
+  </dialog>
+  <dialog id="move-dialog" class="dialog move-dialog" aria-labelledby="move-title">
+    <form id="move-form">
+      <div class="dialog-head">
+        <div><div class="eyebrow">BIBLIOTHEK ORGANISIEREN</div><h2 id="move-title">Verschieben</h2></div>
+        <button type="button" class="icon-button" data-cancel-move aria-label="Schliessen">×</button>
+      </div>
+      <div class="dialog-body" tabindex="0">
+        <p class="move-item-name" id="move-item-name"></p><p class="field-hint" id="move-origin"></p>
+        <label class="field-label" for="move-destination">Neuer Speicherort</label>
+        <select id="move-destination" aria-describedby="move-help"></select>
+        <p class="field-hint" id="move-help">Der Inhalt und dein Lernfortschritt bleiben erhalten.</p>
+      </div>
+      <div class="dialog-actions">
+        <button type="button" class="quiet-button" data-cancel-move>Abbrechen</button>
+        <button type="submit" class="primary-button" id="move-submit">Hierher verschieben</button>
+      </div>
+    </form>
+  </dialog>
   <dialog id="share-dialog" class="dialog share-dialog" aria-labelledby="share-title">
     <form method="dialog">
       <div class="dialog-head">
         <div><h2 id="share-title">Teilen</h2><p id="share-item-name"></p></div>
         <button type="button" class="icon-button" id="share-close" aria-label="Schliessen" title="Schliessen">×</button>
       </div>
-      <p id="share-explanation" class="field-hint"></p>
-      <div id="share-link-field" hidden>
-        <label class="field-label" for="share-url">Freigabelink</label>
-        <input id="share-url" type="url" readonly spellcheck="false" autocomplete="off">
+      <div class="dialog-body" tabindex="0">
+        <p id="share-explanation" class="field-hint"></p>
+        <div id="share-link-field" hidden>
+          <label class="field-label" for="share-url">Freigabelink</label>
+          <input id="share-url" type="url" readonly spellcheck="false" autocomplete="off">
+        </div>
+        <p id="share-status" class="field-hint" role="status"></p>
+        <p id="share-error" class="form-save-error" role="alert" hidden></p>
       </div>
-      <p id="share-status" class="field-hint" role="status"></p>
-      <p id="share-error" class="form-save-error" role="alert" hidden></p>
       <div class="dialog-actions">
         <button type="button" id="share-native" class="quiet-button" hidden>Teilen …</button>
         <button type="button" id="share-copy" class="primary-button" hidden>Link kopieren</button>
@@ -155,38 +195,42 @@
         <div><div class="eyebrow">TEXTIMPORT</div><h2 id="import-title">Lernkarten aus Text erstellen</h2></div>
         <button type="button" class="icon-button" value="cancel" aria-label="Schliessen">×</button>
       </div>
-      <div class="import-format">
-        <fieldset id="import-mode">
-          <legend class="field-label">Importformat</legend>
-          <div class="import-format-options">
-            <label><input class="sr-only" type="radio" name="import-mode" value="auto" checked><span>Automatisch erkennen</span></label>
-            <label><input class="sr-only" type="radio" name="import-mode" value="vocabulary"><span>Textkarten</span></label>
-            <label><input class="sr-only" type="radio" name="import-mode" value="learning-goals"><span>Lernziele &amp; Stichpunkte</span></label>
-            <label><input class="sr-only" type="radio" name="import-mode" value="french-verbs"><span>Französische Verben</span></label>
+      <div class="dialog-body" tabindex="0">
+        <div class="import-format">
+          <fieldset id="import-mode">
+            <legend class="field-label">Importformat</legend>
+            <div class="import-format-options">
+              <label><input class="sr-only" type="radio" name="import-mode" value="auto" checked><span>Automatisch erkennen</span></label>
+              <label><input class="sr-only" type="radio" name="import-mode" value="vocabulary"><span>Textkarten</span></label>
+              <label><input class="sr-only" type="radio" name="import-mode" value="learning-goals"><span>Lernziele &amp; Stichpunkte</span></label>
+              <label><input class="sr-only" type="radio" name="import-mode" value="french-verbs"><span>Französische Verben</span></label>
+            </div>
+          </fieldset>
+          <p class="import-format-status" id="import-format-status" role="status"></p>
+          <p class="import-description" id="import-auto-description">Die App erkennt Textkarten und Lernziele mit <code>=</code> sowie französische Verben mit <code>|</code>.</p>
+          <p class="import-description" id="import-vocabulary-description" hidden>Eine Karte pro Zeile. Trenne Vorder- und Rückseite mit <code>=</code>. Einen Beispielsatz kannst du ans Ende der jeweiligen Seite setzen, z. B. <code>((Beispielsatz.))</code>.</p>
+          <p class="import-description" id="import-goal-description" hidden>Ein Lernziel pro Zeile. Links vom <code>=</code> steht das Lernziel, rechts beginnt jeder Stichpunkt mit <code>•</code>. Die Punkte erscheinen als Liste auf der Rückseite.</p>
+          <p class="import-description" id="import-verb-description" hidden>Ein Verb pro Zeile. Trenne die elf Felder mit <code>|</code>. Zuerst kommen die deutsche Bedeutung, der französische Infinitiv und der Imparfait-Stamm. Ein Strich markiert eine Lücke. Einen fehlenden Stamm ergänzt die App nach Möglichkeit. Den KI-Prompt findest du unter «Anleitung».</p>
+        </div>
+        <div class="import-source">
+          <label class="field-label" for="import-text">Lernmaterial</label>
+          <textarea id="import-text" rows="8" aria-describedby="import-auto-description" placeholder="Liste einfügen oder eine Textdatei wählen"></textarea>
+          <div class="import-file-row">
+            <label class="quiet-button file-button" for="import-file">＋ Textdatei wählen</label>
+            <input id="import-file" type="file" accept=".txt,text/plain">
+            <span id="import-file-name" class="muted">TXT · UTF-8</span>
           </div>
-        </fieldset>
-        <p class="import-format-status" id="import-format-status" role="status"></p>
-        <p class="import-description" id="import-auto-description">Die App erkennt Textkarten und Lernziele mit <code>=</code> sowie französische Verben mit <code>|</code>.</p>
-        <p class="import-description" id="import-vocabulary-description" hidden>Eine Karte pro Zeile. Trenne Vorder- und Rückseite mit <code>=</code>. Einen Beispielsatz kannst du ans Ende der jeweiligen Seite setzen, z. B. <code>((Beispielsatz.))</code>.</p>
-        <p class="import-description" id="import-goal-description" hidden>Ein Lernziel pro Zeile. Links vom <code>=</code> steht das Lernziel, rechts beginnt jeder Stichpunkt mit <code>•</code>. Die Punkte erscheinen als Liste auf der Rückseite.</p>
-        <p class="import-description" id="import-verb-description" hidden>Ein Verb pro Zeile. Trenne die elf Felder mit <code>|</code>. Zuerst kommen die deutsche Bedeutung, der französische Infinitiv und der Imparfait-Stamm. Ein Strich markiert eine Lücke. Einen fehlenden Stamm ergänzt die App nach Möglichkeit. Den KI-Prompt findest du unter «Anleitung».</p>
-      </div>
-      <div class="import-source">
-        <label class="field-label" for="import-text">Lernmaterial</label>
-        <textarea id="import-text" rows="8" aria-describedby="import-auto-description" placeholder="Liste einfügen oder eine Textdatei wählen"></textarea>
-        <div class="import-file-row">
-          <label class="quiet-button file-button" for="import-file">＋ Textdatei wählen</label>
-          <input id="import-file" type="file" accept=".txt,text/plain">
-          <span id="import-file-name" class="muted">TXT · UTF-8</span>
+        </div>
+        <div class="import-meta"><label class="field-label" for="import-set">Im Lernstapel speichern</label><select id="import-set"></select></div>
+        <div id="import-review">
+          <div class="import-app-update" id="import-app-update" hidden>
+            <p id="import-app-update-status" role="status"></p>
+            <button type="button" class="quiet-button" id="import-app-reload">Seite neu laden</button>
+          </div>
+          <div id="import-preview" class="import-preview" aria-live="polite"></div>
         </div>
       </div>
-      <div class="import-meta"><label class="field-label" for="import-set">Im Lernstapel speichern</label><select id="import-set"></select></div>
-      <div id="import-preview" class="import-preview" aria-live="polite"></div>
       <div class="dialog-actions import-actions">
-        <div class="import-app-update" id="import-app-update" hidden>
-          <p id="import-app-update-status" role="status"></p>
-          <button type="button" class="quiet-button" id="import-app-reload">Seite neu laden</button>
-        </div>
         <p class="import-action-hint" id="import-action-hint" role="status" aria-live="polite">Füge Lernmaterial ein oder wähle eine Textdatei.</p>
         <div class="import-action-buttons">
           <button type="button" class="quiet-button" value="cancel">Abbrechen</button>
@@ -195,23 +239,55 @@
       </div>
     </form>
   </dialog>
-  <dialog id="reset-progress-dialog" class="dialog"><form method="dialog" id="reset-progress-form"><div class="dialog-head"><div><div class="eyebrow">LERNFORTSCHRITT</div><h2>Lernstapel zurücksetzen?</h2></div><button type="button" class="icon-button" id="reset-progress-close" aria-label="Schliessen">×</button></div><p class="muted" id="reset-progress-copy"></p><div class="dialog-actions"><button type="button" class="quiet-button" id="reset-progress-cancel">Abbrechen</button><button type="button" class="reset-confirm-button" id="reset-progress-confirm">Lernfortschritt zurücksetzen</button></div></form></dialog>
+  <dialog id="reset-progress-dialog" class="dialog" aria-labelledby="reset-progress-title">
+    <form method="dialog" id="reset-progress-form">
+      <div class="dialog-head">
+        <div><div class="eyebrow">LERNFORTSCHRITT</div><h2 id="reset-progress-title">Lernstapel zurücksetzen?</h2></div>
+        <button type="button" class="icon-button" id="reset-progress-close" aria-label="Schliessen">×</button>
+      </div>
+      <div class="dialog-body" tabindex="0"><p class="muted" id="reset-progress-copy"></p></div>
+      <div class="dialog-actions">
+        <button type="button" class="quiet-button" id="reset-progress-cancel">Abbrechen</button>
+        <button type="button" class="reset-confirm-button" id="reset-progress-confirm">Lernfortschritt zurücksetzen</button>
+      </div>
+    </form>
+  </dialog>
   <dialog id="settings-dialog" class="dialog settings-dialog" aria-labelledby="settings-title">
     <form method="dialog">
-      <div class="dialog-head"><div><div class="eyebrow">PERSÖNLICHER LERNRAUM</div><h2 id="settings-title">Einstellungen</h2><p class="settings-description">Gestalte deine App und deine Lernkarten. Änderungen werden sofort übernommen und in diesem Browser gespeichert.</p></div><button type="button" class="icon-button" id="settings-close" aria-label="Einstellungen schliessen" title="Schliessen">×</button></div>
-      <section class="appearance-settings">
-        <fieldset class="appearance-options" id="appearance-options" aria-describedby="appearance-hint">
-          <legend>Darstellung</legend>
-          <p class="theme-choice-hint" id="appearance-hint">Graphit ist die Standarddarstellung. Die Oberfläche und deine Kartenfarben kannst du separat wählen.</p>
-          <div class="appearance-choice-grid">
-            <label class="appearance-option" for="app-appearance-dark"><input type="radio" id="app-appearance-dark" name="app-appearance" value="dark" checked><span class="appearance-option-copy"><strong>Dunkel</strong><small>Graphit</small></span></label>
-            <label class="appearance-option" for="app-appearance-light"><input type="radio" id="app-appearance-light" name="app-appearance" value="light"><span class="appearance-option-copy"><strong>Hell</strong><small>Helle Oberfläche</small></span></label>
-            <label class="appearance-option" for="app-appearance-system"><input type="radio" id="app-appearance-system" name="app-appearance" value="system"><span class="appearance-option-copy"><strong>System</strong><small>Wie dein Gerät</small></span></label>
+      <div class="dialog-head"><div><div class="eyebrow">PERSÖNLICHER LERNRAUM</div><h2 id="settings-title">Einstellungen</h2></div><button type="button" class="icon-button" id="settings-close" aria-label="Einstellungen schliessen" title="Schliessen">×</button></div>
+      <div class="dialog-body" tabindex="0">
+        <p class="settings-description">Gestalte deine App und deine Lernkarten. Änderungen werden sofort übernommen und in diesem Browser gespeichert.</p>
+        <section class="app-install" id="app-install" aria-labelledby="app-install-title">
+          <div class="app-install-heading">
+            <div><h3 id="app-install-title">App auf deinem Gerät</h3><p id="app-install-description">Füge die App kostenlos zu deinem Home-Bildschirm, Dock oder Startmenü hinzu.</p></div>
+            <button type="button" class="quiet-button" id="app-install-button" hidden><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m-4-4 4 4 4-4M5 16v4h14v-4"/></svg>App installieren</button>
           </div>
-        </fieldset>
-      </section>
-      <fieldset class="theme-choice-group"><legend>Kartendesign</legend><p class="theme-choice-hint">Gilt für alle Lernstapel ohne eigenes Design. Maskuline Artikel bleiben blau, feminine rot – unabhängig von der Darstellung der App.</p><div id="card-theme-options" class="card-theme-options"></div></fieldset>
-      <section class="settings-reminder"><label class="settings-reminder-label" for="donation-reminder-enabled"><span><strong>Spendenbegrüssung beim App-Start anzeigen</strong><small>Die Begrüssung erscheint höchstens alle drei Monate. Du kannst sie hier dauerhaft ausblenden.</small></span><input id="donation-reminder-enabled" type="checkbox" checked></label></section>
+          <details class="app-install-help" id="app-install-help">
+            <summary>So fügst du die App hinzu</summary>
+            <ul>
+              <li><strong>iPhone und iPad</strong><span>Öffne die Seite in Safari. Wähle «Teilen» → «Zum Home-Bildschirm». Aktiviere «Als Web-App öffnen», falls diese Option erscheint, und tippe auf «Hinzufügen».</span></li>
+              <li><strong>Android</strong><span>Öffne die Seite in Chrome. Wähle im Browser-Menü «App installieren» oder «Zum Startbildschirm hinzufügen».</span></li>
+              <li><strong>Mac</strong><span>Wähle in Safari «Ablage» → «Zum Dock hinzufügen». In Chrome findest du «Seite als App installieren» unter «Streamen, speichern und teilen».</span></li>
+              <li><strong>Windows</strong><span>Wähle in Chrome im Browser-Menü «Streamen, speichern und teilen» → «Seite als App installieren». In Edge findest du die Installation im Menü «Apps».</span></li>
+            </ul>
+            <p>Die verfügbaren Menüpunkte hängen von deinem Browser und seiner Version ab.</p>
+          </details>
+          <p class="app-install-status" id="app-install-status" role="status"></p>
+        </section>
+        <section class="appearance-settings">
+          <fieldset class="appearance-options" id="appearance-options" aria-describedby="appearance-hint">
+            <legend>Darstellung</legend>
+            <p class="theme-choice-hint" id="appearance-hint">Graphit ist die Standarddarstellung. Die Oberfläche und deine Kartenfarben kannst du separat wählen.</p>
+            <div class="appearance-choice-grid">
+              <label class="appearance-option" for="app-appearance-dark"><input type="radio" id="app-appearance-dark" name="app-appearance" value="dark" checked><span class="appearance-option-copy"><strong>Dunkel</strong><small>Graphit</small></span></label>
+              <label class="appearance-option" for="app-appearance-light"><input type="radio" id="app-appearance-light" name="app-appearance" value="light"><span class="appearance-option-copy"><strong>Hell</strong><small>Helle Oberfläche</small></span></label>
+              <label class="appearance-option" for="app-appearance-system"><input type="radio" id="app-appearance-system" name="app-appearance" value="system"><span class="appearance-option-copy"><strong>System</strong><small>Wie dein Gerät</small></span></label>
+            </div>
+          </fieldset>
+        </section>
+        <fieldset class="theme-choice-group"><legend>Kartendesign</legend><p class="theme-choice-hint">Gilt für alle Lernstapel ohne eigenes Design. Maskuline Artikel bleiben blau, feminine rot – unabhängig von der Darstellung der App.</p><div id="card-theme-options" class="card-theme-options"></div></fieldset>
+        <section class="settings-reminder"><label class="settings-reminder-label" for="donation-reminder-enabled"><span><strong>Spendenbegrüssung beim App-Start anzeigen</strong><small>Die Begrüssung erscheint höchstens alle drei Monate. Du kannst sie hier dauerhaft ausblenden.</small></span><input id="donation-reminder-enabled" type="checkbox" checked></label></section>
+      </div>
       <div class="dialog-actions"><button type="button" class="primary-button" id="settings-done">Fertig</button></div>
     </form>
   </dialog>

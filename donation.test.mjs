@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import Stripe from 'stripe';
 import {
   DONATION_MAX_CENTS,
   DONATION_MIN_CENTS,
@@ -8,6 +9,7 @@ import {
   createDonationCheckoutIdempotencyKey,
   donationStatusFromStripeSession,
   formatDonationAmount,
+  isDonationCheckoutSessionId,
   isValidDonationAmountCents,
   markDonationWelcomeShown,
   parseDonationAmountCents,
@@ -19,6 +21,7 @@ import { createStripeWebhookHandler } from './api/stripe-webhook.mjs';
 import { POST as createCheckout, createDonationCheckoutHandler } from './api/support-checkout.mjs';
 import { GET as checkDonationStatus, createDonationStatusHandler } from './api/support-status.mjs';
 import { GET as checkDonationReadiness, isDonationCheckoutConfigured } from './api/support-readiness.mjs';
+import { getAuthenticatedUser, isAllowedAppOrigin } from './server/donation-utils.mjs';
 
 assert.deepEqual(DONATION_PRESETS_CENTS, [500, 1000, 2000]);
 const completeDonationConfig = {
@@ -29,7 +32,11 @@ const completeDonationConfig = {
 assert.equal(isDonationCheckoutConfigured(completeDonationConfig), true);
 assert.equal(isDonationCheckoutConfigured({ ...completeDonationConfig, STRIPE_WEBHOOK_SECRET: '' }), false);
 assert.equal(isDonationCheckoutConfigured({ ...completeDonationConfig, SUPABASE_SECRET_KEY: '' }), false);
+assert.equal(isDonationCheckoutConfigured({ ...completeDonationConfig, VITE_SUPABASE_URL: 'not-a-url' }), false);
 assert.equal(isDonationCheckoutConfigured({ ...completeDonationConfig, APP_BASE_URL: 'http://wortwerk.example' }), false);
+assert.equal(isDonationCheckoutConfigured({ ...completeDonationConfig, APP_BASE_URL: 'http://localhost:5173' }), true);
+assert.equal(isDonationCheckoutConfigured({ ...completeDonationConfig, APP_BASE_URL: 'ftp://localhost:5173' }), false);
+assert.equal(isDonationCheckoutConfigured({ ...completeDonationConfig, APP_BASE_URL: 'https://user@wortwerk.example' }), false);
 assert.equal((await checkDonationReadiness()).status, 200);
 assert.equal(parseDonationAmountCents('0.50'), 50);
 assert.equal(parseDonationAmountCents('12,5'), 1250);
@@ -49,6 +56,9 @@ const requestB = '774dcbce-2627-40c6-8ef9-b0050a35f9f2';
 assert.equal(createDonationCheckoutIdempotencyKey(userId, requestA), createDonationCheckoutIdempotencyKey(userId, requestA));
 assert.notEqual(createDonationCheckoutIdempotencyKey(userId, requestA), createDonationCheckoutIdempotencyKey(userId, requestB));
 assert.equal(createDonationCheckoutIdempotencyKey(userId, 'bad'), null);
+assert.equal(createDonationCheckoutIdempotencyKey(userId, '-'.repeat(36)), null);
+assert.equal(createDonationCheckoutIdempotencyKey(userId, [requestA]), null);
+assert.equal(isDonationCheckoutSessionId('cs_test_' + 'x'.repeat(250)), false);
 
 const storageMap = new Map();
 const storage = {
@@ -75,7 +85,7 @@ const session = {
   amount_total: 1250,
   metadata: { app: 'wortwerk', purpose: 'voluntary_donation' }
 };
-const event = (type, object = session, id = `evt_${type.replaceAll('.', '_')}`) => ({ id, type, data: { object } });
+const event = (type, object = session, id = `evt_${type.replace(/[._]/g, '')}`) => ({ id, type, data: { object } });
 assert.equal(classifyDonationWebhookEvent(event('checkout.session.completed')).payment_status, 'paid');
 assert.equal(classifyDonationWebhookEvent(event('checkout.session.completed', { ...session, payment_status: 'unpaid' })).payment_status, 'pending');
 assert.equal(classifyDonationWebhookEvent(event('checkout.session.async_payment_succeeded')).payment_status, 'paid');
@@ -84,6 +94,8 @@ assert.equal(classifyDonationWebhookEvent(event('checkout.session.expired', { ..
 assert.equal(classifyDonationWebhookEvent(event('checkout.session.completed', { ...session, mode: 'subscription' })), null);
 assert.equal(classifyDonationWebhookEvent(event('checkout.session.completed', { ...session, amount_total: 49 })), null);
 assert.equal(classifyDonationWebhookEvent(event('checkout.session.completed', { ...session, metadata: { app: 'wortwerk', purpose: 'not-a-donation' } })), null);
+assert.equal(classifyDonationWebhookEvent(event('checkout.session.completed', { ...session, id: 123 })), null);
+assert.equal(classifyDonationWebhookEvent(event('checkout.session.completed', session, 123)), null);
 assert.equal(donationStatusFromStripeSession({ ...session, status: 'expired' }), 'expired');
 assert.equal(donationStatusFromStripeSession({ ...session, status: 'open', payment_status: 'unpaid' }, { status: 'requires_payment_method', last_payment_error: {} }), 'failed');
 assert.equal(donationStatusFromStripeSession({ ...session, payment_status: 'unpaid' }), 'pending');
@@ -97,6 +109,8 @@ const duplicateInsert = await persistDonationEventOnce(ledgerRecord, async recor
 });
 assert.deepEqual(firstInsert, { recorded: true, duplicate: false });
 assert.deepEqual(duplicateInsert, { recorded: true, duplicate: true });
+const storageConflict = Object.assign(new Error('write conflict'), { status: 409 });
+await assert.rejects(persistDonationEventOnce(ledgerRecord, async () => { throw storageConflict; }), storageConflict);
 
 process.env.STRIPE_WEBHOOK_SECRET = 'whsec_test_value';
 const webhookEvents = [event('checkout.session.completed')];
@@ -123,7 +137,29 @@ const invalidStripe = { webhooks: { constructEvent: () => { throw new Error('inv
 const invalidHandler = createStripeWebhookHandler({ getStripeClient: () => invalidStripe, persistEvent: async () => assert.fail('invalid event must not be persisted') });
 assert.equal((await invalidHandler(webhookRequest())).status, 400);
 
+const retryableWebhookHandler = createStripeWebhookHandler({
+  getStripeClient: () => verifiedStripe,
+  persistEvent: async () => { throw storageConflict; }
+});
+assert.equal((await retryableWebhookHandler(webhookRequest())).status, 503, 'an unconfirmed write is retried by Stripe');
+
+const signatureClient = new Stripe('local-fixture-only');
+const rawEvent = JSON.stringify(event('checkout.session.async_payment_succeeded'), null, 2);
+const localSignature = signatureClient.webhooks.generateTestHeaderString({ payload: rawEvent, secret: process.env.STRIPE_WEBHOOK_SECRET });
+const signedRequest = new Request('https://wortwerk.test/api/stripe-webhook', {
+  method: 'POST', headers: { 'stripe-signature': localSignature }, body: rawEvent
+});
+let genuineEventRecord;
+const signedWebhookHandler = createStripeWebhookHandler({
+  getStripeClient: () => signatureClient,
+  persistEvent: async record => { genuineEventRecord = record; }
+});
+assert.equal((await signedWebhookHandler(signedRequest)).status, 200);
+assert.equal(genuineEventRecord.payment_status, 'paid', 'a real SDK signature is verified against the exact raw request');
+
 process.env.APP_BASE_URL = 'https://lernkarte-maker.vercel.app';
+assert.equal(isAllowedAppOrigin(new Request('https://wortwerk.test', { headers: { origin: process.env.APP_BASE_URL } })), true);
+assert.equal(isAllowedAppOrigin(new Request('https://wortwerk.test', { headers: { origin: `${process.env.APP_BASE_URL}/another` } })), false);
 const anonymousCheckout = await createCheckout(new Request('https://lernkarte-maker.vercel.app/api/support-checkout', {
   method: 'POST', headers: { origin: 'https://lernkarte-maker.vercel.app', 'content-type': 'application/json' },
   body: JSON.stringify({ amountCents: 500, requestId: requestA })
@@ -134,6 +170,7 @@ const checkoutCalls = [];
 const checkoutHandler = createDonationCheckoutHandler({
   authenticate: async () => ({ user: { id: userId } }),
   allowedOrigin: () => true,
+  checkoutConfigured: () => true,
   stripeClient: () => ({ checkout: { sessions: { create: async (params, options) => {
     checkoutCalls.push({ params, options });
     return { url: 'https://checkout.stripe.com/c/pay_test' };
@@ -156,11 +193,24 @@ assert.equal(checkoutCalls[0].options.idempotencyKey, createDonationCheckoutIdem
 await checkoutHandler(checkoutRequest(500, requestA));
 await checkoutHandler(checkoutRequest(1000, requestB));
 assert.equal(checkoutCalls[1].options.idempotencyKey, checkoutCalls[0].options.idempotencyKey, 'retries reuse the request idempotency key');
+assert.deepEqual(checkoutCalls[1].params, checkoutCalls[0].params, 'Stripe also requires identical parameters for a repeated key');
 assert.notEqual(checkoutCalls[2].options.idempotencyKey, checkoutCalls[0].options.idempotencyKey, 'a later donation gets a separate Checkout session');
 assert.equal(checkoutCalls[2].params.line_items[0].price_data.unit_amount, 1000);
 const invalidAmountResponse = await checkoutHandler(checkoutRequest(49, requestA));
 assert.equal(invalidAmountResponse.status, 400);
 assert.equal(checkoutCalls.length, 3, 'invalid amounts never reach Stripe');
+let attemptedUnconfirmedCheckout = false;
+const checkoutWithoutLedger = createDonationCheckoutHandler({
+  authenticate: async () => ({ user: { id: userId } }),
+  allowedOrigin: () => true,
+  checkoutConfigured: () => isDonationCheckoutConfigured({ ...completeDonationConfig, SUPABASE_SECRET_KEY: '' }),
+  stripeClient: () => {
+    attemptedUnconfirmedCheckout = true;
+    throw new Error('unexpected Stripe use');
+  }
+});
+assert.equal((await checkoutWithoutLedger(checkoutRequest(500, requestA))).status, 503);
+assert.equal(attemptedUnconfirmedCheckout, false, 'checkout requires configuration for payment confirmation');
 
 const paidOwnedSession = {
   ...session,
@@ -170,9 +220,16 @@ const paidOwnedSession = {
 };
 let ledgerConfirmation = { amount_total: 1250, currency: 'chf' };
 let statusSession = paidOwnedSession;
+let paymentIntentReads = 0;
 const statusHandler = createDonationStatusHandler({
   authenticate: async () => ({ user: { id: userId } }),
-  stripeClient: () => ({ checkout: { sessions: { retrieve: async () => statusSession } } }),
+  stripeClient: () => ({
+    checkout: { sessions: { retrieve: async () => statusSession } },
+    paymentIntents: { retrieve: async () => {
+      paymentIntentReads++;
+      return { status: 'requires_payment_method', last_payment_error: {} };
+    } }
+  }),
   eventStore: () => ({ from: () => {
     const query = {
       select: () => query,
@@ -197,9 +254,34 @@ statusSession = { ...paidOwnedSession, client_reference_id: 'another-user' };
 assert.equal((await statusHandler(statusRequest())).status, 403, 'a session from another user cannot be inspected');
 statusSession = { ...paidOwnedSession, status: 'open', payment_status: 'unpaid', payment_intent: { status: 'requires_payment_method', last_payment_error: {} } };
 assert.deepEqual(await (await statusHandler(statusRequest())).json(), { status: 'failed' });
-statusSession = { ...paidOwnedSession, status: 'expired' };
+statusSession = { ...paidOwnedSession, payment_intent: 'pi_fixture' };
+assert.deepEqual(await (await statusHandler(statusRequest())).json(), { status: 'paid', amountCents: 1250, currency: 'chf' });
+statusSession = { ...paidOwnedSession, status: 'expired', payment_intent: 'pi_fixture' };
 assert.deepEqual(await (await statusHandler(statusRequest())).json(), { status: 'expired' });
+assert.equal(paymentIntentReads, 0, 'paid or expired sessions require no extra PaymentIntent lookup');
+statusSession = { ...paidOwnedSession, status: 'open', payment_status: 'unpaid', payment_intent: 'pi_fixture' };
+assert.deepEqual(await (await statusHandler(statusRequest())).json(), { status: 'failed' });
+assert.equal(paymentIntentReads, 1, 'unexpanded PaymentIntents are resolved only when still relevant');
+statusSession = { ...paidOwnedSession, id: 'cs_test_anothersession' };
+assert.equal((await statusHandler(statusRequest())).status, 403, 'the retrieved Checkout session must match the reference');
 assert.equal((await statusHandler(new Request('https://lernkarte-maker.vercel.app/api/support-status?session_id=invalid'))).status, 400);
 assert.equal((await checkDonationStatus(new Request('https://lernkarte-maker.vercel.app/api/support-status?session_id=cs_test_donation123'))).status, 401);
+
+const originalFetch = globalThis.fetch;
+try {
+  process.env.SUPABASE_URL = 'https://supabase.example';
+  process.env.SUPABASE_PUBLISHABLE_KEY = 'fixture-public-key';
+  const authenticatedRequest = new Request('https://wortwerk.test/api/support-status', { headers: { authorization: 'Bearer fixture-only' } });
+  for (const [providerStatus, applicationStatus] of [[503, 503], [429, 503], [401, 401]]) {
+    globalThis.fetch = async url => {
+      assert.equal(new URL(url).origin, 'https://supabase.example');
+      return new Response(JSON.stringify({ message: 'fixture response' }), { status: providerStatus, headers: { 'content-type': 'application/json' } });
+    };
+    const result = await getAuthenticatedUser(authenticatedRequest);
+    assert.equal(result.error.status, applicationStatus);
+  }
+} finally {
+  globalThis.fetch = originalFetch;
+}
 
 console.log('donation.test.mjs passed');

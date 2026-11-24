@@ -4,9 +4,11 @@ import { createAuthLifecycle } from './auth-lifecycle.mjs';
 import { getAppAppearance } from './appearance.mjs';
 import { createLibraryShareReceiver } from './library-share-receiver.js';
 import { forgetShareForSignIn, rememberShareForSignIn } from './library-sharing.mjs';
+import { bindAppInstall } from './app-install.mjs';
 
 // Apply the same saved surface during authentication and in the library.
 getAppAppearance();
+bindAppInstall();
 
 inject({
   mode: import.meta.env.PROD ? 'production' : 'development',
@@ -132,8 +134,8 @@ const lifecycle = createAuthLifecycle({
   },
   showSignedOut,
   resetWorkspace: () => window.WortwerkResetWorkspace?.(),
-  onError(error) {
-    console.error(error);
+  onError() {
+    console.error('Lernkarten-App konnte nicht geladen werden.');
     if (reloadingApp) return;
     const message = 'Die Lernkarten-App konnte nicht geladen werden. Lade die App neu, um es erneut zu versuchen.';
     showSignedOut(message);
@@ -168,11 +170,11 @@ async function startGoogleSignIn() {
       options: { redirectTo }
     });
     if (error) throw error;
-  } catch (error) {
+  } catch {
     forgetShareForSignIn();
     signingIn = false;
     showSignedOut('Die Anmeldung konnte nicht gestartet werden. Bitte prüfe deine Verbindung und versuche es erneut.');
-    console.error('Google OAuth konnte nicht gestartet werden.', error);
+    console.error('Google OAuth konnte nicht gestartet werden.');
   }
 }
 
@@ -183,8 +185,8 @@ signOutButton.addEventListener('click', async () => {
   try {
     const { error } = await supabase.auth.signOut();
     if (error) throw error;
-  } catch (error) {
-    console.error('Abmeldung fehlgeschlagen.', error);
+  } catch {
+    console.error('Abmeldung fehlgeschlagen.');
     window.alert('Die Abmeldung ist fehlgeschlagen. Bitte versuche es erneut.');
   } finally {
     signingOut = false;
@@ -213,13 +215,16 @@ if (!isSupabaseConfigured) {
     // this bootstrap result and must not be overwritten by a stale null/error.
     if (authEventObserved) return;
     if (error) {
-      console.error('Supabase-Session konnte nicht wiederhergestellt werden.', error);
+      console.error('Supabase-Session konnte nicht wiederhergestellt werden.');
       applySession(null, readOAuthError() || 'Die gespeicherte Sitzung konnte nicht geprüft werden. Bitte melde dich erneut an.');
+      authRetry.hidden = false;
       return;
     }
     applySession(data.session, data.session ? '' : readOAuthError());
-  }).catch(error => {
-    console.error('Supabase-Session konnte nicht geprüft werden.', error);
-    if (!authEventObserved) applySession(null, readOAuthError() || 'Die Anmeldung ist gerade nicht erreichbar. Bitte versuche es erneut.');
+  }).catch(() => {
+    if (authEventObserved) return;
+    console.error('Supabase-Session konnte nicht geprüft werden.');
+    applySession(null, readOAuthError() || 'Die Anmeldung ist gerade nicht erreichbar. Bitte versuche es erneut.');
+    authRetry.hidden = false;
   });
 }

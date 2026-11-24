@@ -57,13 +57,14 @@ insert into public.sets (user_id, id, subject_id, folder_id, data)
 select '11111111-1111-4111-8111-111111111111', id, 'share-test-subject-a', folder_id,
   jsonb_build_object('id', id, 'subjectId', 'share-test-subject-a', 'folderId', folder_id,
     'name', title, 'description', 'Lektion à Paris', 'position', position,
-    'cardThemeId', 'lunar-navy-pearl-silver', 'lastStudiedAt', '2026-10-01T00:00:00Z')
+    'cardThemeId', 'lunar-navy-pearl-silver', 'frenchSpeechSide', speech_side,
+    'lastStudiedAt', '2026-10-01T00:00:00Z')
 from (values
-  ('share-test-stack-z', 'Erster Stapel', 'share-test-root', 0),
-  ('share-test-stack-a', 'Zweiter Stapel', 'share-test-root', 1),
-  ('share-test-deep-stack', 'Tiefer Stapel', 'share-test-grandchild', 0),
-  ('share-test-private-stack', 'Privater Stapel', 'share-test-neighbor', 0)
-) as stacks(id, title, folder_id, position);
+  ('share-test-stack-z', 'Erster Stapel', 'share-test-root', 0, 'off'),
+  ('share-test-stack-a', 'Zweiter Stapel', 'share-test-root', 1, 'front'),
+  ('share-test-deep-stack', 'Tiefer Stapel', 'share-test-grandchild', 0, 'back'),
+  ('share-test-private-stack', 'Privater Stapel', 'share-test-neighbor', 0, null)
+) as stacks(id, title, folder_id, position, speech_side);
 
 insert into public.cards (user_id, id, set_id, data)
 select '11111111-1111-4111-8111-111111111111', id, set_id,
@@ -73,8 +74,8 @@ select '11111111-1111-4111-8111-111111111111', id, set_id,
     'lastReviewedAt', '2026-10-01T00:00:00Z', 'nextReviewAt', '2026-10-02T00:00:00Z')
 from (values
   ('share-test-card-z', 'share-test-stack-z', 'eine Burg', 'un château fort', 0),
-  ('share-test-card-a', 'share-test-stack-z', 'die Königin', 'la reine', 1),
-  ('share-test-deep-card', 'share-test-deep-stack', 'ein Schlüssel', 'une clé', 0),
+  ('share-test-card-a', 'share-test-stack-z', 'die Königin', E'• Die Königin.\n• Die Regentin.', 1),
+  ('share-test-deep-card', 'share-test-deep-stack', 'laufen', '@fr-verb:1 courir | cour- | avoir | couru | je cours | tu cours | il / elle / on court | nous courons | vous courez | ils / elles courent', 0),
   ('share-test-private-card', 'share-test-private-stack', 'privat', 'privé', 0)
 ) as cards(id, set_id, front, back, position);
 
@@ -183,6 +184,11 @@ select pg_temp.check_that(
     from public.sets where user_id = auth.uid()),
   'stack fields and relative order survive while private progress is cleared');
 select pg_temp.check_that(
+  (select jsonb_object_agg(data->>'name', data->>'frenchSpeechSide')
+    = '{"Erster Stapel":"off","Zweiter Stapel":"front","Tiefer Stapel":"back"}'::jsonb
+    from public.sets where user_id = auth.uid()),
+  'all explicit speech settings persist when sharing folder contents');
+select pg_temp.check_that(
   (select array_agg(c.data->>'front' order by (c.data->>'position')::integer) = array['eine Burg', 'die Königin']
     from public.cards c join public.sets s on s.user_id = c.user_id and s.id = c.set_id
     where c.user_id = auth.uid() and s.data->>'name' = 'Erster Stapel')
@@ -193,12 +199,20 @@ select pg_temp.check_that(
   and not exists (select from public.study_sessions)
   and not exists (select from public.study_history),
   'card text, order and examples survive under new IDs and clean progress');
+select pg_temp.check_that(
+  (select data->>'back' = E'• Die Königin.\n• Die Regentin.' from public.cards where data->>'front' = 'die Königin')
+  and (select data->>'back' = '@fr-verb:1 courir | cour- | avoir | couru | je cours | tu cours | il / elle / on court | nous courons | vous courez | ils / elles courent'
+    from public.cards where data->>'front' = 'laufen'),
+  'learning goal bullets and French verb conjugations remain encoded in a copy');
 
 select set_config('share_test.import_b_set', public.import_library_share(current_setting('share_test.set'), 'share-test-subject-b')::text, true);
 select pg_temp.check_that(current_setting('share_test.import_b_set')::jsonb @> '{"status":"imported","kind":"set","subjectId":"share-test-subject-b"}'
   and (select folder_id is null from public.sets where user_id = auth.uid() and id = current_setting('share_test.import_b_set')::jsonb->>'id')
   and (select count(*) = 2 from public.cards where user_id = auth.uid() and set_id = current_setting('share_test.import_b_set')::jsonb->>'id'),
   'one stack is imported directly into a chosen subject');
+select pg_temp.check_that(
+  (select data->>'frenchSpeechSide' = 'off' from public.sets where id = current_setting('share_test.import_b_set')::jsonb->>'id'),
+  'an explicit speech setting also persists when sharing a single stack');
 
 select set_config('request.jwt.claim.sub', '33333333-3333-4333-8333-333333333333', true);
 select set_config('request.jwt.claims', '{"sub":"33333333-3333-4333-8333-333333333333","role":"authenticated","is_anonymous":true}', true);

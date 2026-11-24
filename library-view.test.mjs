@@ -1,8 +1,12 @@
 import assert from 'node:assert/strict';
-import { cardListPage, libraryCardCounts, searchLibrary } from './library-view.mjs';
+import { cardListPage, libraryCardsBySet, searchLibrary } from './library-view.mjs';
 const cards = Array.from({ length: 50000 }, (_, index) => ({ id: String(index), setId: index % 2 ? 'a' : 'b', front: `Begriff ${index}`, back: 'un château', backExampleSentence: 'À côté du musée.' }));
 const snapshot = JSON.stringify(cards.slice(0, 5));
-assert.equal(libraryCardCounts(cards).get('a'), 25000);
+const groups = libraryCardsBySet(cards);
+assert.equal(groups.get('a').length, 25000);
+assert.equal(groups.get('b').length, 25000);
+assert.equal(groups.get('a')[0], cards[1]);
+assert.equal(groups.get('a')[1], cards[3]);
 assert.equal(cardListPage(cards).cards.length, 100);
 assert.equal(cardListPage(cards, 'CHATEAU musee').total, 50000);
 assert.equal(cardListPage(cards, 'Begriff 49999').cards[0].id, '49999');

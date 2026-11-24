@@ -22,6 +22,8 @@ Lege im Stripe-Dashboard im **Live-Modus** einen Webhook an:
 
 Das dort angezeigte Signaturgeheimnis kommt in `STRIPE_WEBHOOK_SECRET`. Die Webhook-Adresse akzeptiert nur signierte Stripe-Anfragen. Ereignis-IDs werden in Supabase eindeutig gespeichert; Wiederholungen derselben Nachricht erzeugen keinen zweiten Eintrag. Die Bestätigungsseite zeigt eine Spende erst, wenn sowohl der aktuelle Stripe-Status als auch ein passender, signaturgeprüfter Webhook-Eintrag den tatsächlichen CHF-Betrag bestätigen.
 
+Die Checkout-API prüft vor dem Stripe-Aufruf, ob die Variablen für den Webhook und die dauerhafte Bestätigung gesetzt sind. Bei einer Wiederholung derselben Checkout-Anfrage bleiben Schlüssel und Zahlungsparameter gleich, damit Stripe dieselbe Checkout-Session zurückgeben kann. [Stripe-Dokumentation zu wiederholbaren Anfragen](https://docs.stripe.com/api/idempotent_requests)
+
 ## Schweiz und Freigabe
 
 Schliesse das Stripe-Geschäftskonto-Onboarding ab und hinterlege das gewünschte Auszahlungskonto in der Schweiz. Prüfe im Dashboard, dass das Konto Zahlungen und Auszahlungen in CHF unterstützt. Verwende erst danach Live-Schlüssel und den Live-Webhook. Bis diese Werte gesetzt sind, lehnt die API Zahlungen geschlossen ab; die übrige App bleibt davon unberührt.

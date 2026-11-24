@@ -18,6 +18,7 @@ export function bindLibraryDrag({ identify, targets, resolve, destinations, navi
   function markTargets(state) {
     state.visual.markTargets(targets(state.source));
     state.dirty = true;
+    scheduleFrame(state);
   }
 
   function clearSpring(state) {
@@ -26,22 +27,36 @@ export function bindLibraryDrag({ identify, targets, resolve, destinations, navi
     state.springKey = null;
   }
 
-  function refreshTarget(state) {
+  function recheckAfterLayout(state) {
+    if (state.waitingForLayout) return;
+    const settled = state.visual.layoutSettled();
+    if (!settled) return;
+    state.waitingForLayout = true;
+    settled.then(() => {
+      state.waitingForLayout = false;
+      if (drag === state && !state.target) scheduleFrame(state);
+    });
+  }
+
+  function refreshTarget(state, hit) {
     state.dirty = false;
-    const hit = document.elementFromPoint(state.x, state.y);
     if (hit?.closest('.library-drag-slot')) return;
     const candidate = resolve(state.source, hit, state.x, state.y);
     const previous = state.target;
-    if (candidate?.element === previous?.element && candidate?.placement === previous?.placement) return;
+    if (candidate?.element === previous?.element && candidate?.placement === previous?.placement) {
+      if (!candidate) recheckAfterLayout(state);
+      return;
+    }
     state.target = candidate;
     state.visual.preview(candidate?.placement ? candidate.element : null, candidate?.placement);
     state.visual.highlight(candidate?.element, candidate?.label || 'Ziehe zu einer neuen Position oder in einen Ordner.');
     clearSpring(state);
+    if (!candidate) recheckAfterLayout(state);
     if (!candidate?.open) return;
     state.springKey = candidate.key;
     state.springTimer = setTimeout(() => {
       if (drag !== state || state.springKey !== candidate.key || !candidate.element.isConnected) return;
-      state.visual.restore();
+      state.visual.restore(false);
       state.target = null;
       state.navigated = navigate(state.source, candidate) || state.navigated;
       clearSpring(state);
@@ -57,21 +72,24 @@ export function bindLibraryDrag({ identify, targets, resolve, destinations, navi
     return 0;
   }
 
-  function scroll(state) {
-    const hit = document.elementFromPoint(state.x, state.y);
+  function scroll(state, hit) {
     const bar = state.bar?.contains(hit) ? state.bar : null;
     if (bar) {
       const rect = bar.getBoundingClientRect();
+      const delta = edgeDelta(state.x, rect.left, rect.right);
+      if (!delta) return false;
       const old = bar.scrollLeft;
-      bar.scrollLeft += edgeDelta(state.x, rect.left, rect.right);
+      bar.scrollLeft = old + delta;
       return old !== bar.scrollLeft;
     }
     const sidebar = hit?.closest('.app-sidebar');
     if (sidebar) {
-      const scroller = sidebar.querySelector('.sidebar-subjects');
+      const scroller = state.compactSidebar.matches ? sidebar : sidebar.querySelector('.sidebar-subjects');
       const rect = scroller.getBoundingClientRect();
+      const delta = edgeDelta(state.y, rect.top, rect.bottom);
+      if (!delta) return false;
       const old = scroller.scrollTop;
-      scroller.scrollTop += edgeDelta(state.y, rect.top, rect.bottom);
+      scroller.scrollTop = old + delta;
       return old !== scroller.scrollTop;
     }
     const barTop = state.bar?.getBoundingClientRect().top || window.innerHeight;
@@ -82,15 +100,17 @@ export function bindLibraryDrag({ identify, targets, resolve, destinations, navi
     return old !== window.scrollY;
   }
 
-  function frame() {
-    if (!drag?.visual) return;
-    const state = drag;
-    const scrolled = scroll(state);
-    if (state.dirty || scrolled) {
+  function scheduleFrame(state) {
+    if (state.frame != null) return;
+    state.frame = requestAnimationFrame(() => {
+      state.frame = null;
+      if (state !== drag) return;
+      const hit = document.elementFromPoint(state.x, state.y);
+      const scrolled = scroll(state, hit);
+      refreshTarget(state, scrolled ? document.elementFromPoint(state.x, state.y) : hit);
       state.visual.move(state.x, state.y);
-      refreshTarget(state);
-    }
-    state.frame = requestAnimationFrame(frame);
+      if (scrolled) scheduleFrame(state);
+    });
   }
 
   function start(state) {
@@ -98,9 +118,9 @@ export function bindLibraryDrag({ identify, targets, resolve, destinations, navi
     clearTimeout(state.holdTimer);
     state.visual = createLibraryDragVisuals(state.tile, { x: state.startX, y: state.startY });
     state.bar = destinations(state.source);
+    state.compactSidebar = window.matchMedia('(max-height: 380px)');
     try { document.body.setPointerCapture(state.pointerId); } catch { /* Pointer may have been released. */ }
     markTargets(state);
-    frame();
   }
 
   function finish(commit = false) {
@@ -115,12 +135,10 @@ export function bindLibraryDrag({ identify, targets, resolve, destinations, navi
     if (document.body.hasPointerCapture(state.pointerId)) document.body.releasePointerCapture(state.pointerId);
     state.bar?.remove();
     if (!commit || !state.target) {
-      state.visual.restore();
       const arrival = state.navigated ? cancelNavigation(state.source) : state.tile;
       state.visual.finish(arrival || null);
       return;
     }
-    state.visual.restore();
     drop(state.source, state.target, state.visual);
   }
 
@@ -143,7 +161,11 @@ export function bindLibraryDrag({ identify, targets, resolve, destinations, navi
     if (!drag || drag.pointerId !== event.pointerId) return;
     const state = drag;
     position(state, event.clientX, event.clientY);
-    if (state.visual || Math.hypot(state.x - state.startX, state.y - state.startY) < (state.pointerType === 'mouse' ? 7 : 9)) return;
+    if (state.visual) {
+      if (state.dirty) scheduleFrame(state);
+      return;
+    }
+    if (Math.hypot(state.x - state.startX, state.y - state.startY) < (state.pointerType === 'mouse' ? 7 : 9)) return;
     if (state.pointerType === 'mouse') start(state);
     else finish();
   });
@@ -157,9 +179,23 @@ export function bindLibraryDrag({ identify, targets, resolve, destinations, navi
   document.addEventListener('pointerup', event => {
     if (!drag || drag.pointerId !== event.pointerId) return;
     position(drag, event.clientX, event.clientY);
-    if (drag.visual && drag.dirty) refreshTarget(drag);
+    if (drag.visual) {
+      if (drag.dirty || drag.frame != null || drag.waitingForLayout) refreshTarget(drag, document.elementFromPoint(drag.x, drag.y));
+      drag.visual.move(drag.x, drag.y);
+    }
     finish(true);
   });
+  function refreshGeometry() {
+    if (!drag?.visual) return;
+    drag.dirty = true;
+    scheduleFrame(drag);
+  }
+  window.addEventListener('scroll', refreshGeometry, { capture: true, passive: true });
+  window.addEventListener('resize', () => {
+    if (!drag?.visual) return;
+    drag.bar ||= destinations(drag.source);
+    markTargets(drag);
+  }, { passive: true });
   for (const name of ['pointercancel', 'lostpointercapture']) {
     document.addEventListener(name, event => {
       if (drag?.pointerId === event.pointerId &&

@@ -95,8 +95,12 @@ const DONATION_EVENT_STATUSES = new Map([
   ['checkout.session.expired', () => 'expired']
 ]);
 
+export function isDonationCheckoutSessionId(id) {
+  return typeof id === 'string' && id.length <= 255 && /^cs_(?:test_|live_)?[A-Za-z0-9]+$/.test(id);
+}
+
 export function classifyDonationWebhookEvent(event) {
-  if (!event?.id || !event.id.startsWith('evt_')) return null;
+  if (typeof event?.id !== 'string' || !/^evt_[A-Za-z0-9]+$/.test(event.id)) return null;
   const getStatus = DONATION_EVENT_STATUSES.get(event.type);
   if (!getStatus) return null;
 
@@ -107,7 +111,7 @@ export function classifyDonationWebhookEvent(event) {
     session.mode !== 'payment' ||
     session.metadata?.app !== 'wortwerk' ||
     !purpose ||
-    !session.id?.startsWith('cs_') ||
+    !isDonationCheckoutSessionId(session.id) ||
     session.currency !== 'chf'
   ) return null;
 
@@ -128,7 +132,7 @@ export function classifyDonationWebhookEvent(event) {
 }
 
 export function createDonationCheckoutIdempotencyKey(userId, requestId) {
-  if (typeof userId !== 'string' || !userId || !/^[0-9a-f-]{36}$/i.test(String(requestId || ''))) return null;
+  if (typeof userId !== 'string' || !userId || typeof requestId !== 'string' || !/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(requestId)) return null;
   return `wortwerk-donation-${userId}-${requestId}`;
 }
 
@@ -137,7 +141,7 @@ export async function persistDonationEventOnce(record, persist) {
     await persist(record);
     return { recorded: true, duplicate: false };
   } catch (error) {
-    if (error?.code === '23505' || error?.status === 409) return { recorded: true, duplicate: true };
+    if (error?.code === '23505') return { recorded: true, duplicate: true };
     throw error;
   }
 }

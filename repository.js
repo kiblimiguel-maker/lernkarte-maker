@@ -1,5 +1,5 @@
 import { supabase } from './supabaseClient.js';
-import { LIBRARY_TABLE_FIELDS, LIBRARY_TABLES, createLibraryLoadGuard, createLibraryWriter, createPendingRecovery, deriveRecentStudySets, claimLegacyCache, LIBRARY_STORAGE_KEY, LEGACY_MIGRATION_KEY, readAllRows } from './repository-core.mjs';
+import { LIBRARY_TABLE_FIELDS, LIBRARY_TABLES, createLibraryLoadGuard, createLibraryWriter, createPendingRecovery, deriveRecentStudySets, claimLegacyCache, LIBRARY_STORAGE_KEY, LEGACY_MIGRATION_KEY, readLibraryRows } from './repository-core.mjs';
 
 const tables = LIBRARY_TABLES;
 const fieldMap = LIBRARY_TABLE_FIELDS;
@@ -12,10 +12,16 @@ const loadGuard = createLibraryLoadGuard();
 const failedWrites = new Set();
 export function resetLibraryOwner() { loadGuard.reset(); }
 export function getPendingRecovery() { return recovery.get(loadGuard.activeUserId); }
-export function discardPendingRecovery() { recovery.discard(loadGuard.activeUserId); }
+export function discardPendingRecovery(token) { return recovery.discard(loadGuard.activeUserId ?? loadGuard.recoveryUserId, token); }
+function stageRecovery(userId, library, changes) {
+  return recovery.stage(userId, library, {
+    changes,
+    preserveOrganisation: recovery.get(userId)?.preserveOrganisation
+  });
+}
 export function stagePendingRecovery(library) {
-  const userId = loadGuard.activeUserId;
-  return recovery.stage(userId, library, { preserveOrganisation: recovery.get(userId)?.preserveOrganisation });
+  const userId = loadGuard.recoveryUserId;
+  return userId ? stageRecovery(userId, library, writer.recoveryChanges(library, userId)) : null;
 }
 function emitSaveState(name, detail) {
   if (loadGuard.activeUserId && detail.userId === loadGuard.activeUserId) window.dispatchEvent(new CustomEvent(name, { detail }));
@@ -29,7 +35,7 @@ const writer = createLibraryWriter({
   },
   onError(error, state) {
     if (state.userId) failedWrites.add(state.userId);
-    console.error('Supabase-Speichern fehlgeschlagen.', error);
+    console.error('Supabase-Speichern fehlgeschlagen.');
     emitSaveState('library-save-error', { ...state, error });
   }
 });
@@ -39,7 +45,7 @@ export async function loadLibrary(normalize, { client = supabase, storage = brow
   await writer.flush();
   const user = await loadGuard.verifyOwner(ticket, client);
   const tableResults = await Promise.all(tables.map(async table => {
-    const rows = await readAllRows(client.from(table).select('*').eq('user_id', user.id).order('id', { ascending: true }));
+    const rows = await readLibraryRows(client, table, user.id);
     return [table, rows];
   }));
   const rawRows = Object.fromEntries(tableResults);
@@ -60,7 +66,7 @@ export async function loadLibrary(normalize, { client = supabase, storage = brow
     console.warn('Lokaler Lernkarten-Cache konnte nicht geprüft werden.', error);
   }
   const legacy = await claimLegacyCache({ legacyRaw: localRaw, migrationOwner, hasRemote, remote, normalize, persist, userId: user.id, storage, assertCurrent: () => loadGuard.assertCurrent(ticket) });
-  await loadGuard.verifyOwner(ticket, client, user.id);
+  if (legacy.imported) await loadGuard.verifyOwner(ticket, client, user.id);
   loadGuard.commit(ticket, user.id);
   failedWrites.delete(user.id);
   if (legacy.imported || (localRaw && !migrationOwner)) return legacy.library;
@@ -69,8 +75,16 @@ export async function loadLibrary(normalize, { client = supabase, storage = brow
 
 export function saveLibrary(library, suppliedUserId) {
   const userId = suppliedUserId || loadGuard.activeUserId;
-  const token = recovery.stage(userId, library, { preserveOrganisation: recovery.get(userId)?.preserveOrganisation });
-  return writer.save(library, userId).then(() => {
+  if (!userId) {
+    stagePendingRecovery(library);
+    return Promise.reject(new Error('Die Bibliothek wird neu geladen. Ungespeicherte Änderungen können anschliessend wiederhergestellt werden.'));
+  }
+  let token;
+  const ownerVersion = loadGuard.ownerVersion;
+  return writer.save(library, userId, {
+    onRecoveryChanges: changes => { token = stageRecovery(userId, library, changes); },
+    isCurrentOwner: () => loadGuard.ownerVersion === ownerVersion && (Boolean(suppliedUserId) || loadGuard.recoveryUserId === userId)
+  }).then(() => {
     recovery.acknowledge(userId, token);
   }, error => {
     if (error?.code === '40001') recovery.preserveOrganisation(userId);
@@ -79,14 +93,16 @@ export function saveLibrary(library, suppliedUserId) {
 }
 
 export async function saveLibraryOrganisation(before, after) {
+  const ownerVersion = loadGuard.ownerVersion;
   const userId = await flushLibraryWrites();
-  return writer.organise(before, after, userId);
+  return writer.organise(before, after, userId, () => loadGuard.ownerVersion === ownerVersion && loadGuard.recoveryUserId === userId);
 }
 
 export async function flushLibraryWrites() {
   const userId = loadGuard.activeUserId;
+  const ownerVersion = loadGuard.ownerVersion;
   await writer.flush();
-  if (!userId || loadGuard.activeUserId !== userId) {
+  if (!userId || loadGuard.activeUserId !== userId || loadGuard.ownerVersion !== ownerVersion) {
     throw new Error('Die aktive Sitzung hat sich geändert. Bitte versuche es erneut.');
   }
   if (failedWrites.has(userId) || recovery.get(userId)) {

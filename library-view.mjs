@@ -1,8 +1,11 @@
 // Derived presentation data only; card records and their order stay untouched.
-export function libraryCardCounts(cards) {
-  const counts = new Map();
-  for (const card of cards) counts.set(card.setId, (counts.get(card.setId) || 0) + 1);
-  return counts;
+export function libraryCardsBySet(cards) {
+  const groups = new Map();
+  for (const card of cards) {
+    if (!groups.has(card.setId)) groups.set(card.setId, []);
+    groups.get(card.setId).push(card);
+  }
+  return groups;
 }
 
 const searchable = value => String(value || '').normalize('NFKD').replace(/\p{M}/gu, '').toLocaleLowerCase('de');
