@@ -1510,8 +1510,6 @@ button { touch-action: manipulation; }
 .main-area {
   margin-left: var(--sidebar-width);
   min-width: 0;
-  /* Keep the viewport steady when the account row changes the header height. */
-  overflow-anchor: none;
 }
 .app-sidebar {
   position: fixed;
@@ -1562,8 +1560,6 @@ button { touch-action: manipulation; }
   border-bottom: 1px solid var(--line);
   background: var(--background);
 }
-.topbar:has(.account-menu[open]) { align-items: flex-start; }
-.topbar:has(.account-menu[open]) > :is(.breadcrumbs, .save-status-wrap) { min-height: var(--control-size); }
 .breadcrumbs { display: flex; flex: 1; align-items: center; min-width: 0; font-size: 13px; }
 .breadcrumbs > span { display: flex; align-items: center; min-width: 0; }
 .breadcrumbs > span:first-child { flex: 0 0 auto; }
@@ -1610,12 +1606,15 @@ summary::-webkit-details-marker { display: none; }
 }
 .account-chevron { color: var(--muted); flex: none; }
 .account-menu[open] .account-chevron { transform: rotate(180deg); color: inherit; }
-/* The panel adds height to the topbar while the summary still sets its column width. */
+/* Keep account actions anchored to their trigger without resizing the header. */
 .account-menu-body {
+  position: absolute;
+  z-index: 25;
+  inset: calc(100% + var(--space-2)) 0 auto auto;
   display: flex;
   justify-content: flex-end;
-  contain: inline-size;
-  padding-block: var(--space-2) var(--space-1);
+  width: max-content;
+  max-width: calc(100vw - 2 * var(--workspace-gutter));
 }
 .account-menu-panel, .management-menu-panel, .item-menu-panel {
   width: max-content;
@@ -1644,21 +1643,28 @@ summary::-webkit-details-marker { display: none; }
 }
 .account-menu-panel {
   flex: none;
-  min-width: min(216px, calc(100vw - 2 * var(--workspace-gutter)));
-  max-width: min(300px, calc(100vw - 2 * var(--workspace-gutter)));
-  max-height: max(64px, calc(100dvh - 112px));
+  width: 252px;
+  min-width: 0;
+  max-width: calc(100vw - 2 * var(--workspace-gutter));
+  max-height: calc(100dvh - var(--topbar-height) - 16px);
   overflow-y: auto;
   overscroll-behavior: contain;
+  scrollbar-width: thin;
 }
 .account-menu-panel > * { flex-shrink: 0; }
 .account-identity { display: grid; gap: 3px; padding: 8px 10px 11px; border-bottom: 1px solid var(--line); }
 .account-identity .field-hint { margin: 0; color: var(--quiet-text); font-size: 11px; }
 .account-email { color: var(--text); font-size: 13px; font-weight: 560; overflow-wrap: anywhere; }
-.account-menu-panel .sign-out-button { justify-content: flex-start; gap: var(--space-2); margin-top: 2px; padding-inline: 10px; border-color: transparent; border-radius: var(--radius-compact); background: transparent; }
-.account-menu-panel .sign-out-button svg { flex: none; }
+.account-menu-panel .account-action-button { justify-content: flex-start; gap: var(--space-2); width: 100%; min-height: var(--control-size); padding: 9px 10px; border-color: transparent; border-radius: var(--radius-compact); background: transparent; color: var(--text); font-size: 13px; text-align: left; overflow-wrap: anywhere; touch-action: manipulation; }
+.account-menu-panel .account-action-button svg { flex: none; }
+.account-menu-panel .account-action-button:focus-visible { outline-offset: -2px; }
+.account-menu-panel .account-action-button:disabled { color: var(--disabled-text); }
+.account-error { margin: 2px 0 0; padding: 8px 10px; color: var(--danger); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
 @media (hover: hover) {
+  .account-menu-panel .account-action-button:hover:not(:disabled) { background: var(--surface-hover); }
   .account-menu-panel .sign-out-button:hover:not(:disabled) { background: var(--danger-surface); color: var(--danger); }
 }
+.account-menu-panel .account-action-button:active:not(:disabled) { background: var(--surface-raised); }
 .account-menu-panel .sign-out-button:active:not(:disabled) { background: var(--danger-hover); color: var(--danger); }
 :is(.management-menu-panel, .item-menu-panel) button {
   --menu-hover: var(--surface-hover);

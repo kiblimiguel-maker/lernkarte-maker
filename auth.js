@@ -31,10 +31,14 @@ const authRetry = document.querySelector('#auth-retry');
 const authLoading = document.querySelector('#auth-loading');
 const accountEmail = document.querySelector('#account-email');
 const signOutButton = document.querySelector('#sign-out');
+const switchAccountButton = document.querySelector('#account-switch');
+const accountMenu = document.querySelector('.account-menu');
+const accountError = document.querySelector('#account-error');
 
 let authEventObserved = false;
 let signingIn = false;
 let signingOut = false;
+let switchingAccount = false;
 let reloadingApp = false;
 let accountUserId = null;
 const sharedLibrary = createLibraryShareReceiver({ signIn: startGoogleSignIn });
@@ -61,6 +65,26 @@ function setError(message = '') {
   authRetry.hidden = true;
 }
 
+function updateAccountActions() {
+  const busy = signingOut || switchingAccount;
+  signOutButton.disabled = busy;
+  switchAccountButton.disabled = busy;
+  switchAccountButton.setAttribute('aria-busy', String(switchingAccount));
+  switchAccountButton.querySelector('span').textContent = switchingAccount ? 'Weiter zu Google …' : 'Konto wechseln';
+}
+
+function setAccountError(message = '') {
+  accountError.textContent = message;
+  accountError.hidden = !message;
+  if (message) accountMenu.open = true;
+}
+
+accountMenu.addEventListener('focusout', event => {
+  // Safari may leave focus on the body when a menu button is clicked. Closing
+  // on that null focus target would hide the action before its click fires.
+  if (event.relatedTarget && !switchingAccount && !accountMenu.contains(event.relatedTarget)) accountMenu.open = false;
+});
+
 function readOAuthError() {
   const query = new URLSearchParams(window.location.search);
   const hash = new URLSearchParams(window.location.hash.replace(/^#/, ''));
@@ -86,6 +110,9 @@ function readOAuthError() {
 }
 
 function showSignedOut(message = '') {
+  accountUserId = null;
+  accountMenu.open = false;
+  setAccountError('');
   bootScreen.hidden = true;
   appShell.hidden = true;
   authScreen.hidden = false;
@@ -115,9 +142,10 @@ const lifecycle = createAuthLifecycle({
   reloadApp: () => window.WortwerkReloadLibrary?.(),
   updateAccount(user) {
     setError('');
+    if (accountUserId !== user.id) setAccountError('');
     accountUserId = user.id;
     accountEmail.textContent = user.email || 'Angemeldet';
-    signOutButton.disabled = signingOut;
+    updateAccountActions();
   },
   showLoading() {
     sharedLibrary.setAuth('loading', { id: accountUserId });
@@ -178,10 +206,50 @@ async function startGoogleSignIn() {
   }
 }
 
+switchAccountButton.addEventListener('click', async () => {
+  if (!supabase || switchingAccount || signingOut || signingIn || !accountUserId || appShell.hidden) return;
+  const ownerId = accountUserId;
+  const wasInert = appShell.inert;
+  let prepared = false;
+  let failed = false;
+  switchingAccount = true;
+  setAccountError('');
+  updateAccountActions();
+  // Freeze edits before flushing the queue. No later click can enqueue a save
+  // between the last write and the OAuth redirect.
+  appShell.inert = true;
+  try {
+    const savedOwner = await window.WortwerkRepository.flushLibraryWrites();
+    if (savedOwner !== ownerId || accountUserId !== ownerId) throw new Error('Account changed');
+    prepared = true;
+    if (!rememberShareForSignIn()) throw new Error('Return link unavailable');
+    const redirectTo = new URL(window.location.pathname, window.location.origin).toString();
+    const { data, error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: { redirectTo, queryParams: { prompt: 'select_account' }, skipBrowserRedirect: true }
+    });
+    if (error || !data?.url || accountUserId !== ownerId) throw error || new Error('Account switch unavailable');
+    const destination = new URL(data.url);
+    if (!['http:', 'https:'].includes(destination.protocol)) throw new Error('Invalid login URL');
+    window.location.assign(destination.toString());
+  } catch {
+    failed = true;
+    forgetShareForSignIn();
+    setAccountError(prepared
+      ? 'Der Kontowechsel konnte nicht gestartet werden. Du bist weiterhin mit deinem bisherigen Konto angemeldet. Bitte versuche es erneut.'
+      : 'Deine Änderungen sind noch nicht vollständig gespeichert. Bitte prüfe die Verbindung und speichere sie, bevor du das Konto wechselst.');
+  } finally {
+    switchingAccount = false;
+    appShell.inert = wasInert;
+    updateAccountActions();
+    if (failed && !appShell.hidden) switchAccountButton.focus({ preventScroll: true });
+  }
+});
+
 signOutButton.addEventListener('click', async () => {
-  if (!supabase || signingOut) return;
+  if (!supabase || signingOut || switchingAccount) return;
   signingOut = true;
-  signOutButton.disabled = true;
+  updateAccountActions();
   try {
     const { error } = await supabase.auth.signOut();
     if (error) throw error;
@@ -190,7 +258,7 @@ signOutButton.addEventListener('click', async () => {
     window.alert('Die Abmeldung ist fehlgeschlagen. Bitte versuche es erneut.');
   } finally {
     signingOut = false;
-    signOutButton.disabled = false;
+    updateAccountActions();
   }
 });
 
@@ -210,17 +278,19 @@ if (!isSupabaseConfigured) {
     }
   });
 
-  supabase.auth.getSession().then(({ data, error }) => {
+  supabase.auth.getSession().then(async ({ data, error }) => {
     // A real auth event received while restoration was pending is newer than
     // this bootstrap result and must not be overwritten by a stale null/error.
     if (authEventObserved) return;
+    const oauthMessage = readOAuthError();
     if (error) {
       console.error('Supabase-Session konnte nicht wiederhergestellt werden.');
-      applySession(null, readOAuthError() || 'Die gespeicherte Sitzung konnte nicht geprüft werden. Bitte melde dich erneut an.');
+      applySession(null, oauthMessage || 'Die gespeicherte Sitzung konnte nicht geprüft werden. Bitte melde dich erneut an.');
       authRetry.hidden = false;
       return;
     }
-    applySession(data.session, data.session ? '' : readOAuthError());
+    await applySession(data.session, data.session ? '' : oauthMessage);
+    if (data.session && oauthMessage && accountUserId === data.session.user.id && !appShell.hidden) setAccountError(oauthMessage);
   }).catch(() => {
     if (authEventObserved) return;
     console.error('Supabase-Session konnte nicht geprüft werden.');

@@ -126,7 +126,9 @@
           <div class="account-menu-body">
             <div class="account-menu-panel">
               <div class="account-identity"><span class="field-hint">Angemeldet als</span><span class="account-email" id="account-email"></span></div>
-              <button type="button" class="quiet-button sign-out-button" id="sign-out"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5H5v14h6m-2-7h11m-4-4 4 4-4 4"/></svg>Abmelden</button>
+              <button type="button" class="quiet-button account-action-button" id="account-switch"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h15m-4-4 4 4-4 4M20 17H5m4-4-4 4 4 4"/></svg><span>Konto wechseln</span></button>
+              <button type="button" class="quiet-button account-action-button sign-out-button" id="sign-out"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5H5v14h6m-2-7h11m-4-4 4 4-4 4"/></svg>Abmelden</button>
+              <p class="account-error" id="account-error" role="alert" hidden></p>
             </div>
           </div>
         </details>
