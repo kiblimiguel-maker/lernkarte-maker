@@ -8,7 +8,8 @@
     "preview": "vite preview",
     "test:interactions": "node scripts/interaction-browser.test.mjs",
     "test:account-menu": "node scripts/account-menu-browser.test.mjs",
-    "test": "node parser.test.js && node learning-goals.test.mjs && node french-verbs.test.mjs && node model.test.js && node shuffle.test.js && node presentation.test.js && node card-themes.test.js && node appearance.test.mjs && node study-keyboard.test.mjs && node study-speech.test.mjs && node auth-lifecycle.test.mjs && node library-view.test.mjs && node library-drag-visuals.test.mjs && node repository.test.mjs && node donation.test.mjs && node web-app-manifest.test.mjs && node app-install.test.mjs"
+    "test": "node parser.test.js && node learning-goals.test.mjs && node french-verbs.test.mjs && node exams.test.mjs && node model.test.js && node shuffle.test.js && node presentation.test.js && node card-themes.test.js && node appearance.test.mjs && node study-keyboard.test.mjs && node study-speech.test.mjs && node auth-lifecycle.test.mjs && node library-view.test.mjs && node library-drag-visuals.test.mjs && node repository.test.mjs && node donation.test.mjs && node web-app-manifest.test.mjs && node app-install.test.mjs",
+    "test:exams": "node scripts/exams-browser.test.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "2.117.2",

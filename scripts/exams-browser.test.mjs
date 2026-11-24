@@ -1,0 +1,243 @@
+/**
+ * Optional Tests-area browser regressions. Runs a local Vite fixture with all
+ * external traffic mocked; Google OAuth and production accounts are never used.
+ * PLAYWRIGHT_MODULE=/path/to/playwright node scripts/exams-browser.test.mjs
+ * Optional: PLAYWRIGHT_CHROMIUM_EXECUTABLE, QA_ENGINES=chromium.
+ */
+import assert from 'node:assert/strict';
+import { createRequire } from 'node:module';
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
+import { createServer } from 'node:net';
+import { resolve, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { setTimeout as delay } from 'node:timers/promises';
+import { mkdir } from 'node:fs/promises';
+
+const require = createRequire(import.meta.url);
+let playwright;
+try { playwright = require(process.env.PLAYWRIGHT_MODULE || 'playwright'); }
+catch { throw new Error('Browserprüfung benötigt ein separat installiertes Playwright. Setze PLAYWRIGHT_MODULE auf dessen Modulpfad.'); }
+const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const backend = process.env.QA_BACKEND_ORIGIN || 'https://exam-fixture.supabase.invalid';
+const storageKey=`sb-${new URL(backend).hostname.split('.')[0]}-auth-token`;
+const user = { id: '212c8ce0-d613-4864-a588-98da450ca3e3', email: 'exam-qa@example.invalid', aud: 'authenticated', role: 'authenticated', app_metadata: { provider: 'google' }, user_metadata: {} };
+const expires = Math.floor(Date.now() / 1000) + 3600;
+const session = {
+  user, access_token: `eyJhbGciOiJIUzI1NiJ9.${Buffer.from(JSON.stringify({ sub: user.id, exp: expires, role: 'authenticated' })).toString('base64url')}.c2ln`,
+  refresh_token: 'fixture', expires_in: 3600, expires_at: expires, token_type: 'bearer'
+};
+const fixture = {
+  subjects: [
+    { id: 'fr', name: 'Französisch', color: '#7D9DBD', emoji: '🇫🇷', position: 0 },
+    { id: 'bio', name: 'Biologie', color: '#86A48B', emoji: '🧬', position: 1 }
+  ],
+  folders: [{ id: 'unit', subjectId: 'fr', name: 'Unterricht', parentId: null, position: 0, color: '#7D9DBD' }],
+  sets: [
+    { id: 'vocab', subjectId: 'fr', folderId: 'unit', name: 'Vokabeln', position: 0 },
+    { id: 'extra', subjectId: 'fr', folderId: null, name: 'Weitere Karten', position: 1 },
+    { id: 'cell', subjectId: 'bio', folderId: null, name: 'Zellbiologie', position: 0 }
+  ],
+  cards: [
+    { id: 'card-home', setId: 'vocab', front: 'das Haus', back: 'la maison', position: 0, correctCount: 0, incorrectCount: 0 },
+    { id: 'card-word', setId: 'extra', front: 'das Wort', back: 'le mot', position: 0, correctCount: 0, incorrectCount: 0 },
+    { id: 'card-cell', setId: 'cell', front: 'Zellkern', back: 'Enthält Erbinformation', position: 0, correctCount: 0, incorrectCount: 0 }
+  ],
+  study_sessions: [], study_history: []
+};
+const toRow = data => ({ id: data.id, user_id: user.id, data, ...(data.subjectId && { subject_id: data.subjectId }), ...(data.folderId && { folder_id: data.folderId }), ...(data.setId && { set_id: data.setId }) });
+const json = body => ({ status: 200, contentType: 'application/json', headers: { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': 'GET,POST,DELETE,OPTIONS' }, body: JSON.stringify(body) });
+
+async function startServer() {
+  const reservation = createServer();
+  reservation.listen(0, '127.0.0.1');
+  await once(reservation, 'listening');
+  const port = reservation.address().port;
+  await new Promise(resolve => reservation.close(resolve));
+  const origin = `http://127.0.0.1:${port}`;
+  const child = spawn(process.execPath, [resolve(repo, 'node_modules/vite/bin/vite.js'), '--host', '127.0.0.1', '--port', String(port), '--strictPort'], {
+    cwd: repo, env: { ...process.env, VITE_SUPABASE_URL: backend, VITE_SUPABASE_ANON_KEY: 'isolated-browser-fixture-only', VITE_SUPABASE_PUBLISHABLE_KEY: 'isolated-browser-fixture-only' }, stdio: ['ignore', 'pipe', 'pipe']
+  });
+  let startup = '';
+  child.stdout.on('data', chunk => { startup = (startup + chunk).slice(-2000); });
+  child.stderr.on('data', chunk => { startup = (startup + chunk).slice(-2000); });
+  for (let attempt = 0; attempt < 100; attempt++) {
+    if (child.exitCode !== null) throw new Error(`Lokale Testvorschau konnte nicht starten: ${startup}`);
+    try { if ((await fetch(origin)).ok) return { child, origin }; } catch { /* Server is starting. */ }
+    await delay(100);
+  }
+  child.kill();
+  throw new Error(`Lokale Testvorschau ist nicht erreichbar: ${startup}`);
+}
+
+async function setup(browser, origin, viewport, reduced, colorScheme) {
+  const context = await browser.newContext({ viewport, isMobile: viewport.width < 800, hasTouch: viewport.width < 800, colorScheme, reducedMotion: reduced ? 'reduce' : 'no-preference' });
+  const db = Object.fromEntries(Object.entries(fixture).map(([table, records]) => [table, new Map(records.map(data => [data.id, toRow(structuredClone(data))]))]));
+  const errors = [], unexpected = [];
+  let failFolderWrite = false;
+  await context.addInitScript(({session,storageKey}) => {
+    localStorage.setItem(storageKey, JSON.stringify(session));
+    localStorage.setItem('wortwerk-donation-reminder-enabled-v1', 'false');
+    localStorage.setItem('lernkarten-appearance-v1', 'system');
+  }, {session,storageKey});
+  await context.route('**/*', async route => {
+    const request = route.request(), url = new URL(request.url());
+    if (url.origin === origin && url.pathname.startsWith('/_vercel/')) return route.fulfill({status:200,body:''});
+    if (url.origin === origin) return route.continue();
+    if (url.hostname === 'va.vercel-scripts.com') return route.fulfill({ status: 200, body: '' });
+    if (url.origin !== backend) { unexpected.push(`${url.origin}${url.pathname}`); return route.abort(); }
+    if (request.method() === 'OPTIONS') return route.fulfill(json(null));
+    if (url.pathname === '/auth/v1/user') return route.fulfill(json(user));
+    if (url.pathname === '/rest/v1/rpc/organise_library') {
+      const {p_changes}=request.postDataJSON();
+      for(const [table,changes] of Object.entries(p_changes))for(const change of changes){const current=db[table].get(change.id);const row={...current,data:{...current.data,...change}};if(change.subjectId)row.subject_id=change.subjectId;if(table==='sets')row.folder_id=change.folderId||null;db[table].set(row.id,row);}
+      return route.fulfill(json(null));
+    }
+    if (url.pathname === '/rest/v1/rpc/save_library_organisation_rows') {
+      const { p_table, p_rows } = request.postDataJSON();
+      if (p_table === 'folders' && failFolderWrite) { failFolderWrite=false;return route.fulfill({ ...json({message:'Isolated save failure'}),status:500 }); }
+      assert.ok(db[p_table], 'Unbekannte Tabelle in der isolierten Speicherung');
+      for (const { row } of p_rows) db[p_table].set(row.id, row);
+      return route.fulfill(json(null));
+    }
+    const table = url.pathname.split('/').at(-1);
+    if (!db[table]) { unexpected.push(url.pathname); return route.fulfill({ ...json({ message: 'Unknown fixture endpoint' }), status: 404 }); }
+    if (request.method() === 'POST') {
+      if (table === 'folders' && failFolderWrite) { failFolderWrite=false;return route.fulfill({ ...json({message:'Isolated save failure'}),status:500 }); }
+      const rows = request.postDataJSON();
+      for (const row of Array.isArray(rows) ? rows : [rows]) db[table].set(row.id, row);
+      return route.fulfill(json(null));
+    }
+    if (request.method() === 'DELETE') {
+      const ids = (url.searchParams.get('id') || '').replace(/^in\.\(/, '').replace(/\)$/, '').split(',');
+      ids.forEach(id => db[table].delete(id));
+      return route.fulfill(json(null));
+    }
+    const cursor = url.searchParams.get('id')?.replace(/^gt\./, ''), offset = Number(url.searchParams.get('offset') || 0), limit = Number(url.searchParams.get('limit') || 500);
+    const rows = [...db[table].values()].filter(row => !cursor || row.id > cursor).sort((a, b) => a.id.localeCompare(b.id)).slice(offset, offset + limit);
+    return route.fulfill({ ...json(rows), headers: { ...json(rows).headers, 'content-range': rows.length ? `0-${rows.length - 1}/*` : '*/*' } });
+  });
+  const page = await context.newPage();
+  page.on('pageerror', error => errors.push(error.message));
+  await page.goto(origin);
+  await page.getByRole('heading', { name: 'Bibliothek', exact: true }).waitFor();
+  return { page, context, errors, unexpected, db, rejectFolderOnce:()=>{failFolderWrite=true;} };
+}
+
+async function verifyExams(browser,origin,engine,viewport,reduced,colorScheme){
+  const {page,context,errors,unexpected,db,rejectFolderOnce}=await setup(browser,origin,viewport,reduced,colorScheme);
+  const testsNav=async()=>{if(viewport.width<=760)await page.locator('#navigation-toggle').click();await page.locator('[data-view="tests"]').click();};
+  const noOverflow=async()=>assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1),false);
+  try{
+    assert.equal(await page.locator('[data-view="recent"]').count(),0);
+    await testsNav();await page.locator('[data-exam-create]').first().click();
+    await page.locator('#exam-name').fill('Verben-Test');
+    await page.locator('#exam-subject').selectOption('fr');
+    await page.locator('#exam-date').fill('2027-01-15');
+    await page.locator('input[name="examSetIds"][value="vocab"]').check();
+    assert.equal(await page.locator('input[name="examSetIds"][value="cell"]').count(),0,'Other subjects are not selectable.');
+    await page.locator('#exam-notes').fill('Kapitel 1–3\nUnregelmässige Verben üben.');
+    await page.locator('#exam-add-link').click();
+    await page.locator('[data-exam-link-title]').fill('Schulunterlagen');
+    await page.locator('[data-exam-link-url]').fill('https://example.org/unterricht');
+    rejectFolderOnce();
+    await page.locator('#exam-save').click();
+    await page.locator('#exam-error:not([hidden])').waitFor();
+    assert.equal(await page.locator('#exam-name').inputValue(),'Verben-Test');
+    assert.equal(await page.locator('#exam-dialog').evaluate(dialog=>dialog.open),true);
+    assert.equal(await page.locator('#exam-form').evaluate(form=>form.inert),false);
+    await page.locator('#exam-save').click();
+    await page.locator('#exam-title').waitFor();
+    const exam=[...db.folders.values()].find(row=>row.data.kind==='exam');
+    assert.ok(exam);assert.equal(exam.user_id,user.id);assert.equal(exam.subject_id,'fr');
+    assert.deepEqual(exam.data.examSetIds,['vocab']);
+    assert.equal(exam.data.examDate,'2027-01-15');
+    assert.equal(db.sets.get('vocab').folder_id,'unit','Associating material never moves the original.');
+    assert.equal(await page.locator('[data-open-set="vocab"]').count(),1);
+    assert.equal(await page.locator('.exam-notes').textContent(),'Kapitel 1–3\nUnregelmässige Verben üben.');
+    assert.equal(await page.locator('.exam-links a').getAttribute('href'),'https://example.org/unterricht');
+    await noOverflow();
+    const subjectNav=async()=>{if(viewport.width<=760)await page.locator('#navigation-toggle').click();await page.locator('[data-sidebar-subject="fr"]').click();};
+    await subjectNav();await page.locator('#add-folder').click();await page.locator('#f-name').fill('Grammatik');
+    await page.locator('#form-submit').click();await page.locator('#form-dialog').waitFor({state:'hidden'});await subjectNav();
+    await page.locator('[data-toggle-sort]').click();
+    assert.equal(await page.locator('.folder-grid > .folder-card').count(),2,'Exam containers do not replace ordinary folders.');
+    assert.equal(await page.locator('.folder-grid > .folder-card').first().locator('.sort-position').textContent(),'1 / 2');
+    await page.locator('.folder-grid > .folder-card').first().locator('[data-sort-step="1"]').click();
+    await page.waitForFunction(()=>document.querySelector('.folder-grid > .folder-card h3')?.textContent==='Grammatik');
+    assert.equal(db.folders.get(exam.id).data.kind,'exam');
+    assert.equal(db.folders.get(exam.id).data.examDate,'2027-01-15','Folder reordering preserves test metadata.');
+    await page.reload();await page.getByRole('heading',{name:'Bibliothek',exact:true}).waitFor();
+    await testsNav();await page.locator(`[data-exam-open="${exam.id}"]`).click();
+    assert.equal(await page.locator('#exam-title').textContent(),'Verben-Test');
+    await page.locator('[data-exam-materials]').click();
+    assert.equal(await page.locator('#exam-subject').isDisabled(),true);
+    await page.locator('#exam-name').fill('Verben – aktualisiert');
+    await page.locator('#exam-date').fill('2027-01-16');
+    await page.locator('input[name="examSetIds"][value="extra"]').check();
+    await page.locator('#exam-save').click();await page.locator('#exam-dialog').waitFor({state:'hidden'});await page.locator('#exam-title').waitFor();
+    assert.equal(db.folders.get(exam.id).data.examDate,'2027-01-16');
+    assert.deepEqual(db.folders.get(exam.id).data.examSetIds,['vocab','extra']);
+    await page.locator('[data-quick-study="vocab"]').click();
+    await page.locator('#study-dialog[open]').waitFor();
+    await page.locator('.study-card-slot.is-active .study-card').click();
+    await page.locator('#answer-yes').click();
+    await page.locator('#finish-study').click();
+    assert.equal(await page.locator('#exam-title').textContent(),'Verben – aktualisiert');
+    await page.locator('[data-quick-edit="vocab"]').click();
+    await page.getByRole('heading',{name:'Vokabeln',exact:true}).waitFor();
+    await page.locator('#go-back').click();
+    assert.equal(await page.locator('#exam-title').textContent(),'Verben – aktualisiert');
+    await page.locator('[data-exam-new-set]').click();
+    assert.equal(await page.locator('#f-folder').inputValue(),exam.id);
+    await page.locator('#f-name').fill('Testkarten');await page.locator('#form-submit').click();
+    await page.getByRole('heading',{name:'Testkarten',exact:true}).waitFor();
+    const created=[...db.sets.values()].find(row=>row.data.name==='Testkarten');
+    assert.ok(created);assert.equal(created.folder_id,exam.id);
+    await page.locator('#add-card').click();await page.locator('#f-front').fill('gehen');await page.locator('#f-back').fill('aller');
+    await page.locator('#form-submit').click();await page.locator('#form-dialog').waitFor({state:'hidden'});
+    await page.locator('#go-back').click();await page.locator('#exam-title').waitFor();
+    if(process.env.QA_SCREENSHOT_DIR){await mkdir(process.env.QA_SCREENSHOT_DIR,{recursive:true});await page.screenshot({path:resolve(process.env.QA_SCREENSHOT_DIR,`exams-${engine}-${viewport.width}-detail.png`),fullPage:true});}
+    await page.locator('[data-exam-back]').click();
+    await page.locator('[data-exam-subject-filter]').selectOption('bio');
+    assert.equal(await page.locator('[data-exam-open]').count(),0);
+    await page.locator('[data-exam-subject-filter]').selectOption('fr');
+    await page.locator(`[data-exam-open="${exam.id}"]`).click();
+    await page.locator('.management-menu > summary').click();
+    page.once('dialog',dialog=>dialog.accept());
+    await page.locator(`[data-exam-delete="${exam.id}"]`).click();
+    await page.getByRole('heading',{name:'Tests',exact:true}).waitFor();
+    assert.equal(db.folders.has(exam.id),false);
+    assert.equal(db.sets.get('vocab').folder_id,'unit');
+    assert.equal(db.sets.get(created.id).folder_id,null,'New test stacks return to the subject when a test is removed.');
+    assert.equal(db.cards.size,4,'Deleting a test retains all original and newly created cards.');
+    assert.equal(db.sets.size,4);
+    await page.reload();await page.getByRole('heading',{name:'Bibliothek',exact:true}).waitFor();await testsNav();
+    assert.equal(await page.locator('[data-exam-open]').count(),0);
+    for(const table of Object.keys(db))db[table].clear();
+    await page.reload();await page.getByRole('heading',{name:'Bibliothek',exact:true}).waitFor();await testsNav();
+    await page.locator('[data-exam-create]').first().click();
+    assert.equal(await page.locator('#form-dialog').evaluate(dialog=>dialog.open),true,'An empty library offers subject creation first.');
+    await page.locator('#f-name').fill('Mathematik');await page.locator('#form-submit').click();
+    await page.getByRole('heading',{name:'Mathematik',exact:true}).waitFor();await testsNav();
+    await page.locator('[data-exam-create]').first().click();
+    assert.equal(await page.locator('#exam-name').inputValue(),'Mathematik-Test');
+    await page.locator('#exam-date').fill('2027-02-01');await page.locator('#exam-save').click();
+    await page.locator('#exam-title').waitFor();
+    assert.equal(await page.locator('#exam-title').textContent(),'Mathematik-Test');
+    await noOverflow();assert.deepEqual(errors,[]);assert.deepEqual(unexpected,[]);
+    console.log(`PASS exams ${engine} ${viewport.width}x${viewport.height} ${colorScheme} ${reduced?'reduce':'normal'}`);
+  }finally{await context.close();}
+}
+
+let server;
+try{
+  server=process.env.QA_BASE_URL?{origin:new URL(process.env.QA_BASE_URL).origin}:await startServer();
+  for(const engine of (process.env.QA_ENGINES||'chromium,webkit').split(',')){
+    assert.ok(playwright[engine]);
+    const browser=await playwright[engine].launch(engine==='chromium'&&process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE?{executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE}:{});
+    const profiles=[[{width:1366,height:768},false,'dark'],[{width:390,height:740},false,'light'],[{width:320,height:568},true,'dark']];
+    try{for(const [viewport,reduced,colorScheme] of process.env.QA_SMOKE?profiles.slice(0,2):profiles)await verifyExams(browser,server.origin,engine,viewport,reduced,colorScheme);}
+    finally{await browser.close();}
+  }
+}finally{if(server?.child){server.child.kill();await once(server.child,'exit');}}
