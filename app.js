@@ -13,6 +13,7 @@ import { frenchVerbCardMarkup } from './french-verb-card.mjs';
 import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown, parseDonationAmountCents, shouldShowDonationWelcome, setDonationReminderEnabled, isDonationReminderEnabled } from './donation-values.mjs';
 import { isExam, sortedExams, examSets, validateExamInput } from './exams.mjs';
 import { examIcon, renderExamsPage, renderExamDetail } from './exam-view.mjs';
+import { bindExamDateInput, formatExamDateInput } from './exam-date.mjs';
 import './exam-view.css';
 
 (() => {
@@ -73,6 +74,7 @@ import './exam-view.css';
   let workspaceAccountVersion = 0;
   let data = initial(), activeSubject = null, activeFolder = null, activeSet = null, view = donationReturn ? 'donations' : 'library';
   let activeExamId = null, examReturnId = null, examSubjectFilter = '', examContext = null, examSaving = false;
+  let examDateInput = null;
   let librarySorting = false, librarySortSaving = false, entitySaving = false, libraryLoading = false;
   let libraryLoadFailed = false;
   let cardsBySet=new Map(),cardListSetId=null,cardListQuery='',cardListLimit=100,recoveryAwaitingChoice=false;
@@ -334,11 +336,11 @@ import './exam-view.css';
     $('#exam-form-title').textContent=item?'Test bearbeiten':'Test anlegen';
     $('#exam-error').hidden=true;$('#exam-error').textContent='';
     const subjects=data.subjects.map(entry=>`<option value="${esc(entry.id)}" ${entry.id===subjectId?'selected':''}>${esc(entry.name)}</option>`).join('');
-    $('#exam-form-fields').innerHTML=`<label class="field-label" for="exam-name">Name des Tests</label><input id="exam-name" name="name" maxlength="100" required value="${esc(item?.name||`${subject(subjectId)?.name||'Neuer'}-Test`)}" placeholder="z. B. Verben und Zeiten"><div class="exam-form-grid"><div><label class="field-label" for="exam-subject">Fach</label><select id="exam-subject" required ${item?'disabled':''}>${subjects}</select></div><div><label class="field-label" for="exam-date">Testdatum</label><input id="exam-date" type="date" required value="${esc(item?.examDate||'')}"></div></div><section id="exam-material-fields" class="exam-form-materials"><h3>Lernunterlagen</h3><fieldset class="exam-choice-fieldset"><legend class="field-label">Lernstapel aus diesem Fach</legend><p class="field-hint">Wähle die passenden Stapel für diesen Test aus. Du kannst dieselben Stapel für mehrere Tests verwenden.</p><div id="exam-set-choices" class="exam-set-choices"></div></fieldset><label class="field-label" for="exam-notes">Notizen & Lernziele <span class="optional-label">(optional)</span></label><textarea id="exam-notes" rows="5" maxlength="20000" placeholder="Welche Themen und Lernziele gehören zum Test?">${esc(item?.examNotes||'')}</textarea><div class="exam-form-links-heading"><h3>Links zu Unterlagen</h3><button type="button" class="quiet-button" id="exam-add-link">＋ Link hinzufügen</button></div><div id="exam-link-fields">${(Array.isArray(item?.examLinks)?item.examLinks:[]).map(examLinkFields).join('')}</div></section>`;
+    examDateInput?.dispose();
+    $('#exam-form-fields').innerHTML=`<label class="field-label" for="exam-name">Name des Tests</label><input id="exam-name" name="name" maxlength="100" required value="${esc(item?.name||'')}" placeholder="z. B. Verben und Zeiten"><div class="exam-form-grid"><div><label class="field-label" for="exam-subject">Fach</label><select id="exam-subject" required ${item?'disabled':''}>${subjects}</select></div><div><label class="field-label" for="exam-date">Testdatum</label><div class="exam-date-control"><input id="exam-date" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" maxlength="16" required aria-describedby="exam-date-hint" placeholder="TT.MM.JJJJ" value="${esc(formatExamDateInput(item?.examDate||''))}"><label class="exam-date-calendar" title="Datum im Kalender auswählen"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M8 3v4m8-4v4M4 10h16"/></svg><input id="exam-date-picker" type="date" aria-label="Datum im Kalender auswählen" value="${esc(item?.examDate||'')}"></label></div><p class="field-hint" id="exam-date-hint">Datum eintippen oder im Kalender auswählen.</p></div></div><section id="exam-material-fields" class="exam-form-materials"><h3>Lernunterlagen</h3><fieldset class="exam-choice-fieldset"><legend class="field-label">Lernstapel aus diesem Fach</legend><p class="field-hint">Wähle die passenden Stapel für diesen Test aus. Du kannst dieselben Stapel für mehrere Tests verwenden.</p><div id="exam-set-choices" class="exam-set-choices"></div></fieldset><label class="field-label" for="exam-notes">Notizen & Lernziele <span class="optional-label">(optional)</span></label><textarea id="exam-notes" rows="5" maxlength="20000" placeholder="Welche Themen und Lernziele gehören zum Test?">${esc(item?.examNotes||'')}</textarea><div class="exam-form-links-heading"><h3>Links zu Unterlagen</h3><button type="button" class="quiet-button" id="exam-add-link">＋ Link hinzufügen</button></div><div id="exam-link-fields">${(Array.isArray(item?.examLinks)?item.examLinks:[]).map(examLinkFields).join('')}</div></section>`;
     renderExamSetChoices(subjectId,item?.examSetIds||[]);
-    let automaticName=!item;
-    $('#exam-name').addEventListener('input',()=>{automaticName=false});
-    $('#exam-subject').onchange=event=>{renderExamSetChoices(event.target.value);if(automaticName)$('#exam-name').value=`${subject(event.target.value)?.name||'Neuer'}-Test`};
+    examDateInput=bindExamDateInput(examDialog);
+    $('#exam-subject').onchange=event=>renderExamSetChoices(event.target.value);
     $('#exam-add-link').onclick=()=>{if($('#exam-link-fields').children.length>=50){$('#exam-error').textContent='Pro Test sind höchstens 50 Links möglich.';$('#exam-error').hidden=false;return}$('#exam-link-fields').insertAdjacentHTML('beforeend',examLinkFields());$('#exam-link-fields').lastElementChild.querySelector('input').focus()};
     $('#exam-link-fields').onclick=event=>{const remove=event.target.closest('[data-exam-link-remove]');if(remove)remove.closest('[data-exam-link]').remove()};
     openFormDialog(examDialog);
@@ -347,11 +349,12 @@ import './exam-view.css';
   $('#exam-form').addEventListener('submit',async event=>{
     event.preventDefault();if(examSaving||!examContext)return;
     if(examContext.owner!==data){$('#exam-error').textContent='Deine Bibliothek wurde neu geladen. Schliesse den Dialog und öffne den Test erneut.';$('#exam-error').hidden=false;return}
+    if(!examDateInput?.validate()){$('#exam-form').reportValidity();return}
     const links=[...$('#exam-link-fields').children].map(row=>({id:row.dataset.examLink,title:$('[data-exam-link-title]',row).value,url:$('[data-exam-link-url]',row).value})).filter(link=>link.title.trim()||link.url.trim());
     const selected=[...$('#exam-set-choices').querySelectorAll('input:checked:not(:disabled)')].map(input=>input.value),selectedIds=new Set(selected);
     const previousIds=Array.isArray(folder(examContext.id)?.examSetIds)?folder(examContext.id).examSetIds:[];
     const orderedIds=[...previousIds.filter(key=>selectedIds.has(key)),...selected.filter(key=>!previousIds.includes(key))];
-    const result=validateExamInput({name:$('#exam-name').value,subjectId:$('#exam-subject').value,examDate:$('#exam-date').value,examNotes:$('#exam-notes').value,examLinks:links,examSetIds:orderedIds},data);
+    const result=validateExamInput({name:$('#exam-name').value,subjectId:$('#exam-subject').value,examDate:examDateInput.read(),examNotes:$('#exam-notes').value,examLinks:links,examSetIds:orderedIds},data);
     if(result.error){$('#exam-error').textContent=result.error;$('#exam-error').hidden=false;return}
     const owner=data,previous=data.folders,existing=folder(examContext.id),key=examContext.id,now=new Date().toISOString();
     const record={...existing,...result.value,id:key,color:existing?.color||defaultFolderColor,createdAt:existing?.createdAt||now,updatedAt:now};
@@ -364,7 +367,7 @@ import './exam-view.css';
   });
   examDialog.querySelectorAll('[data-exam-cancel]').forEach(button=>button.onclick=()=>{if(!examSaving)examDialog.close()});
   examDialog.addEventListener('cancel',event=>{if(examSaving)event.preventDefault()});
-  examDialog.addEventListener('close',()=>{examContext=null});
+  examDialog.addEventListener('close',()=>{examContext=null;examDateInput?.dispose();examDateInput=null});
   async function deleteExam(key){
     const item=folder(key);if(!isExam(item)||examSaving)return;
     if(!confirm(`Test „${item.name}“ entfernen? Alle Lernstapel und Lernkarten bleiben in deiner Bibliothek erhalten.`))return;
