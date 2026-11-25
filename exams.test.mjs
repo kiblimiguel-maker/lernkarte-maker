@@ -95,4 +95,13 @@ assert.ok(detail.includes('&lt;script&gt;unsafe&lt;/script&gt;'));
 assert.ok(!detail.includes('href="javascript:'));assert.ok(!detail.includes('user:secret'));
 assert.ok(!detail.includes('<img src=x'));
 assert.ok(renderExamsPage({library,exams:[unsafe]}).includes('&lt;img src=x'));
+for (const color of ['#91BB63', '#FFFFFF', '#000000']) {
+  const markup=renderExamsPage({library,exams:[savedExam],subjects:[{id:savedExam.subjectId,name:'Fach',color}]});
+  assert.ok(markup.includes(`--exam-subject-color:${color}`));
+}
+for (const color of [undefined, '#fff; background: url(https://invalid.example)', '"><img src=x onerror=alert(1)>']) {
+  const markup=renderExamsPage({library,exams:[savedExam],subjects:[{id:savedExam.subjectId,name:'Fach',color}]});
+  assert.ok(markup.includes('--exam-subject-color:var(--accent)'));
+  assert.ok(!markup.includes('<img src=x')&&!markup.includes('url(https://invalid.example)'),'malformed subject colours cannot inject HTML or CSS');
+}
 console.log('Exam model checks passed: valid dates, local calendar boundaries, safe links, independent material references, nested/cyclic folders and stable sorting.');

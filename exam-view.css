@@ -1,13 +1,15 @@
 /* Tests are dated study collections. Their clipboard stays distinct from folders. */
 .exam-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr)); gap: 14px; }
-.exam-card { min-width: 0; border: 1px solid var(--line); border-radius: var(--radius-card); background: var(--surface-raised); overflow: hidden; }
+.exam-card { position: relative; min-width: 0; border: 1px solid var(--line); border-radius: var(--radius-card); background: var(--surface-raised); overflow: hidden; }
+.exam-card::before { position: absolute; inset: 0 0 auto; height: 3px; background: var(--exam-subject-color, var(--accent)); content: ''; pointer-events: none; }
 .exam-card-open { display: flex; width: 100%; min-width: 0; min-height: 184px; flex-direction: column; align-items: flex-start; padding: 18px 18px 12px; border: 0; border-radius: var(--radius-card); background: transparent; color: var(--text); text-align: left; }
 .exam-card-open:focus-visible { outline-offset: -3px; }
-.exam-card-top { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+.exam-card-top { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
 .exam-symbol { display: inline-grid; place-items: center; width: 44px; height: 44px; flex: none; border: 1px solid var(--accent-border); border-radius: var(--radius-control); background: var(--accent-subtle); color: var(--accent-text); }
 .exam-symbol > svg { display: block; }
-.exam-card-subject { color: var(--muted); font-size: 11px; line-height: 1.4; overflow-wrap: anywhere; }
-.exam-card-title { margin: 5px 0 10px; font-size: 16px; font-weight: 620; line-height: 1.4; letter-spacing: -.2px; overflow-wrap: anywhere; }
+.exam-card .exam-symbol { border-color: color-mix(in srgb, var(--exam-subject-color) 38%, var(--line)); background: color-mix(in srgb, var(--exam-subject-color) 12%, var(--surface)); color: color-mix(in srgb, var(--exam-subject-color) 55%, var(--text)); }
+.exam-card-subject { color: var(--text); font-size: 16px; font-weight: 650; line-height: 1.35; letter-spacing: -.15px; overflow-wrap: anywhere; }
+.exam-card-title { margin: 5px 0 10px; font-size: 16px; font-weight: 500; line-height: 1.4; letter-spacing: -.2px; overflow-wrap: anywhere; }
 .exam-card-date { display: inline-flex; align-items: center; gap: 7px; margin-top: auto; color: var(--muted); font-size: 12px; line-height: 1.4; }
 .exam-card-date svg { flex: none; }
 .exam-card-footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 10px 8px 18px; }

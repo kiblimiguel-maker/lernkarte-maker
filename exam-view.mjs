@@ -40,10 +40,11 @@ function safeLinks(exam) {
 
 function examCard(library, exam, subjects, today) {
   const subject = subjects.get(exam.subjectId);
+  const subjectColor = typeof subject?.color === 'string' && /^#[0-9a-f]{6}$/i.test(subject.color) ? subject.color : 'var(--accent)';
   const sets = examSets(library, exam);
   const links = safeLinks(exam);
   const extra = links.length + (String(exam.examNotes || '').trim() ? 1 : 0);
-  return `<article class="exam-card">
+  return `<article class="exam-card" style="--exam-subject-color:${subjectColor}">
     <button type="button" class="exam-card-open" data-exam-open="${escapeText(exam.id)}" aria-label="${escapeText(exam.name)} öffnen">
       <span class="exam-card-top"><span class="exam-symbol">${examIcon(25)}</span>${statusMarkup(exam, today)}</span>
       <span class="exam-card-subject">${escapeText(subject?.name || 'Ohne Fach')}</span>
