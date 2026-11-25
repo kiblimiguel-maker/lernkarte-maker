@@ -3,6 +3,7 @@ import { examDateStatus, examSets } from './exams.mjs';
 const escapeText = value => String(value ?? '').replace(/[&<>"']/g, character => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
 })[character]);
+const subjectColor = subject => typeof subject?.color === 'string' && /^#[0-9a-f]{6}$/i.test(subject.color) ? subject.color : 'var(--accent)';
 
 export function examIcon(size = 20) {
   const dimension = Number.isFinite(size) ? Math.max(12, Math.min(64, size)) : 20;
@@ -40,11 +41,10 @@ function safeLinks(exam) {
 
 function examCard(library, exam, subjects, today) {
   const subject = subjects.get(exam.subjectId);
-  const subjectColor = typeof subject?.color === 'string' && /^#[0-9a-f]{6}$/i.test(subject.color) ? subject.color : 'var(--accent)';
   const sets = examSets(library, exam);
   const links = safeLinks(exam);
   const extra = links.length + (String(exam.examNotes || '').trim() ? 1 : 0);
-  return `<article class="exam-card" style="--exam-subject-color:${subjectColor}">
+  return `<article class="exam-card" style="--exam-subject-color:${subjectColor(subject)}">
     <button type="button" class="exam-card-open" data-exam-open="${escapeText(exam.id)}" aria-label="${escapeText(exam.name)} öffnen">
       <span class="exam-card-top"><span class="exam-symbol">${examIcon(25)}</span>${statusMarkup(exam, today)}</span>
       <span class="exam-card-subject">${escapeText(subject?.name || 'Ohne Fach')}</span>
@@ -74,11 +74,11 @@ export function renderExamsPage({ library, exams = [], subjects = library.subjec
 export function renderExamDetail({ exam, subject, setsMarkup = '', sets = [], today = new Date(), materialsMarkup = '' }) {
   const links = safeLinks(exam);
   const notes = String(exam.examNotes || '').trim();
-  return `<section class="exam-detail" aria-labelledby="exam-title">
+  return `<section class="exam-detail" aria-labelledby="exam-title" style="--exam-subject-color:${subjectColor(subject)}">
     <header class="subpage-heading exam-detail-heading">
       <button type="button" class="back-button" data-exam-back aria-label="Zurück zu Tests" title="Zurück zu Tests"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m13 6-6 6 6 6M7 12h12"/></svg></button>
       <div class="subject-heading"><span class="exam-symbol">${examIcon(27)}</span><div><div class="page-context">Test · ${escapeText(subject?.name || 'Ohne Fach')}</div><h1 class="page-title" id="exam-title">${escapeText(exam.name)}</h1><p class="page-subtitle"><time datetime="${escapeText(exam.examDate)}">${escapeText(dateText(exam.examDate, today))}</time></p><div class="exam-detail-status">${statusMarkup(exam, today)}</div></div></div>
-      <details class="management-menu"><summary>Verwalten <span class="management-chevron" aria-hidden="true"></span></summary><div class="management-menu-panel"><button type="button" data-exam-edit="${escapeText(exam.id)}">Test bearbeiten</button><button type="button" class="danger-action" data-exam-delete="${escapeText(exam.id)}">Test löschen</button></div></details>
+      <div class="library-detail-actions"><button type="button" class="quiet-button" data-share-kind="exam" data-item-id="${escapeText(exam.id)}" aria-haspopup="dialog">${linkIcon} Teilen</button><details class="management-menu"><summary>Verwalten <span class="management-chevron" aria-hidden="true"></span></summary><div class="management-menu-panel"><button type="button" data-exam-edit="${escapeText(exam.id)}">Test bearbeiten</button><button type="button" class="danger-action" data-exam-delete="${escapeText(exam.id)}">Test löschen</button></div></details></div>
     </header>
     <section class="library-section" aria-labelledby="exam-study-title"><div class="section-head exam-material-heading"><h2 id="exam-study-title">Lernstapel<span class="count-label">${sets.length}</span></h2><div class="section-actions"><button type="button" class="quiet-button" data-exam-materials>Unterlagen verwalten</button><button type="button" class="primary-button" data-exam-new-set>＋ Lernstapel erstellen</button></div></div>
       ${setsMarkup ? `<div class="set-grid">${setsMarkup}</div>` : '<div class="empty-state exam-sets-empty"><h2>Deine Vorbereitung ist noch leer</h2><p>Ordne vorhandene Lernstapel zu oder erstelle einen neuen Stapel für diesen Test.</p></div>'}

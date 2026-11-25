@@ -1,4 +1,5 @@
 import { clearShareRoute, importLibraryShare, previewLibraryShare, readShareRoute, restoreShareAfterSignIn } from './library-sharing.mjs';
+import { formatExamDateInput } from './exam-date.mjs';
 
 export function createLibraryShareReceiver({ signIn }) {
   const dialog = document.querySelector('#shared-library-dialog');
@@ -28,14 +29,20 @@ export function createLibraryShareReceiver({ signIn }) {
   function render() {
     if (token === null) return;
     const isFolder = preview?.kind === 'folder';
-    const label = isFolder ? 'Ordner' : 'Lernstapel';
+    const isExam = preview?.kind === 'exam';
+    const label = isExam ? 'Test' : isFolder ? 'Ordner' : 'Lernstapel';
     kind.textContent = preview ? `Geteilter ${label}` : 'Freigabelink';
     title.textContent = preview?.title || 'Geteilter Lerninhalt';
     counts.hidden = !preview;
     counts.textContent = preview ? [
-      ...(isFolder ? [`${preview.folderCount} Unterordner`, `${preview.setCount} Lernstapel`] : []),
-      `${preview.cardCount} ${preview.cardCount === 1 ? 'Lernkarte' : 'Lernkarten'}`
+      ...(isFolder ? [`${preview.folderCount} Unterordner`] : []),
+      ...(isFolder || isExam ? [`${preview.setCount} Lernstapel`] : []),
+      `${preview.cardCount} ${preview.cardCount === 1 ? 'Lernkarte' : 'Lernkarten'}`,
+      ...(isExam && formatExamDateInput(preview.examDate) ? [`Test am ${formatExamDateInput(preview.examDate)}`] : [])
     ].join(' · ') : '';
+    description.textContent = isExam && preview.snapshot === true
+      ? 'Du erhältst eine eigenständige Kopie des Tests mit Datum, Notizen, Links und Lernkarten. Wähle dein Zielfach; der Test übernimmt dessen Farbe. Das Löschen des Originals ändert deine Kopie und diesen Link nicht.'
+      : 'Du erhältst eine private, eigenständige Kopie in deiner Bibliothek.';
     description.hidden = !preview || Boolean(result);
     destination.hidden = !preview || Boolean(result) || authState !== 'ready';
     subject.disabled = busy;
@@ -113,6 +120,7 @@ export function createLibraryShareReceiver({ signIn }) {
   }
 
   function setAuth(state, { id = null, message = '' } = {}) {
+    const sameAccount = userId === id;
     if (userId !== id) {
       authVersion++;
       result = null;
@@ -124,9 +132,10 @@ export function createLibraryShareReceiver({ signIn }) {
     authMessage = message;
     if (state === 'ready') {
       const subjects = window.WortwerkShareDestinations();
-      const defaultSubject = subjects.find(item => item.name === 'Geteilt mit dir');
+      const previousSubject = sameAccount ? subject.value : '';
       subject.replaceChildren(new Option('Geteilt mit dir (Standard)', ''));
-      subjects.filter(item => item !== defaultSubject).forEach(item => subject.add(new Option(item.name, item.id)));
+      subjects.forEach(item => subject.add(new Option(item.name, item.id)));
+      if (subjects.some(item => item.id === previousSubject)) subject.value = previousSubject;
     }
     render();
   }

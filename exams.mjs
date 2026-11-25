@@ -51,7 +51,7 @@ export function sortedExams(library, { subjectId = null, today = new Date() } = 
 
 export function examSets(library, exam) {
   if (!isExam(exam) || !exam.id || !exam.subjectId) return [];
-  const available = new Map(records(library?.sets).filter(set => set.subjectId === exam.subjectId).map(set => [set.id, set]));
+  const available = new Map(records(library?.sets).map(set => [set.id, set]));
   const result = [], included = new Set();
   const add = id => {
     if (!included.has(id) && available.has(id)) {
@@ -59,8 +59,8 @@ export function examSets(library, exam) {
       result.push(available.get(id));
     }
   };
-  // Linked materials remain in their original library location. Missing or
-  // moved links are ignored instead of preventing the rest from being studied.
+  // Explicit links refer only to the current user's loaded library. They stay
+  // linked after a test changes subject, without moving their original decks.
   for (const id of Array.isArray(exam.examSetIds) ? exam.examSetIds : []) add(id);
 
   const children = new Map();
@@ -77,8 +77,31 @@ export function examSets(library, exam) {
       queue.push(child);
     }
   }
-  for (const set of available.values()) if (within.has(set.folderId)) add(set.id);
+  for (const set of available.values()) if (set.subjectId === exam.subjectId && within.has(set.folderId)) add(set.id);
   return result;
+}
+
+// Build an isolated organisation plan using the same validated folder move as
+// drag and drop. The caller persists its location changes atomically before
+// adopting the new records; cards, sessions and referenced decks are untouched.
+export function planExamSubjectChange(library, examId, subjectId, libraryModel, timestamp) {
+  const fail = error => ({ value: null, changed: false, error });
+  const exam = records(library?.folders).find(item => item.id === examId);
+  if (!isExam(exam)) return fail('Dieser Test ist nicht mehr vorhanden. Bitte öffne ihn erneut.');
+  if (!records(library?.subjects).some(item => item.id === subjectId)) return fail('Wähle ein vorhandenes Fach aus.');
+  if (exam.subjectId === subjectId) return { value: library, changed: false, error: null };
+  if (typeof libraryModel?.canMoveLibraryItem !== 'function' || typeof libraryModel?.moveLibraryItem !== 'function') {
+    return fail('Das Fach kann gerade nicht gewechselt werden. Bitte lade die App neu.');
+  }
+  const options = { type: 'folder', id: examId, subjectId, folderId: null, timestamp };
+  if (!libraryModel.canMoveLibraryItem(library, options)) {
+    return fail('Die Testunterlagen können nicht sicher in dieses Fach verschoben werden. Bitte lade deine Bibliothek neu.');
+  }
+  const cloneRecords = collection => (Array.isArray(collection) ? collection : []).map(item =>
+    item && typeof item === 'object' && !Array.isArray(item) ? { ...item } : item);
+  const value = { ...library, folders: cloneRecords(library.folders), sets: cloneRecords(library.sets) };
+  if (!libraryModel.moveLibraryItem(value, options)) return fail('Das Fach konnte nicht gewechselt werden. Bitte versuche es erneut.');
+  return { value, changed: true, error: null };
 }
 
 export function validateExamInput(input, library) {
@@ -110,10 +133,10 @@ export function validateExamInput(input, library) {
   }
 
   if (input.examSetIds != null && !Array.isArray(input.examSetIds)) return fail('Wähle die Lernstapel über die Liste aus.');
-  const sets = new Set(records(library?.sets).filter(set => set.subjectId === subjectId).map(set => set.id));
+  const sets = new Set(records(library?.sets).map(set => set.id));
   const examSetIds = [];
   for (const id of input.examSetIds || []) {
-    if (typeof id !== 'string' || !sets.has(id)) return fail('Ein ausgewählter Lernstapel gehört nicht zu diesem Fach oder ist nicht mehr vorhanden. Bitte wähle ihn erneut aus.');
+    if (typeof id !== 'string' || !sets.has(id)) return fail('Ein ausgewählter Lernstapel ist nicht mehr in deiner Bibliothek vorhanden. Bitte wähle ihn erneut aus.');
     if (!examSetIds.includes(id)) examSetIds.push(id);
   }
   return { value: { name, subjectId, parentId: null, kind: 'exam', examDate, examNotes, examLinks, examSetIds }, error: null };

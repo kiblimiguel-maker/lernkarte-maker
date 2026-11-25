@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import { examDateStatus, examSets, isExam, sortedExams, validateExamInput } from './exams.mjs';
+import { examDateStatus, examSets, isExam, sortedExams, validateExamInput, planExamSubjectChange } from './exams.mjs';
 import { renderExamsPage, renderExamDetail } from './exam-view.mjs';
 import { toLibraryRows } from './repository-core.mjs';
-const { normalizeLibrary } = createRequire(import.meta.url)('./model.js');
+const model = createRequire(import.meta.url)('./model.js');
+const { normalizeLibrary } = model;
 
 const exam = { id: 'exam', subjectId: 'fr', name: 'Verben', kind: 'exam', examDate: '2026-11-25', examSetIds: ['linked', 'direct', 'linked', 'missing', 'foreign'] };
 const library = {
@@ -21,7 +22,7 @@ const original = structuredClone(library);
 assert.equal(isExam(exam), true);
 assert.equal(isExam({ kind: 'folder' }), false);
 assert.equal(isExam(null), false);
-assert.deepEqual(examSets(library, exam).map(set => set.id), ['linked', 'direct', 'nested']);
+assert.deepEqual(examSets(library, exam).map(set => set.id), ['linked', 'direct', 'foreign', 'nested']);
 assert.equal(examSets(library, exam)[0], library.sets[0], 'links retain existing cards and learning state');
 assert.deepEqual(examSets(library, { kind: 'folder', id: 'exam', subjectId: 'fr' }), []);
 assert.deepEqual(examSets({}, exam), []);
@@ -30,10 +31,10 @@ assert.deepEqual(library, original, 'collecting exam material must not move or c
 const cyclic = structuredClone(library);
 cyclic.folders[1].parentId = 'deep';
 cyclic.folders[2].parentId = 'child';
-assert.deepEqual(examSets(cyclic, exam).map(set => set.id), ['linked', 'direct'], 'parent cycles terminate and do not include an unrelated branch');
+assert.deepEqual(examSets(cyclic, exam).map(set => set.id), ['linked', 'direct', 'foreign'], 'parent cycles terminate and do not include an unrelated branch');
 const rootCycle = structuredClone(library);
 rootCycle.folders[0].parentId = 'deep';
-assert.deepEqual(examSets(rootCycle, rootCycle.folders[0]).map(set => set.id), ['linked', 'direct', 'nested']);
+assert.deepEqual(examSets(rootCycle, rootCycle.folders[0]).map(set => set.id), ['linked', 'direct', 'foreign', 'nested']);
 
 assert.deepEqual(examDateStatus('2026-11-24', new Date(2026, 10, 24, 23, 59)), { label: 'Heute', state: 'today', days: 0 });
 assert.deepEqual(examDateStatus('2026-11-25', '2026-11-24'), { label: 'Morgen', state: 'upcoming', days: 1 });
@@ -67,7 +68,7 @@ assert.equal(validateExamInput({ ...input, examLinks: [{ url: 'https://example.o
 for (const patch of [
   { name: '' }, { name: 'a'.repeat(101) }, { subjectId: 'absent' }, { examDate: '2026-02-29' },
   { examNotes: 'a'.repeat(20_001) }, { examNotes: {} }, { examLinks: {} }, { examSetIds: 'linked' },
-  { examSetIds: ['foreign'] }, { examSetIds: ['missing'] }, { examSetIds: [null] },
+  { examSetIds: ['missing'] }, { examSetIds: [null] },
   { examLinks: [{ url: 'javascript:alert(1)' }] }, { examLinks: [{ url: 'data:text/html,unsafe' }] },
   { examLinks: [{ url: '/relative-path' }] }, { examLinks: [{ url: 'https://user:secret@example.org' }] },
   { examLinks: [{ title: 'x'.repeat(101), url: 'https://example.org' }] },
@@ -80,6 +81,20 @@ for (const patch of [
   assert.ok(result.error);
 }
 assert.deepEqual(library, original, 'validation preserves linked originals and the library');
+assert.equal(validateExamInput({...input,examSetIds:['foreign']},library).error,null,'own linked decks survive a subject change');
+const movable=normalizeLibrary({...library,folders:library.folders.filter(f=>f.id!=='bad-parent'),sets:library.sets.filter(s=>s.id!=='foreign'),cards:[{id:'kept',setId:'direct',front:'A',back:'B',correctCount:4}]});
+const beforeMove=structuredClone(movable);
+const moved=planExamSubjectChange(movable,'exam','bio',model,'2026-11-25T12:00:00Z');
+assert.equal(moved.error,null);assert.equal(moved.changed,true);
+assert.ok(moved.value.folders.filter(f=>['exam','child','deep'].includes(f.id)).every(f=>f.subjectId==='bio'));
+assert.ok(moved.value.sets.filter(s=>['direct','nested'].includes(s.id)).every(s=>s.subjectId==='bio'));
+assert.equal(moved.value.sets.find(s=>s.id==='linked').subjectId,'fr');
+assert.deepEqual(examSets(moved.value,moved.value.folders.find(f=>f.id==='exam')).map(s=>s.id),['linked','direct','nested']);
+assert.deepEqual(moved.value.cards,movable.cards);assert.deepEqual(movable,beforeMove,'planning does not mutate live or pending data');
+assert.equal(planExamSubjectChange(movable,'exam','fr',model).changed,false);
+assert.ok(planExamSubjectChange(movable,'exam','missing',model).error);
+assert.ok(planExamSubjectChange(movable,'missing','bio',model).error);
+assert.ok(planExamSubjectChange(movable,'exam','bio',{}).error);
 const savedExam={id:'saved',...saved.value,position:2};
 const stored=normalizeLibrary({...library,folders:[savedExam],cards:[]});
 const rows=toLibraryRows('folders',stored,'owner');

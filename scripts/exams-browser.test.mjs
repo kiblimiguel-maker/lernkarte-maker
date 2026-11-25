@@ -74,7 +74,7 @@ async function setup(browser, origin, viewport, reduced, colorScheme) {
   const context = await browser.newContext({ viewport, isMobile: viewport.width < 800, hasTouch: viewport.width < 800, colorScheme, reducedMotion: reduced ? 'reduce' : 'no-preference' });
   const db = Object.fromEntries(Object.entries(fixture).map(([table, records]) => [table, new Map(records.map(data => [data.id, toRow(structuredClone(data))]))]));
   const errors = [], unexpected = [];
-  let failFolderWrite = false;
+  let failFolderWrite = false, failOrganisationWrite = false;
   await context.addInitScript(({session,storageKey}) => {
     localStorage.setItem(storageKey, JSON.stringify(session));
     localStorage.setItem('wortwerk-donation-reminder-enabled-v1', 'false');
@@ -89,6 +89,7 @@ async function setup(browser, origin, viewport, reduced, colorScheme) {
     if (request.method() === 'OPTIONS') return route.fulfill(json(null));
     if (url.pathname === '/auth/v1/user') return route.fulfill(json(user));
     if (url.pathname === '/rest/v1/rpc/organise_library') {
+      if(failOrganisationWrite){failOrganisationWrite=false;return route.fulfill({...json({message:'Isolated move failure'}),status:500});}
       const {p_changes}=request.postDataJSON();
       for(const [table,changes] of Object.entries(p_changes))for(const change of changes){const current=db[table].get(change.id);const row={...current,data:{...current.data,...change}};if(change.subjectId)row.subject_id=change.subjectId;if(table==='sets')row.folder_id=change.folderId||null;db[table].set(row.id,row);}
       return route.fulfill(json(null));
@@ -121,11 +122,11 @@ async function setup(browser, origin, viewport, reduced, colorScheme) {
   page.on('pageerror', error => errors.push(error.message));
   await page.goto(origin);
   await page.getByRole('heading', { name: 'Bibliothek', exact: true }).waitFor();
-  return { page, context, errors, unexpected, db, rejectFolderOnce:()=>{failFolderWrite=true;} };
+  return { page, context, errors, unexpected, db, rejectFolderOnce:()=>{failFolderWrite=true;}, rejectOrganisationOnce:()=>{failOrganisationWrite=true;} };
 }
 
 async function verifyExams(browser,origin,engine,viewport,reduced,colorScheme){
-  const {page,context,errors,unexpected,db,rejectFolderOnce}=await setup(browser,origin,viewport,reduced,colorScheme);
+  const {page,context,errors,unexpected,db,rejectFolderOnce,rejectOrganisationOnce}=await setup(browser,origin,viewport,reduced,colorScheme);
   const testsNav=async()=>{if(viewport.width<=760)await page.locator('#navigation-toggle').click();await page.locator('[data-view="tests"]').click();};
   const noOverflow=async()=>assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1),false);
   const screenshot=async name=>{if(process.env.QA_SCREENSHOT_DIR){await mkdir(process.env.QA_SCREENSHOT_DIR,{recursive:true});await page.screenshot({path:resolve(process.env.QA_SCREENSHOT_DIR,`exams-${engine}-${viewport.width}-${name}.png`),fullPage:true,animations:'disabled'});}};
@@ -192,7 +193,7 @@ async function verifyExams(browser,origin,engine,viewport,reduced,colorScheme){
     await testsNav();await screenshot('list');await page.locator(`[data-exam-open="${exam.id}"]`).click();
     assert.equal(await page.locator('#exam-title').textContent(),'Verben-Test');
     await page.locator('[data-exam-materials]').click();
-    assert.equal(await page.locator('#exam-subject').isDisabled(),true);
+    assert.equal(await page.locator('#exam-subject').isDisabled(),false);
     assert.equal(await page.locator('#exam-name').inputValue(),'Verben-Test','Editing retains the saved test name.');
     assert.equal(await page.locator('#exam-date').inputValue(),'15.01.2027','Reloaded dates use the local entry format.');
     await page.locator('#exam-name').fill('Verben – aktualisiert');
@@ -229,10 +230,52 @@ async function verifyExams(browser,origin,engine,viewport,reduced,colorScheme){
     await page.locator('#form-submit').click();await page.locator('#form-dialog').waitFor({state:'hidden'});
     await page.locator('#go-back').click();await page.locator('#exam-title').waitFor();
     await screenshot('detail');
+    await page.locator('[data-exam-materials]').click();
+    await page.locator('#exam-subject').selectOption('bio');
+    await page.locator('#exam-name').fill('Verben – Fachwechsel');
+    assert.equal(await page.locator('input[name="examSetIds"][value="vocab"]').isChecked(),true,'Changing subject keeps selected links.');
+    rejectOrganisationOnce();await page.locator('#exam-save').click();await page.locator('#exam-error:not([hidden])').waitFor();
+    assert.equal(db.folders.get(exam.id).subject_id,'fr','Failed move retains original location.');
+    assert.equal(db.sets.get(created.id).subject_id,'fr');
+    rejectFolderOnce();await page.locator('#exam-save').click();
+    await page.waitForFunction(()=>document.querySelector('#exam-error').textContent.includes('Das Fach wurde gewechselt.'));
+    assert.equal(db.folders.get(exam.id).subject_id,'bio','Successful organisation is retained if later metadata save fails.');
+    assert.equal(db.sets.get(created.id).subject_id,'bio');
+    assert.equal(db.sets.get('vocab').subject_id,'fr','A referenced deck is not moved.');
+    await page.locator('[data-exam-cancel]').last().click();await page.locator('#exam-dialog').waitFor({state:'hidden'});
+    await page.waitForFunction(()=>document.querySelector('.exam-detail .page-context').textContent.includes('Biologie'));
+    await page.locator('[data-exam-materials]').click();await page.locator('#exam-name').fill('Verben – Fachwechsel');
+    await page.locator('#exam-save').click();await page.locator('#exam-dialog').waitFor({state:'hidden'});
+    assert.equal(await page.locator('[data-open-set="vocab"]').count(),1,'Linked material remains visible across subjects.');
+    assert.equal(await page.locator(`[data-open-set="${created.id}"]`).count(),1,'Owned material remains visible.');
+    const token='a'.repeat(64),frozenExam=structuredClone(db.folders.get(exam.id).data);
+    const linkedIds=new Set(frozenExam.examSetIds),sharedSets=[...db.sets.values()].filter(row=>linkedIds.has(row.id)||row.folder_id===exam.id).map(row=>structuredClone(row));
+    const sharedSetIds=new Set(sharedSets.map(row=>row.id)),sharedCards=[...db.cards.values()].filter(row=>sharedSetIds.has(row.set_id)).map(row=>structuredClone(row));
+    await page.route('**/rest/v1/rpc/create_library_share',async route=>{
+      const args=route.request().postDataJSON();assert.equal(args.p_kind,'exam');assert.equal(args.p_id,exam.id);assert.equal(args.p_expected_user,user.id);
+      return route.fulfill(json(token));
+    });
+    await page.route('**/rest/v1/rpc/preview_library_share',async route=>route.fulfill(json({kind:'exam',snapshot:true,title:frozenExam.name,examDate:frozenExam.examDate,folderCount:0,setCount:sharedSets.length,cardCount:sharedCards.length})));
+    await page.route('**/rest/v1/rpc/import_library_share',async route=>{
+      const args=route.request().postDataJSON();assert.equal(args.p_subject_id,'fr');assert.equal(args.p_expected_user,user.id);
+      const copyId='shared-exam-copy';
+      if(!db.folders.has(copyId)){
+        const copied={...frozenExam,id:copyId,subjectId:'fr',parentId:null,examSetIds:[]};db.folders.set(copyId,toRow(copied));
+        for(const source of sharedSets){const copiedSet={...source.data,id:`copy-${source.id}`,subjectId:'fr',folderId:copyId};db.sets.set(copiedSet.id,toRow(copiedSet));}
+        for(const source of sharedCards){const copiedCard={...source.data,id:`copy-${source.id}`,setId:`copy-${source.set_id}`,correctCount:0,incorrectCount:0};db.cards.set(copiedCard.id,toRow(copiedCard));}
+      }
+      return route.fulfill(json({status:'imported',kind:'exam',id:copyId,subjectId:'fr'}));
+    });
+    await page.locator('[data-share-kind="exam"]').click();await page.locator('#share-create').click();
+    await page.locator('#share-link-field').waitFor({state:'visible'});
+    assert.ok((await page.locator('#share-url').inputValue()).includes(`#share=${token}`));
+    assert.ok((await page.locator('#share-explanation').textContent()).includes('feste Kopie'));
+    await screenshot('share-link');
+    await page.locator('#share-close').click();
     await page.locator('[data-exam-back]').click();
-    await page.locator('[data-exam-subject-filter]').selectOption('bio');
-    assert.equal(await page.locator('[data-exam-open]').count(),0);
     await page.locator('[data-exam-subject-filter]').selectOption('fr');
+    assert.equal(await page.locator('[data-exam-open]').count(),0);
+    await page.locator('[data-exam-subject-filter]').selectOption('bio');
     await page.locator(`[data-exam-open="${exam.id}"]`).click();
     await page.locator('.management-menu > summary').click();
     page.once('dialog',dialog=>dialog.accept());
@@ -245,6 +288,22 @@ async function verifyExams(browser,origin,engine,viewport,reduced,colorScheme){
     assert.equal(db.sets.size,4);
     await page.reload();await page.getByRole('heading',{name:'Bibliothek',exact:true}).waitFor();await testsNav();
     assert.equal(await page.locator('[data-exam-open]').count(),0);
+    await page.evaluate(token=>{window.location.hash=`share=${token}`;},token);
+    await page.locator('#shared-library-destination').waitFor({state:'visible'});
+    assert.equal(await page.locator('#shared-library-kind').textContent(),'Geteilter Test');
+    assert.ok((await page.locator('#shared-library-description').textContent()).includes('dessen Farbe'));
+    assert.ok((await page.locator('#shared-library-subject').boundingBox()).height>=40,'Recipient subject selection keeps a full-sized touch target.');
+    await page.locator('#shared-library-subject').selectOption('fr');
+    await screenshot('share-import');
+    await page.locator('#shared-library-action').click();
+    await page.waitForFunction(()=>document.querySelector('#shared-library-action').textContent==='Test öffnen');
+    await page.locator('#shared-library-action').click();await page.locator('#shared-library-dialog').waitFor({state:'hidden'});
+    assert.equal(await page.locator('#exam-title').textContent(),frozenExam.name,'Sent link imports after original deletion.');
+    assert.equal(await page.locator('.exam-notes').textContent(),frozenExam.examNotes);
+    assert.equal(db.folders.get('shared-exam-copy').subject_id,'fr');
+    await page.locator('[data-exam-back]').click();
+    assert.equal(await page.locator('.exam-card').evaluate(card=>card.style.getPropertyValue('--exam-subject-color')),'#7D9DBD','Imported test uses recipient destination colour.');
+    await screenshot('shared-copy');
     for(const table of Object.keys(db))db[table].clear();
     await page.reload();await page.getByRole('heading',{name:'Bibliothek',exact:true}).waitFor();await testsNav();
     await page.locator('[data-exam-create]').first().click();

@@ -14,7 +14,9 @@ Tests sind terminierte Bibliothekscontainer im bestehenden `folders.data`-JSON. 
 
 Referenzierte Lernstapel werden ausschliesslich aus der eigenen geladenen Bibliothek und demselben Fach aufgelöst. Ungültige oder inzwischen entfernte Verweise werden nicht geladen. Datumswerte werden als lokale Kalendertage behandelt, sodass Zeitzonen und Sommerzeit die Tagesanzeige nicht verschieben. Links erlauben HTTP und HTTPS ohne Zugangsdaten; Titel und Notizen werden als Text ausgegeben.
 
-Ein Test bietet keine eigene Freigabeaktion an. Die bestehende Freigabe eines Lernstapels bleibt über dessen Detailansicht erreichbar. Freigabelinks erweitern ihren Inhalt nicht um andere Stapel, die einem Test lediglich zugeordnet wurden.
+Das Fach eines Tests kann nachträglich geändert werden. Dabei wird der Test samt eigenen Unterordnern und darin gespeicherten Stapeln mit der vorhandenen atomaren Organisationsfunktion verschoben. IDs, Karten und Lernfortschritt bleiben erhalten. Verknüpfte Stapel bleiben in ihrem ursprünglichen Fach und weiterhin im Test sichtbar. Der Fachwechsel wird zuerst gespeichert; weitere Formulareingaben folgen danach. Falls nur dieser zweite Schritt fehlschlägt, bleibt das bereits gespeicherte neue Fach bestehen und der Dialog bietet das erneute Speichern der Eingaben an.
+
+Über **Teilen** lässt sich eine feste Version des Tests freigeben. Testdatum, Notizen, Weblinks, eigene Unterordner und alle zugeordneten Lernstapel samt Karten werden als Momentaufnahme gespeichert. Empfänger wählen ihr eigenes Zielfach. Die Testkachel verwendet dessen aktuelle Farbe. Einzelheiten, Löschfälle und die erforderliche Datenbankerweiterung stehen in [library-sharing.md](library-sharing.md).
 
 ## Prüfungen
 

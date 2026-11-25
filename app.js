@@ -11,7 +11,7 @@ import { detectLearningGoalImport, formatLearningGoalBullets, parseLearningGoalB
 import { detectImportFormat, formatFrenchVerbSide, frenchVerbExample, frenchVerbFormLabels, parseFrenchVerbImport, parseFrenchVerbSide, validateFrenchVerbSide } from './french-verbs.mjs';
 import { frenchVerbCardMarkup } from './french-verb-card.mjs';
 import { DONATION_PRESETS_CENTS, formatDonationAmount, markDonationWelcomeShown, parseDonationAmountCents, shouldShowDonationWelcome, setDonationReminderEnabled, isDonationReminderEnabled } from './donation-values.mjs';
-import { isExam, sortedExams, examSets, validateExamInput } from './exams.mjs';
+import { isExam, sortedExams, examSets, validateExamInput, planExamSubjectChange } from './exams.mjs';
 import { examIcon, renderExamsPage, renderExamDetail } from './exam-view.mjs';
 import { bindExamDateInput, formatExamDateInput } from './exam-date.mjs';
 import './exam-view.css';
@@ -323,9 +323,10 @@ import './exam-view.css';
     return `<div class="exam-link-editor" data-exam-link="${esc(link.id)}"><label>Titel <span class="optional-label">(optional)</span><input type="text" data-exam-link-title maxlength="100" value="${esc(link.title)}" placeholder="z. B. Unterrichtsunterlagen"></label><label>Webadresse<input type="url" data-exam-link-url maxlength="2048" value="${esc(link.url)}" placeholder="https://…"></label><button type="button" class="icon-button" data-exam-link-remove aria-label="Link entfernen" title="Link entfernen">×</button></div>`;
   }
   function renderExamSetChoices(subjectId,selected=[]){
-    const ids=new Set(selected),sets=subjectSets(subjectId),current=folder(examContext?.id);
+    const ids=new Set(selected),current=folder(examContext?.id);
     const contained=new Set(isExam(current)?examSets(data,{...current,examSetIds:[]}).map(set=>set.id):[]);
-    $('#exam-set-choices').innerHTML=sets.length?sets.map(set=>`<label class="exam-set-choice"><input type="checkbox" name="examSetIds" value="${esc(set.id)}" ${ids.has(set.id)||contained.has(set.id)?'checked':''} ${contained.has(set.id)?'disabled':''}><span><strong>${esc(set.name)}</strong><small>${contained.has(set.id)?'In diesem Test gespeichert':esc(folder(set.folderId)?.name||'Direkt im Fach')} · ${countSetCards(set.id)} Karten</small></span></label>`).join(''):'<p class="field-hint">In diesem Fach gibt es noch keine Lernstapel. Du kannst nach dem Speichern direkt einen erstellen.</p>';
+    const sets=data.sets.filter(set=>set.subjectId===subjectId||ids.has(set.id)||contained.has(set.id));
+    $('#exam-set-choices').innerHTML=sets.length?sets.map(set=>`<label class="exam-set-choice"><input type="checkbox" name="examSetIds" value="${esc(set.id)}" ${ids.has(set.id)||contained.has(set.id)?'checked':''} ${contained.has(set.id)?'disabled':''}><span><strong>${esc(set.name)}</strong><small>${contained.has(set.id)?'In diesem Test gespeichert':esc(`${subject(set.subjectId)?.name||'Fach'} · ${folder(set.folderId)?.name||'Direkt im Fach'}`)} · ${countSetCards(set.id)} Karten</small></span></label>`).join(''):'<p class="field-hint">In diesem Fach gibt es noch keine Lernstapel. Du kannst nach dem Speichern direkt einen erstellen.</p>';
   }
   function openExamForm(key=null,materials=false){
     if(examSaving||libraryLoading||recoveryAwaitingChoice)return;
@@ -337,10 +338,10 @@ import './exam-view.css';
     $('#exam-error').hidden=true;$('#exam-error').textContent='';
     const subjects=data.subjects.map(entry=>`<option value="${esc(entry.id)}" ${entry.id===subjectId?'selected':''}>${esc(entry.name)}</option>`).join('');
     examDateInput?.dispose();
-    $('#exam-form-fields').innerHTML=`<label class="field-label" for="exam-name">Name des Tests</label><input id="exam-name" name="name" maxlength="100" required value="${esc(item?.name||'')}" placeholder="z. B. Verben und Zeiten"><div class="exam-form-grid"><div><label class="field-label" for="exam-subject">Fach</label><select id="exam-subject" required ${item?'disabled':''}>${subjects}</select></div><div><label class="field-label" for="exam-date">Testdatum</label><div class="exam-date-control"><input id="exam-date" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" maxlength="16" required aria-describedby="exam-date-hint" placeholder="TT.MM.JJJJ" value="${esc(formatExamDateInput(item?.examDate||''))}"><label class="exam-date-calendar" title="Datum im Kalender auswählen"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M8 3v4m8-4v4M4 10h16"/></svg><input id="exam-date-picker" type="date" aria-label="Datum im Kalender auswählen" value="${esc(item?.examDate||'')}"></label></div><p class="field-hint" id="exam-date-hint">Datum eintippen oder im Kalender auswählen.</p></div></div><section id="exam-material-fields" class="exam-form-materials"><h3>Lernunterlagen</h3><fieldset class="exam-choice-fieldset"><legend class="field-label">Lernstapel aus diesem Fach</legend><p class="field-hint">Wähle die passenden Stapel für diesen Test aus. Du kannst dieselben Stapel für mehrere Tests verwenden.</p><div id="exam-set-choices" class="exam-set-choices"></div></fieldset><label class="field-label" for="exam-notes">Notizen & Lernziele <span class="optional-label">(optional)</span></label><textarea id="exam-notes" rows="5" maxlength="20000" placeholder="Welche Themen und Lernziele gehören zum Test?">${esc(item?.examNotes||'')}</textarea><div class="exam-form-links-heading"><h3>Links zu Unterlagen</h3><button type="button" class="quiet-button" id="exam-add-link">＋ Link hinzufügen</button></div><div id="exam-link-fields">${(Array.isArray(item?.examLinks)?item.examLinks:[]).map(examLinkFields).join('')}</div></section>`;
+    $('#exam-form-fields').innerHTML=`<label class="field-label" for="exam-name">Name des Tests</label><input id="exam-name" name="name" maxlength="100" required value="${esc(item?.name||'')}" placeholder="z. B. Verben und Zeiten"><div class="exam-form-grid"><div><label class="field-label" for="exam-subject">Fach</label><select id="exam-subject" required>${subjects}</select></div><div><label class="field-label" for="exam-date">Testdatum</label><div class="exam-date-control"><input id="exam-date" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" maxlength="16" required aria-describedby="exam-date-hint" placeholder="TT.MM.JJJJ" value="${esc(formatExamDateInput(item?.examDate||''))}"><label class="exam-date-calendar" title="Datum im Kalender auswählen"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M8 3v4m8-4v4M4 10h16"/></svg><input id="exam-date-picker" type="date" aria-label="Datum im Kalender auswählen" value="${esc(item?.examDate||'')}"></label></div><p class="field-hint" id="exam-date-hint">Datum eintippen oder im Kalender auswählen.</p></div></div><section id="exam-material-fields" class="exam-form-materials"><h3>Lernunterlagen</h3><fieldset class="exam-choice-fieldset"><legend class="field-label">Lernstapel für diesen Test</legend><p class="field-hint">Wähle passende Stapel aus. Beim Fachwechsel ziehen im Test gespeicherte Stapel mit; verknüpfte Stapel bleiben an ihrem bisherigen Ort.</p><div id="exam-set-choices" class="exam-set-choices"></div></fieldset><label class="field-label" for="exam-notes">Notizen & Lernziele <span class="optional-label">(optional)</span></label><textarea id="exam-notes" rows="5" maxlength="20000" placeholder="Welche Themen und Lernziele gehören zum Test?">${esc(item?.examNotes||'')}</textarea><div class="exam-form-links-heading"><h3>Links zu Unterlagen</h3><button type="button" class="quiet-button" id="exam-add-link">＋ Link hinzufügen</button></div><div id="exam-link-fields">${(Array.isArray(item?.examLinks)?item.examLinks:[]).map(examLinkFields).join('')}</div></section>`;
     renderExamSetChoices(subjectId,item?.examSetIds||[]);
     examDateInput=bindExamDateInput(examDialog);
-    $('#exam-subject').onchange=event=>renderExamSetChoices(event.target.value);
+    $('#exam-subject').onchange=event=>renderExamSetChoices(event.target.value,[...$('#exam-set-choices').querySelectorAll('input:checked:not(:disabled)')].map(input=>input.value));
     $('#exam-add-link').onclick=()=>{if($('#exam-link-fields').children.length>=50){$('#exam-error').textContent='Pro Test sind höchstens 50 Links möglich.';$('#exam-error').hidden=false;return}$('#exam-link-fields').insertAdjacentHTML('beforeend',examLinkFields());$('#exam-link-fields').lastElementChild.querySelector('input').focus()};
     $('#exam-link-fields').onclick=event=>{const remove=event.target.closest('[data-exam-link-remove]');if(remove)remove.closest('[data-exam-link]').remove()};
     openFormDialog(examDialog);
@@ -356,18 +357,28 @@ import './exam-view.css';
     const orderedIds=[...previousIds.filter(key=>selectedIds.has(key)),...selected.filter(key=>!previousIds.includes(key))];
     const result=validateExamInput({name:$('#exam-name').value,subjectId:$('#exam-subject').value,examDate:examDateInput.read(),examNotes:$('#exam-notes').value,examLinks:links,examSetIds:orderedIds},data);
     if(result.error){$('#exam-error').textContent=result.error;$('#exam-error').hidden=false;return}
-    const owner=data,previous=data.folders,existing=folder(examContext.id),key=examContext.id,now=new Date().toISOString();
-    const record={...existing,...result.value,id:key,color:existing?.color||defaultFolderColor,createdAt:existing?.createdAt||now,updatedAt:now};
-    record.position=existing?.position??window.WortwerkModel.nextLibraryPosition(data,'folder',record);
-    data.folders=existing?data.folders.map(item=>item.id===key?record:item):[...data.folders,record];
+    const owner=data,existing=folder(examContext.id),key=examContext.id,now=new Date().toISOString();
+    let previous=data.folders,moved=false,metadataAttempt=false;
     examSaving=true;$('#exam-form').inert=true;$('#exam-form').setAttribute('aria-busy','true');$('#exam-save').textContent='Wird gespeichert …';syncLibraryInteractivity();
-    try{await save();if(data!==owner)return;examDialog.close();openExam(key);toast('Test gespeichert.','success')}
-    catch{if(data!==owner)return;data.folders=previous;window.WortwerkRepository.stagePendingRecovery?.(data);$('#exam-error').textContent='Der Test konnte nicht gespeichert werden. Deine Eingaben bleiben geöffnet. Bitte versuche es erneut.';$('#exam-error').hidden=false}
+    try{
+      if(existing&&existing.subjectId!==result.value.subjectId){
+        const plan=planExamSubjectChange(data,key,result.value.subjectId,window.WortwerkModel,now);
+        if(plan.error)throw new Error(plan.error);
+        await window.WortwerkRepository.saveLibraryOrganisation(data,plan.value);
+        if(data!==owner)return;
+        data.folders=plan.value.folders;data.sets=plan.value.sets;previous=data.folders;moved=true;examContext.subjectMoved=true;
+      }
+      const current=folder(key),record={...current,...result.value,id:key,color:current?.color||defaultFolderColor,createdAt:current?.createdAt||now,updatedAt:now};
+      record.position=current?.position??window.WortwerkModel.nextLibraryPosition(data,'folder',record);
+      metadataAttempt=true;data.folders=current?data.folders.map(item=>item.id===key?record:item):[...data.folders,record];
+      await save();if(data!==owner)return;examContext.subjectMoved=false;examDialog.close();openExam(key);toast('Test gespeichert.','success');
+    }
+    catch(error){if(data!==owner)return;data.folders=previous;if(metadataAttempt)window.WortwerkRepository.stagePendingRecovery?.(data);$('#exam-error').textContent=moved?'Das Fach wurde gewechselt. Die weiteren Änderungen konnten nicht gespeichert werden. Deine Eingaben bleiben erhalten; bitte versuche es erneut.':error?.code==='40001'?'Die Ablage wurde auf einem anderen Gerät geändert. Schliesse den Dialog und lade deine Bibliothek neu.':'Der Test konnte nicht gespeichert werden. Deine Eingaben bleiben geöffnet. Bitte versuche es erneut.';$('#exam-error').hidden=false}
     finally{examSaving=false;$('#exam-form').inert=false;$('#exam-form').removeAttribute('aria-busy');$('#exam-save').textContent='Test speichern';syncLibraryInteractivity()}
   });
   examDialog.querySelectorAll('[data-exam-cancel]').forEach(button=>button.onclick=()=>{if(!examSaving)examDialog.close()});
   examDialog.addEventListener('cancel',event=>{if(examSaving)event.preventDefault()});
-  examDialog.addEventListener('close',()=>{examContext=null;examDateInput?.dispose();examDateInput=null});
+  examDialog.addEventListener('close',()=>{const moved=examContext?.subjectMoved;examContext=null;examDateInput?.dispose();examDateInput=null;if(moved){activeSubject=folder(activeExamId)?.subjectId||activeSubject;render()}});
   async function deleteExam(key){
     const item=folder(key);if(!isExam(item)||examSaving)return;
     if(!confirm(`Test „${item.name}“ entfernen? Alle Lernstapel und Lernkarten bleiben in deiner Bibliothek erhalten.`))return;
@@ -681,12 +692,12 @@ import './exam-view.css';
   }
   function openShareDialog(kind,itemId,opener){
     if(librarySortSaving||shareDialog.open)return;
-    const item=kind==='folder'?folder(itemId):setById(itemId);
+    const item=kind==='folder'||kind==='exam'?folder(itemId):setById(itemId);
     if(!item)return;
     shareContext={kind,itemId,name:item.name,owner:data,opener};
-    $('#share-title').textContent=kind==='folder'?'Ordner teilen':'Lernstapel teilen';
+    $('#share-title').textContent=kind==='exam'?'Test teilen':kind==='folder'?'Ordner teilen':'Lernstapel teilen';
     $('#share-item-name').textContent=item.name;
-    $('#share-explanation').textContent=kind==='folder'
+    $('#share-explanation').textContent=kind==='exam'?'Der Link enthält eine feste Kopie dieses Tests mit Datum, Notizen, Links und allen zugeordneten Lernstapeln. Er bleibt beim Löschen des Originals erhalten. Empfänger wählen ihr eigenes Fach. Spätere Änderungen brauchen einen neuen Link.':kind==='folder'
       ? 'Wer den Link hat, sieht eine Vorschau und kann den Ordner samt Unterordnern und Lernstapeln in die eigene Bibliothek kopieren.'
       : 'Wer den Link hat, sieht eine Vorschau und kann den Lernstapel in die eigene Bibliothek kopieren.';
     shareUrlField.value='';
@@ -2145,10 +2156,11 @@ import './exam-view.css';
     return result;
   };
   window.WortwerkOpenSharedCopy=async(kind,key)=>{
-    const find=kind==='folder'?folder:setById;
+    const find=kind==='folder'||kind==='exam'?folder:setById;
     if(!find(key)&&!await window.WortwerkReloadLibrary())return false;
     const item=find(key);
     if(!item)return false;
+    if(kind==='exam'){if(!isExam(item))return false;openExam(item.id);return true}
     activeSubject=item.subjectId;
     activeFolder=kind==='folder'?item.id:item.folderId||null;
     activeSet=kind==='set'?item.id:null;

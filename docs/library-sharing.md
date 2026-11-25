@@ -1,5 +1,37 @@
 # Ordner und Lernstapel teilen
 
+## Tests teilen
+
+Die Test-Detailansicht bietet **Teilen → Link erstellen**. Dieser neue Freigabetyp benötigt die vorbereitete Migration `20261125193553_exam_share_snapshots.sql`. Sie wird erst nach ausdrücklicher Freigabe auf die produktive Datenbank angewendet.
+
+Ein Testlink enthält eine unveränderliche Momentaufnahme beim Erstellen: Testname, Datum, Notizen, Weblinks, eigene Unterordner und alle zugeordneten Lernstapel samt Karten, Beispielsätzen, Kartendesign und Aussprache-Einstellung. Ein mehrfach zugeordneter Stapel wird einmal übernommen. Verknüpfte Stapel aus anderen eigenen Fächern werden mitkopiert; fremde Konten und nicht ausgewählte Nachbarstapel werden nicht aufgenommen. Lernfortschritte werden nicht geteilt.
+
+- **Originaltest, Originalstapel oder ursprüngliches Fach gelöscht:** Der Testlink bleibt gültig. Auch wer ihn erst danach öffnet, kann die gespeicherte Version importieren.
+- **Original später geändert:** Ein schon verschickter Link behält seinen Stand. Erneutes Erstellen nach Inhaltsänderungen erzeugt einen neuen Link; unveränderte Inhalte verwenden denselben Link wieder.
+- **Empfänger importiert:** Es entstehen neue IDs und ein eigener Lernfortschritt. Löschen oder Bearbeiten beim Absender verändert diese Kopie nicht.
+- **Zielfach:** Vor dem Hinzufügen kann jedes eigene Fach gewählt werden. Standard ist „Geteilt mit dir“, das bei Bedarf angelegt wird. Der Test übernimmt die Farbe des gewählten Fachs und reagiert auch auf spätere Änderungen dieser Fachfarbe.
+- **Derselbe Link nochmals hinzugefügt:** Solange die eigene Testkopie existiert, wird sie geöffnet statt dupliziert. Auch wenn sie inzwischen das Fach gewechselt hat, wird ihr aktueller Ort zurückgegeben. Nach dem Löschen der eigenen Testkopie ist ein neuer Import möglich.
+- **Externe Unterlagen:** Gespeichert wird deren Webadresse. Externe Dateien selbst werden nicht kopiert; verschwinden sie beim jeweiligen Anbieter oder fehlen dort Zugriffsrechte, kann die App sie nicht verfügbar halten.
+- **Linkschutz:** Wer den zufälligen Link besitzt, sieht Titel, Datum und Anzahlen. Zum Kopieren ist eine Anmeldung nötig. Die internen Snapshot-Tabellen sind für App-Konten nicht direkt lesbar oder veränderbar. Das Löschen des Absenderkontos entfernt dessen gespeicherte Freigaben.
+
+Der Testimport ist eine Transaktion. Ungültige Zielfächer werden abgewiesen, unterbrochene Importe hinterlassen keine halben Kopien und parallele Importe eines Kontos werden serialisiert. Eine Momentaufnahme ist auf 25 MiB begrenzt. Es werden keine bestehenden Nutzerdaten oder bisherigen Freigaben umgeschrieben.
+
+Die bisherigen **Ordner- und Lernstapellinks** behalten ihr unten beschriebenes Verhalten: Noch nicht importierte Inhalte hängen dort weiterhin am Original. Das neue Fortbestehen nach Löschen gilt für die neuen **Testlinks**.
+
+### Isoliert prüfen
+
+`supabase/checks/exam-sharing.sql` prüft Eigentümertrennung, anonyme Vorschau, eigene Zielfächer, querverknüpfte und verschachtelte Inhalte, frischen Lernfortschritt, wiederholte Importe, Änderungen und Löschung des Originals, späten Erstimport, Wiederherstellen gelöschter Testkopien und vollständigen Rollback bei einem absichtlichen Schreibfehler. Alle Testdaten werden zurückgerollt. Niemals diese Fehlersimulation auf der produktiven Datenbank ausführen.
+
+Optional lässt sich die Prüfung ohne Server mit separat installiertem `@electric-sql/pglite` ausführen:
+
+```sh
+PGLITE_MODULE=/absoluter/pfad/zu/node_modules/@electric-sql/pglite npm run test:sharing-db
+```
+
+Sie verwendet ausschliesslich eine isolierte PostgreSQL-Instanz im Arbeitsspeicher, prüft die neue Migration sowohl mit dem bisherigen Produktionsstand als auch mit allen lokalen Freigabe-Migrationen und führt die bestehenden Freigabeprüfungen zusätzlich aus. Weder Konten noch Produktivdaten werden angesprochen.
+
+## Bisherige Ordner- und Lernstapellinks
+
 Über **Teilen** in der Detailansicht oder im Kartenmenü lässt sich ein wiederverwendbarer Freigabelink erstellen. Wer den Link hat, sieht den Titel und die Anzahl der enthaltenen Elemente. Zum Import ist eine Anmeldung nötig. Das Zielfach kann gewählt werden. Standardmässig wird **Geteilt mit dir** verwendet und bei Bedarf angelegt.
 
 Der Import übernimmt den zu diesem Zeitpunkt vorhandenen Inhalt, einschliesslich Unterordnern, Reihenfolge, Farben, Kartendesign, Aussprache-Einstellung und Beispielsätzen. Die Bibliothek speichert Karten als Text und hat keine verknüpften Mediendateien. Die Kopien erhalten neue IDs und einen frischen Lernfortschritt. Eine pro Empfänger und Link gespeicherte Bestätigung verhindert doppelte Kopien, auch nach einer unterbrochenen Verbindung. Wer eine importierte Kopie selbst löscht, kann denselben Link danach nicht erneut importieren.

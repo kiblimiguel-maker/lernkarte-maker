@@ -7,7 +7,7 @@
 .exam-card-top { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
 .exam-symbol { display: inline-grid; place-items: center; width: 44px; height: 44px; flex: none; border: 1px solid var(--accent-border); border-radius: var(--radius-control); background: var(--accent-subtle); color: var(--accent-text); }
 .exam-symbol > svg { display: block; }
-.exam-card .exam-symbol { border-color: color-mix(in srgb, var(--exam-subject-color) 38%, var(--line)); background: color-mix(in srgb, var(--exam-subject-color) 12%, var(--surface)); color: color-mix(in srgb, var(--exam-subject-color) 55%, var(--text)); }
+.exam-card .exam-symbol, .exam-detail-heading .exam-symbol { border-color: color-mix(in srgb, var(--exam-subject-color) 38%, var(--line)); background: color-mix(in srgb, var(--exam-subject-color) 12%, var(--surface)); color: color-mix(in srgb, var(--exam-subject-color) 55%, var(--text)); }
 .exam-card-subject { color: var(--text); font-size: 16px; font-weight: 650; line-height: 1.35; letter-spacing: -.15px; overflow-wrap: anywhere; }
 .exam-card-title { margin: 5px 0 10px; font-size: 16px; font-weight: 500; line-height: 1.4; letter-spacing: -.2px; overflow-wrap: anywhere; }
 .exam-card-date { display: inline-flex; align-items: center; gap: 7px; margin-top: auto; color: var(--muted); font-size: 12px; line-height: 1.4; }
@@ -81,7 +81,7 @@
   .exam-detail-heading .exam-symbol { width: 38px; height: 38px; }
 }
 .exam-form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-.dialog #exam-subject { display: block; height: var(--control-size); appearance: none; -webkit-appearance: none; padding-inline-end: 36px; background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%); background-position: calc(100% - 17px) 50%, calc(100% - 12px) 50%; background-size: 5px 5px; background-repeat: no-repeat; cursor: pointer; }
+.dialog #exam-subject, .dialog #shared-library-subject { display: block; height: var(--control-size); appearance: none; -webkit-appearance: none; padding-inline-end: 36px; background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%); background-position: calc(100% - 17px) 50%, calc(100% - 12px) 50%; background-size: 5px 5px; background-repeat: no-repeat; cursor: pointer; }
 .exam-date-control { position: relative; min-width: 0; }
 .dialog .exam-date-control > input { padding-inline-end: 52px; font-variant-numeric: tabular-nums; }
 .exam-date-calendar { position: absolute; inset: 0 0 0 auto; display: grid; place-items: center; width: var(--control-size); border-radius: 0 var(--radius-control) var(--radius-control) 0; color: var(--muted); }
