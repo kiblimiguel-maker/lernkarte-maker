@@ -2,7 +2,7 @@
 
 ## Tests teilen
 
-Die Test-Detailansicht bietet **Teilen → Link erstellen**. Dieser neue Freigabetyp benötigt die vorbereitete Migration `20261125193553_exam_share_snapshots.sql`. Sie wird erst nach ausdrücklicher Freigabe auf die produktive Datenbank angewendet.
+Die Test-Detailansicht bietet **Teilen → Link erstellen**. Dieser neue Freigabetyp benötigt die vorbereitete Migration `20261125195143_exam_share_snapshots.sql`. Sie wird erst nach ausdrücklicher Freigabe auf die produktive Datenbank angewendet.
 
 Ein Testlink enthält eine unveränderliche Momentaufnahme beim Erstellen: Testname, Datum, Notizen, Weblinks, eigene Unterordner und alle zugeordneten Lernstapel samt Karten, Beispielsätzen, Kartendesign und Aussprache-Einstellung. Ein mehrfach zugeordneter Stapel wird einmal übernommen. Verknüpfte Stapel aus anderen eigenen Fächern werden mitkopiert; fremde Konten und nicht ausgewählte Nachbarstapel werden nicht aufgenommen. Lernfortschritte werden nicht geteilt.
 

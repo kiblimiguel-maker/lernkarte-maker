@@ -16,7 +16,7 @@ for(const includeSettings of [true,false]){
       create function auth.jwt() returns jsonb language sql stable as $$select coalesce(nullif(current_setting('request.jwt.claims',true),''),'{}')::jsonb$$;
       grant usage on schema auth to anon,authenticated; grant execute on all functions in schema auth to anon,authenticated;`);
     for(const name of ['20261005000000_user_library.sql','20261111203927_library_sharing.sql',
-      ...(includeSettings?['20261116064041_preserve_shared_study_settings.sql']:[]),'20261125193553_exam_share_snapshots.sql']){
+      ...(includeSettings?['20261116064041_preserve_shared_study_settings.sql']:[]),'20261125195143_exam_share_snapshots.sql']){
       await db.exec(await sql(`supabase/migrations/${name}`));
     }
     if(includeSettings)await db.exec(await sql('supabase/checks/library-sharing.sql'));
