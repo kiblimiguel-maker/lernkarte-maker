@@ -61,6 +61,11 @@ async function verify(browser,origin,engine,viewport,colorScheme,reduced){
     await page.goto(origin);
     const entry = page.locator('#auth-screen');
     await entry.waitFor();
+    const expectedNotices = {
+      privacy: ['Informationen zum Datenschutz', 'Google Analytics ist derzeit ausgeschaltet', legalConfig.privacyEmail],
+      terms: ['Nutzungsregeln', 'Änderungen am Original', legalConfig.supportEmail],
+      imprint: ['Anbieter und Kontakt', legalConfig.appName, legalConfig.supportEmail]
+    };
     for (const name of ['privacy','terms','imprint','contact']) {
       await entry.locator(`[data-legal-page="${name}"]`).click();
       await page.locator('#legal-dialog[open]').waitFor();
@@ -68,6 +73,11 @@ async function verify(browser,origin,engine,viewport,colorScheme,reduced){
       if (name === 'contact') {
         assert.equal(await page.locator('.legal-mail').getAttribute('href'), `mailto:${legalConfig.supportEmail}`);
         assert.equal(new URL(await page.locator('[data-contact-send]').getAttribute('href')).pathname, legalConfig.supportEmail);
+      } else {
+        const [heading, excerpt, email] = expectedNotices[name];
+        assert.equal(await page.locator('.legal-notice h3').innerText(), heading);
+        assert.ok((await page.locator('.legal-section').allTextContents()).join(' ').includes(excerpt));
+        assert.equal(await page.locator('.legal-mail').getAttribute('href'), `mailto:${email}`);
       }
       await close();
       await page.locator('#legal-dialog').waitFor({state:'hidden'});

@@ -1,6 +1,10 @@
 import { legalConfig, legalPages, legalPublicationReady, contactEmail, contactCategories } from './legal-config.mjs';
+import { publicLegalNotice } from './legal-public-notices.mjs';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+const renderSections = sections => sections.map(section =>
+  `<section class="legal-section"><h3>${esc(section.title)}</h3>${section.paragraphs.map(text => `<p>${esc(text)}</p>`).join('')}</section>`
+).join('');
 const reportCategory = 'Inhalt melden';
 const privacyCategories = new Set(['Datenschutzanfragen', 'Auskunft über meine Daten', 'Kontolöschung anfragen']);
 
@@ -109,7 +113,10 @@ export function createLegalUI({ analytics = null, config = legalConfig, win = wi
   }
   async function renderDocument() {
     if ((import.meta.env.PROD && !__LEGAL_DOCUMENTS_RELEASED__) || !legalPublicationReady(config)) {
-      body.innerHTML='<div class="legal-notice"><h3>Informationen noch nicht freigegeben</h3><p>Der Betreiber vervollständigt und prüft die Angaben für diese Seite vor ihrer Veröffentlichung.</p><p>Optionale Nutzungsanalyse bleibt ausgeschaltet, solange die erforderliche Freigabe fehlt.</p></div>';
+      const notice = publicLegalNotice(page, config);
+      body.innerHTML = `<div class="legal-notice"><h3>${esc(notice.title)}</h3><p>${esc(notice.status)}</p></div>
+        ${renderSections(notice.sections)}
+        ${notice.email ? `<p class="legal-contact-address"><a class="legal-mail" href="mailto:${esc(notice.email)}">${esc(notice.email)}</a></p>` : ''}`;
       setFooter(closeButton);
       return;
     }
@@ -122,7 +129,7 @@ export function createLegalUI({ analytics = null, config = legalConfig, win = wi
       const {legalDrafts}=await documentModule;
       if(version!==generation||page!==requestedPage)return;
       const document=legalDrafts(config)[requestedPage];
-      body.innerHTML=`<p class="legal-version">Stand ${esc(document.date)} · Version ${esc(document.version)}</p>${document.sections.map(section=>`<section class="legal-section"><h3>${esc(section.title)}</h3>${section.paragraphs.map(text=>`<p>${esc(text)}</p>`).join('')}</section>`).join('')}`;
+      body.innerHTML=`<p class="legal-version">Stand ${esc(document.date)} · Version ${esc(document.version)}</p>${renderSections(document.sections)}`;
     }catch{documentModule=null;if(version===generation)showError('Die rechtlichen Informationen konnten nicht geladen werden. Bitte versuche es erneut.');}
   }
   function renderCookies() {

@@ -1,6 +1,6 @@
 # Lernkarten Maker · Datenschutz einrichten
 
-Der Teilrelease umfasst Kontakt, Löschanfragen per E-Mail und Cookie-Einstellungen. Google Analytics und die automatische Kontolöschung sind gesperrt. Die ungeprüften Rechtstexte bleiben ausserhalb des öffentlichen Repositories und des Produktionsbuilds.
+Öffentlich verfügbar sind Datenschutzhinweise zur aktuellen App, Nutzungsregeln, öffentliche Projektangaben, Kontakt, Löschanfragen per E-Mail und Cookie-Einstellungen. Google Analytics und die automatische Kontolöschung sind gesperrt. Die vollständigen Rechtstexte werden nach ihrer Freigabe veröffentlicht. Die Entwürfe bleiben ausserhalb des öffentlichen Repositories und des Produktionsbuilds.
 
 ## 1. Kontakt einrichten und Anfragen beantworten
 
