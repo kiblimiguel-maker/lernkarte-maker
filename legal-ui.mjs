@@ -128,7 +128,7 @@ export function createLegalUI({ analytics = null, config = legalConfig, win = wi
       documentModule??=drafts();
       const {legalDrafts}=await documentModule;
       if(version!==generation||page!==requestedPage)return;
-      const document=legalDrafts(config)[requestedPage];
+      const document=legalDrafts(config, undefined, {automaticDeletion: __ACCOUNT_DELETION_RELEASED__})[requestedPage];
       body.innerHTML=`<p class="legal-version">Stand ${esc(document.date)} · Version ${esc(document.version)}</p>${renderSections(document.sections)}`;
     }catch{documentModule=null;if(version===generation)showError('Die rechtlichen Informationen konnten nicht geladen werden. Bitte versuche es erneut.');}
   }

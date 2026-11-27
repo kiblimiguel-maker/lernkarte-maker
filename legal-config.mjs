@@ -26,7 +26,6 @@ export const legalConfig = Object.freeze({
     backupPolicy: '',
     minorUsagePolicy: '',
     legalBasesAndScope: '',
-    termsLawAndJurisdiction: '',
     processorsReviewed: false,
     googleAnalyticsTermsReviewed: false
   })
@@ -57,8 +56,7 @@ export function legalPublicationIssues(config = legalConfig) {
     ['processing.retentionPolicy', 'Speicher- und Löschfristen festlegen'],
     ['processing.backupPolicy', 'Backup-Verfahren und verbleibende Aufbewahrung prüfen'],
     ['processing.minorUsagePolicy', 'Nutzung durch Minderjährige und Einwilligungsfähigkeit rechtlich klären'],
-    ['processing.legalBasesAndScope', 'Anwendbares Datenschutzrecht und Bearbeitungsgrundlagen prüfen'],
-    ['processing.termsLawAndJurisdiction', 'Anwendbares Recht und zulässige Zuständigkeit rechtlich prüfen']
+    ['processing.legalBasesAndScope', 'Anwendbares Datenschutzrecht und Bearbeitungsgrundlagen prüfen']
   ];
   for (const [path, label] of fields) {
     const value = path.split('.').reduce((current, key) => current?.[key], config);

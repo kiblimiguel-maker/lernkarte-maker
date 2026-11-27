@@ -19,14 +19,15 @@ export function publicLegalNotice(page, config) {
       {
         title: 'Website und Browserspeicher',
         paragraphs: [
-          'Vercel stellt die Website bereit. Beim Aufruf der App und ihrer Dienste fallen technische Verbindungsdaten wie IP-Adresse und Zeitpunkt an. Die beteiligten Dienste können Daten auch ausserhalb der Schweiz bearbeiten.',
-          'Die App nutzt den Browserspeicher für die Sitzung, Einstellungen und die Wiederherstellung ausstehender Änderungen. Wenn du eine Anfrage per E-Mail sendest, bearbeiten wir die Nachricht im Support- oder Datenschutzpostfach.'
+          'Vercel stellt die Website bereit. Beim Aufruf der App und ihrer Dienste fallen technische Verbindungsdaten wie IP-Adresse und Zeitpunkt an. Vercel nennt die USA als primären Ort seiner Datenbearbeitung. Supabase nennt neben der gewählten Datenbankregion Singapur und die USA für bestimmte Betriebs- und Supportaufgaben.',
+          'Die App nutzt den Browserspeicher für die Sitzung, Einstellungen und die Wiederherstellung ausstehender Änderungen. Wenn du uns per E-Mail kontaktierst, werden Adresse und Nachricht im Gmail-Postfach bearbeitet. Google betreibt für seine Dienste weltweit Server.'
         ]
       },
       {
         title: 'Geteilte Lerninhalte',
         paragraphs: [
-          'Personen mit einem Freigabelink können die Vorschau öffnen und die freigegebenen Inhalte nach Anmeldung als eigene Kopie übernehmen. Importierte Kopien bleiben unabhängig. Ein Testlink verweist auf den Stand zum Zeitpunkt der Freigabe und kann auch nach dem Löschen des ursprünglichen Tests noch funktionieren.'
+          'Personen mit einem Freigabelink können die Vorschau öffnen und die freigegebenen Inhalte nach Anmeldung als eigene Kopie übernehmen. Importierte Kopien bleiben unabhängig. Ein Testlink verweist auf den Stand zum Zeitpunkt der Freigabe und kann auch nach dem Löschen des ursprünglichen Tests noch funktionieren.',
+          'Links zu Unterlagen werden als Webadressen gespeichert. Beim Öffnen gelangst du zum jeweiligen Anbieter. Die Aussprachefunktion verwendet französische Stimmen, die dein Browser als lokal kennzeichnet.'
         ]
       },
       {

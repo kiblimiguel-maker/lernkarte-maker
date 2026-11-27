@@ -44,6 +44,14 @@ if (existsSync(new URL('./legal-content.mjs', import.meta.url))) {
   assert.ok(textOf(privacy).includes(ready.supportEmail));
   assert.match(textOf(privacy), /Ausk(unft|unftsbegehren).*Herausgabe/);
   assert.match(textOf(privacy), /Meldungen.*Support-Postfach/);
+  for (const document of [privacy, terms]) {
+    assert.match(textOf(document), /Löschung deines Kontos per E-Mail/);
+    assert.doesNotMatch(textOf(document), /In den Kontoeinstellungen kannst du die Löschung/);
+  }
+  const withDeletion = legalDrafts(ready, undefined, {automaticDeletion: true});
+  for (const document of [withDeletion.privacy, withDeletion.terms]) {
+    assert.match(textOf(document), /In den Kontoeinstellungen kannst du die Löschung/);
+  }
   assert.ok(textOf(terms).includes(ready.supportEmail));
   assert.ok(textOf(imprint).includes(ready.operator.email));
   assert.ok(textOf(imprint).includes(ready.website));
