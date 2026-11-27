@@ -5,6 +5,8 @@ import { createLibraryShareReceiver } from './library-share-receiver.js';
 import { forgetShareForSignIn, rememberShareForSignIn } from './library-sharing.mjs';
 import { bindAppInstall } from './app-install.mjs';
 import { getAnalytics } from './analytics.mjs';
+import { analyticsConfig } from './analytics-config.mjs';
+import { createVercelAnalytics } from './vercel-analytics.mjs';
 import './privacy-actions.css';
 
 // Apply the same saved surface during authentication and in the library.
@@ -38,6 +40,8 @@ let switchingAccount = false;
 let reloadingApp = false;
 let accountUserId = null;
 const analytics = getAnalytics();
+const statisticsProvider = analyticsConfig.enabled ? 'google' : 'vercel';
+const statistics = statisticsProvider === 'google' ? analytics : createVercelAnalytics();
 let legalUI, legalLoad, privacyActions, privacyLoad;
 
 async function currentPrivacySession() {
@@ -48,7 +52,7 @@ async function currentPrivacySession() {
 
 function loadLegal() {
   legalLoad ??= Promise.all([import('./legal-ui.mjs'), import('./legal-ui.css')]).then(([{ createLegalUI }]) => {
-    legalUI = createLegalUI({ analytics });
+    legalUI = createLegalUI({ analytics: statistics, statisticsProvider });
     return legalUI;
   }).catch(error => { legalLoad = null; throw error; });
   return legalLoad;
@@ -101,9 +105,13 @@ function openLegalRoute() {
 }
 window.addEventListener('hashchange', openLegalRoute);
 openLegalRoute();
-analytics.subscribe(() => {
-  if (analytics.isAvailable() && !analytics.readConsent() && !legalUI) void loadLegal().catch(showPrivacyFailure);
-});
+function offerStatisticsChoice() {
+  if (!legalUI && statistics.isAvailable() && statistics.shouldPrompt?.() !== false && !statistics.readConsent()) {
+    void loadLegal().catch(() => { /* A failed optional banner must not interrupt the app. */ });
+  }
+}
+statistics.subscribe(offerStatisticsChoice);
+offerStatisticsChoice();
 
 document.addEventListener('click', event => {
   const link = event.target.closest('[data-legal-page]');

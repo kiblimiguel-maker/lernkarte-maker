@@ -51,7 +51,11 @@ const dateLabel = value => {
   return Number.isFinite(date.getTime()) ? new Intl.DateTimeFormat('de-CH',{dateStyle:'medium',timeStyle:'short'}).format(date) : '';
 };
 
-export function createLegalUI({ analytics = null, config = legalConfig, win = window, doc = document } = {}) {
+export function createLegalUI({ analytics = null, statisticsProvider = 'google', config = legalConfig, win = window, doc = document } = {}) {
+  const statisticsName = statisticsProvider === 'vercel' ? 'Vercel Web Analytics' : 'Google Analytics 4';
+  const statisticsPurpose = statisticsProvider === 'vercel'
+    ? 'für freiwillige Statistiken zur Anzahl allgemeiner Aufrufe der App'
+    : 'für freiwillige Besucherstatistiken und Funktionsnutzung';
   const dialog = doc.createElement('dialog');
   dialog.className = 'dialog wide legal-dialog';
   dialog.id = 'legal-dialog';
@@ -63,7 +67,7 @@ export function createLegalUI({ analytics = null, config = legalConfig, win = wi
   banner.className = 'consent-banner';
   banner.setAttribute('aria-labelledby','consent-banner-title');
   banner.hidden = true;
-  banner.innerHTML = '<div class="consent-banner-copy"><h2 id="consent-banner-title">Deine Privatsphäre</h2><p>Wir verwenden notwendige Technologien, damit Lernkarten Maker zuverlässig funktioniert. Mit deiner Zustimmung nutzen wir Google Analytics 4 für freiwillige Nutzungsstatistiken. <a class="consent-privacy-link" href="#legal=privacy" data-legal-page="privacy">Datenschutzerklärung</a></p></div><div class="consent-banner-actions"><button type="button" class="quiet-button" data-consent-choice="accepted">Statistik erlauben</button><button type="button" class="quiet-button" data-consent-choice="necessary">Nur notwendige</button><button type="button" class="text-button" data-cookie-settings>Einstellungen</button></div><p class="legal-error" data-banner-error role="alert" hidden></p>';
+  banner.innerHTML = `<div class="consent-banner-copy"><h2 id="consent-banner-title">Deine Privatsphäre</h2><p>Wir verwenden notwendige Technologien, damit Lernkarten Maker zuverlässig funktioniert. Mit deiner Zustimmung nutzen wir ${statisticsName} ${statisticsPurpose}. <a class="consent-privacy-link" href="#legal=privacy" data-legal-page="privacy">Datenschutzerklärung</a></p></div><div class="consent-banner-actions"><button type="button" class="quiet-button" data-consent-choice="accepted">Statistik erlauben</button><button type="button" class="quiet-button" data-consent-choice="necessary">Nur notwendige</button><button type="button" class="text-button" data-cookie-settings>Einstellungen</button></div><p class="legal-error" data-banner-error role="alert" hidden></p>`;
   doc.body.append(banner);
   let page = null, busy = false, destroyed = false, opener = null;
   const available = () => analytics?.isAvailable?.() === true;
@@ -84,7 +88,7 @@ export function createLegalUI({ analytics = null, config = legalConfig, win = wi
   observer?.observe(banner);
   function syncConsent() {
     if (destroyed) return;
-    banner.hidden=!(available()&&!consent());
+    banner.hidden=!(available()&&analytics?.shouldPrompt?.()!==false&&!consent());
     bannerSpace();
     if (page === 'cookies' && !busy) renderCookies();
   }
@@ -129,7 +133,7 @@ export function createLegalUI({ analytics = null, config = legalConfig, win = wi
   }
   function renderCookies() {
     const ready=available(), current=consent();
-    body.innerHTML=`<p class="legal-intro">Du entscheidest über freiwillige Nutzungsstatistiken. Deine Lernfunktionen bleiben auch ohne Analyse verfügbar.</p><section class="cookie-category"><div><h3>Notwendige Technologien</h3><p>Anmeldung, Sicherheit, Benutzersitzung, App-Einstellungen, Cookie-Auswahl und technisch notwendige Funktionen.</p></div><span class="cookie-required">Immer aktiv</span></section><section class="cookie-category"><label for="legal-analytics-enabled"><h3>Statistik und Analyse</h3><p>Google Analytics 4 für allgemeine Besucherstatistiken und Funktionsnutzung. Keine Werbung und keine Übermittlung deiner Lerninhalte.</p></label><input id="legal-analytics-enabled" type="checkbox" ${ready&&current?.choice==='accepted'?'checked':''} ${ready?'':'disabled data-permanent-disabled="true"'} aria-describedby="legal-analytics-note"></section><p class="field-hint" id="legal-analytics-note">${ready?'Standardmässig deaktiviert. Du kannst deine Auswahl jederzeit ändern.':'Optionale Analyse ist derzeit nicht freigegeben oder in dieser Umgebung nicht verfügbar. Es werden keine Analytics-Skripte geladen.'}</p>${current?`<p class="legal-version">Letzte Auswahl: ${esc(dateLabel(current.updatedAt))}</p>`:''}`;
+    body.innerHTML=`<p class="legal-intro">Du entscheidest über freiwillige Nutzungsstatistiken. Deine Lernfunktionen bleiben auch ohne Analyse verfügbar.</p><section class="cookie-category"><div><h3>Notwendige Technologien</h3><p>Anmeldung, Sicherheit, Benutzersitzung, App-Einstellungen, Cookie-Auswahl und technisch notwendige Funktionen.</p></div><span class="cookie-required">Immer aktiv</span></section><section class="cookie-category"><label for="legal-analytics-enabled"><h3>Statistik und Analyse</h3><p>${statisticsName} ${statisticsPurpose}. Deine Lerninhalte bleiben ausserhalb der Messung.</p></label><input id="legal-analytics-enabled" type="checkbox" ${ready&&current?.choice==='accepted'?'checked':''} ${ready?'':'disabled data-permanent-disabled="true"'} aria-describedby="legal-analytics-note"></section><p class="field-hint" id="legal-analytics-note">${ready?'Standardmässig deaktiviert. Du kannst deine Auswahl jederzeit ändern.':'Optionale Analyse ist in dieser Umgebung nicht verfügbar.'}</p>${current?`<p class="legal-version">Letzte Auswahl: ${esc(dateLabel(current.updatedAt))}</p>`:''}`;
     setFooter(`${closeButton}<button type="button" class="quiet-button" data-consent-choice="necessary">Nur notwendige</button>${ready?'<button type="button" class="quiet-button" data-cookie-save>Auswahl speichern</button>':''}`);
   }
   function renderContact() {

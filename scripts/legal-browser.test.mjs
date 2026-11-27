@@ -62,7 +62,7 @@ async function verify(browser,origin,engine,viewport,colorScheme,reduced){
     const entry = page.locator('#auth-screen');
     await entry.waitFor();
     const expectedNotices = {
-      privacy: ['Informationen zum Datenschutz', 'Google Analytics ist derzeit ausgeschaltet', legalConfig.privacyEmail],
+      privacy: ['Informationen zum Datenschutz', 'Vercel Web Analytics', legalConfig.privacyEmail],
       terms: ['Nutzungsregeln', 'Änderungen am Original', legalConfig.supportEmail],
       imprint: ['Anbieter und Kontakt', legalConfig.appName, legalConfig.supportEmail]
     };
@@ -77,7 +77,7 @@ async function verify(browser,origin,engine,viewport,colorScheme,reduced){
         const [heading, excerpt, email] = expectedNotices[name];
         assert.equal(await page.locator('.legal-notice h3').innerText(), heading);
         assert.ok((await page.locator('.legal-section').allTextContents()).join(' ').includes(excerpt));
-        assert.equal(await page.locator('.legal-mail').getAttribute('href'), `mailto:${email}`);
+        assert.equal(await page.locator('a[href^="mailto:"]').getAttribute('href'), `mailto:${email}`);
       }
       await close();
       await page.locator('#legal-dialog').waitFor({state:'hidden'});

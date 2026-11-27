@@ -14,10 +14,12 @@
     "test:privacy": "node analytics.test.mjs && node legal.test.mjs && node privacy-account.test.mjs && node privacy-backend.test.mjs",
     "test:privacy-db": "node scripts/privacy-db.test.mjs",
     "test:analytics-browser": "node scripts/analytics-browser.test.mjs",
+    "test:vercel-analytics-browser": "node scripts/vercel-analytics-browser.test.mjs",
     "test:legal-browser": "node scripts/legal-browser.test.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "2.117.2",
+    "@vercel/analytics": "2.0.1",
     "stripe": "^23.1.0"
   },
   "devDependencies": {

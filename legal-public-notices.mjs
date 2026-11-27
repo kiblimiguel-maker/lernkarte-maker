@@ -1,5 +1,18 @@
 import { contactEmail } from './legal-config.mjs';
 
+export const vercelWebAnalyticsNotice = {
+  title: 'Freiwillige Besuchsstatistik',
+  paragraphs: [
+    'Wenn du «Statistik erlauben» wählst, kann die veröffentlichte Website einen allgemeinen Aufruf der App an Vercel Web Analytics melden. So lässt sich die Nutzung der App in zusammengefassten Zahlen einschätzen. Pro Laden der App wird höchstens ein Aufruf erfasst. Die Auswahl ist freiwillig und alle Lernfunktionen sind auch ohne Statistik verfügbar.',
+    'Vercel verarbeitet dafür technische Angaben wie den Zeitpunkt, den ungefähren Standort sowie Browser- und Gerätedaten. Vercel Web Analytics setzt keine Analyse-Cookies. Eine aus der Anfrage berechnete Kennung unterscheidet Besuche innerhalb eines Tages. Bei einem direkten Verweis von einer anderen Website kann Vercel die Adresse ihrer Startseite erhalten. Besuche mit privaten Linkangaben oder zusätzlichen URL-Parametern bleiben ebenso wie Konto- und Lerndaten und einzelne App-Aktionen ausserhalb der Statistik. Vercel kann Daten in den USA und an weiteren Bearbeitungsorten verarbeiten.',
+    'Die App merkt sich deine Auswahl in einem Cookie dieser Website für höchstens 180 Tage. Dieses Cookie dient ausschliesslich dazu, deine Auswahl zu berücksichtigen. Unter «Rechtliches → Cookie-Einstellungen» kannst du deine Zustimmung jederzeit widerrufen. Dann endet die weitere Messung.'
+  ],
+  links: [
+    { title: 'Vercel zu Datenschutz bei Web Analytics', url: 'https://vercel.com/docs/analytics/privacy-policy' },
+    { title: 'Vercel zu Datenbearbeitung und Auslandübermittlungen', url: 'https://vercel.com/legal/dpa' }
+  ]
+};
+
 export function publicLegalNotice(page, config) {
   const support = contactEmail(config.supportEmail);
   const privacy = contactEmail(config.privacyEmail) || support;
@@ -30,12 +43,10 @@ export function publicLegalNotice(page, config) {
           'Links zu Unterlagen werden als Webadressen gespeichert. Beim Öffnen gelangst du zum jeweiligen Anbieter. Die Aussprachefunktion verwendet französische Stimmen, die dein Browser als lokal kennzeichnet.'
         ]
       },
+      vercelWebAnalyticsNotice,
       {
-        title: 'Cookie-Einstellungen und Statistik',
-        paragraphs: [
-          'Google Analytics ist derzeit ausgeschaltet. Die App lädt keinen Analytics-Tag und setzt keine Google-Analytics-Cookies.',
-          'Wenn du «Nur notwendige» wählst, speichert die App die Auswahl im Browser. Ist der lokale Speicher gesperrt, kann ein Cookie dieser Website die Auswahl und ihren Zeitpunkt für höchstens 180 Tage festhalten.'
-        ]
+        title: 'Google Analytics 4',
+        paragraphs: ['Google Analytics 4 ist ausgeschaltet. Die App lädt dafür kein Skript und setzt keine Google-Analytics-Cookies.']
       },
       {
         title: 'Auskunft, Berichtigung und Löschung',
