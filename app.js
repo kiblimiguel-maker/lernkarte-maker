@@ -1669,15 +1669,15 @@ import './exam-view.css';
   const studyMotion=(()=>{
     const styles=getComputedStyle(document.documentElement);
     function duration(name, fallback) {
-      // CSS minification can turn 420ms into .42s. Web Animations takes milliseconds.
+      // CSS minification can express durations in seconds. Web Animations takes milliseconds.
       const value = styles.getPropertyValue(`--study-${name}-duration`).trim();
       const time = /^(\d*\.?\d+)(ms|s)$/.exec(value);
       return time ? Number(time[1]) * (time[2] === 's' ? 1000 : 1) : fallback;
     }
     return {
       step: duration('step', 160),
-      swipe: duration('swipe', 220),
-      flip: duration('flip', 420),
+      swipe: duration('swipe', 320),
+      flip: duration('flip', 360),
       easing: styles.getPropertyValue('--motion-ease-out').trim() || 'ease-out'
     };
   })();
