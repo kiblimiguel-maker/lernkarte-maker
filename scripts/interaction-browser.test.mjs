@@ -84,7 +84,7 @@ async function setup(browser, origin, viewport, reduced) {
     if (url.origin === origin && url.pathname === '/' && request.isNavigationRequest()) {
       const response = await route.fetch();
       // Production CSS minification expresses this custom property in seconds.
-      const body = (await response.text()).replace('<head>', '<head><style>:root{--study-flip-duration:.24s!important;--study-step-duration:.16s!important;--study-swipe-duration:.8s!important}</style>');
+      const body = (await response.text()).replace('<head>', '<head><style>:root{--study-flip-duration:.23s!important;--study-step-duration:.16s!important;--study-swipe-duration:.68s!important}</style>');
       return route.fulfill({ response, body });
     }
     if (url.origin === origin) return route.continue();
@@ -165,7 +165,7 @@ async function verifyStudy(browser, origin, engine, viewport, reduced) {
         for (const animation of animations) animation.finish();
         return { duration, samples, end: visible() };
       });
-      assert.equal(flip.duration, reduced ? 0 : 240, 'Full flip duration with production CSS units');
+      assert.equal(flip.duration, reduced ? 0 : 230, 'Full flip duration with production CSS units');
       if (!reduced) {
         assert.deepEqual(flip.samples.map(sample => sample.visible), [[back, !back], [!back, back]]);
         assert.ok(flip.samples.every(sample => sample.tilt > .1), 'Both halves rotate in 3D');
@@ -199,7 +199,7 @@ async function verifyStudy(browser, origin, engine, viewport, reduced) {
     assert.equal(quick.next.front, 'Deutsch 1');
     assert.equal(quick.next.pressed, 'false');
     assert.equal(quick.back.front, 'Deutsch 0');
-    assert.deepEqual([quick.forwardDuration, quick.backDuration, quick.ratingDuration], reduced ? [0, 0, 0] : [160, 160, 800]);
+    assert.deepEqual([quick.forwardDuration, quick.backDuration, quick.ratingDuration], reduced ? [0, 0, 0] : [160, 160, 680]);
     assert.equal(quick.current.front, 'Deutsch 3');
     assert.equal(quick.known, '2');
     assert.equal(quick.missed, '1');

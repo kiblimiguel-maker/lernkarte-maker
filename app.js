@@ -1676,8 +1676,8 @@ import './exam-view.css';
     }
     return {
       step: duration('step', 160),
-      swipe: duration('swipe', 800),
-      flip: duration('flip', 240),
+      swipe: duration('swipe', 680),
+      flip: duration('flip', 230),
       easing: styles.getPropertyValue('--motion-ease-out').trim() || 'ease-out'
     };
   })();

@@ -64,8 +64,8 @@
   --space-6: 24px;
   --space-8: 32px;
   --study-step-duration: 160ms;
-  --study-swipe-duration: 800ms;
-  --study-flip-duration: 240ms;
+  --study-swipe-duration: 680ms;
+  --study-flip-duration: 230ms;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -1121,17 +1121,13 @@ span.card-bullet-list > span { display: list-item; list-style-type: disc; }
   background: #d7ebd9;
   border-color: #b7dcbb;
 }
-.study-card-slot.is-correct .study-feedback-text { color: #146637; }
+.study-card-slot.is-correct .study-feedback-text { color: #15803d; }
 
 .study-card-slot.is-incorrect .study-feedback {
   background: #fde5dd;
   border-color: #f7c7bc;
 }
-.study-card-slot.is-incorrect .study-feedback-text { color: #A32C31; }
-:root[data-appearance="dark"] .study-card-slot.is-correct .study-feedback { background: #21382D; border-color: #476A56; }
-:root[data-appearance="dark"] .study-card-slot.is-correct .study-feedback-text { color: #A7D8BB; }
-:root[data-appearance="dark"] .study-card-slot.is-incorrect .study-feedback { background: #39292F; border-color: #704A55; }
-:root[data-appearance="dark"] .study-card-slot.is-incorrect .study-feedback-text { color: #F4B4BC; }
+.study-card-slot.is-incorrect .study-feedback-text { color: #c53030; }
 .study-controls {
   display: grid;
   grid-template-columns: minmax(0, 118px) repeat(2, minmax(0, 168px)) minmax(0, 118px);
