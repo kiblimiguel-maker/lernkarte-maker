@@ -34,7 +34,7 @@ const original = themes.find(theme => theme.id === 'wortwerk-original');
 const violet = themes.find(theme => theme.id === 'ultra-violet-soft-apricot');
 const mint = themes.find(theme => theme.id === 'sky-mint-graphite');
 const ion = themes.find(theme => theme.id === 'ion-blue-drift-silver');
-assert.equal(DEFAULT_THEME_ID, graphite.id, 'Graphite is the default');
+assert.equal(DEFAULT_THEME_ID, ion.id, 'Ion Blue · Drift Silver is the default');
 assert.deepEqual(themes.filter(theme => theme !== graphite).map(theme => [theme.front.surface, theme.back.surface]), [
   ['#DDE3EA', '#EAF2F8'],
   ['#6A00F4', '#FFD6A5'],
@@ -71,7 +71,8 @@ const storage = {
   getItem(key) { return values.get(key) ?? null; },
   setItem(key, value) { values.set(key, value); }
 };
-assert.equal(readThemeId(storage), graphite.id, 'missing preference uses the new default');
+assert.equal(readThemeId(storage), ion.id, 'missing preference uses the new default');
+assert.equal(readThemeId({ getItem: () => graphite.id }), graphite.id, 'an explicit choice of the previous default is preserved');
 const saved = saveTheme(original.id, storage);
 assert.equal(saved.persisted, true);
 assert.equal(readThemeId(storage), original.id, 'the saved original design survives reloading after the default changes');
@@ -92,7 +93,7 @@ assert.equal(resolveSetThemeId(null, ion.id), ion.id, 'missing sets safely inher
 assert.equal(resolveSetThemeId({ cardThemeId: '' }, ion.id), ion.id, 'empty overrides use the global design');
 assert.equal(resolveSetThemeId({ cardThemeId: 'unknown-theme' }, ion.id), ion.id, 'invalid overrides do not override a valid global design');
 assert.equal(resolveSetThemeId(inheritedSet, 'unknown-theme'), DEFAULT_THEME_ID, 'invalid global values use the default design');
-assert.equal(resolveSetThemeId(inheritedSet), graphite.id, 'missing preferences use Graphite');
+assert.equal(resolveSetThemeId(inheritedSet), ion.id, 'missing preferences use Ion Blue · Drift Silver');
 assert.equal(resolveSetThemeId(violetSet, 'unknown-theme'), violet.id, 'a valid set override takes priority over an invalid global selection');
 assert.equal(resolveSetThemeId(violetSet, ion.id), violet.id);
 assert.equal(resolveSetThemeId(mintSet, ion.id), mint.id, 'sets in the same folder retain independent designs');

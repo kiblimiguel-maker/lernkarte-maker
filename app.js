@@ -1135,12 +1135,13 @@ import './exam-view.css';
       element.onclick=event=>{if((event.target.closest('button,details')&&event.target.closest('button,details')!==element)||librarySorting)return;open()};element.onkeydown=event=>{if(event.target===element&&!librarySorting&&(event.key==='Enter'||event.key===' ')){event.preventDefault();open()}};
     });
   }
-  function libraryProgressBar(percentage,label='Sicher beherrschte Karten'){
-    return `<div class="library-progress" role="progressbar" aria-label="${esc(label)}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${percentage}"><span style="width:${percentage}%"></span></div>`;
+  function libraryProgressBar(round){
+    if(!round)return '<div class="library-progress" aria-hidden="true"></div>';
+    return `<div class="library-progress" role="meter" aria-label="Letzter vollständiger Durchgang" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${round.percentage}" aria-valuetext="${round.known} von ${round.cardCount} gewusst"><span style="width:${round.percentage}%"></span></div>`;
   }
   function setCard(set){
     const parent=folder(set.folderId),sub=subject(set.subjectId),theme=cardThemes.getTheme(cardThemes.resolveSetThemeId(set,activeCardThemeId));
-    const {total,percentage}=window.WortwerkModel.getSetProgress(cardsBySet.get(set.id)??[]);
+    const total=countSetCards(set.id),round=window.WortwerkModel.getLastFullRound(set);
     return `<article class="set-card" ${sortAttributes('set',set)} tabindex="0" data-open-set="${esc(set.id)}" style="--set-front:${theme.front.surface};--set-back:${theme.back.surface}">
       <div class="set-card-top"><span class="set-cover" data-organise-handle aria-hidden="true"><span></span><span></span></span>${view==='tests'?'':itemActions('set',set)}</div>
       <div class="set-card-meta">${esc(view==='tests'&&sub?[sub.name,parent?.name].filter(Boolean).join(' / '):parent?.name||sub?.name||'Fach')}</div>
@@ -1148,8 +1149,8 @@ import './exam-view.css';
       <div class="set-card-bottom">
         <div class="set-card-stats">
           <span>${total} ${total===1?'Karte':'Karten'}</span>
-          <span class="set-card-progress-text" aria-hidden="true">${percentage}&nbsp;% sicher</span>
-          ${libraryProgressBar(percentage,`Sicher beherrschte Karten in ${set.name}`)}
+          <span class="set-card-progress-text" title="Letzter vollständiger Durchgang">${round?`${round.percentage}&nbsp;% gewusst`:'Noch kein Ergebnis'}</span>
+          ${libraryProgressBar(round)}
         </div>
         <span class="set-actions"><button type="button" class="quiet-button" data-quick-study="${esc(set.id)}" ${total?'':'disabled'}>${studyActionLabel(set.id)}</button><button type="button" class="quiet-button" data-quick-edit="${esc(set.id)}">Öffnen</button></span>
       </div>
@@ -1214,10 +1215,11 @@ import './exam-view.css';
     const previous=parentFolder?.name||parent?.name;
     const returnExam=folder(examReturnId);
     if(isExam(returnExam))crumbs([{label:'Tests',level:'tests'},{label:returnExam.name,level:'exam',id:returnExam.id},{label:item.name}]);
+    const round=window.WortwerkModel.getLastFullRound(item);
     const progress=window.WortwerkModel.getSetProgress(cards);
     const positions=new Map(cards.map((card,index)=>[card.id,index]));
     const studyLabel=studyActionLabel(item.id);
-    $('#content').innerHTML=`<div class="subpage-heading">${backButton(previous,item.subjectId,item.folderId||null)}<div><div class="page-context">${esc(parentFolder?.name||parent?.name||'Lernstapel')}</div><h1 class="page-title">${esc(item.name)}</h1><p class="page-subtitle">${cards.length} ${cards.length===1?'Lernkarte':'Lernkarten'}</p></div>${libraryDetailActions('set',item,`<button id="edit-set">Lernstapel bearbeiten</button><button data-move-item="set" data-item-id="${esc(item.id)}">Lernstapel verschieben …</button><button id="swap-card-sides" ${cards.length?'':'disabled'}>Vorder- und Rückseiten tauschen</button><button class="danger-action" id="delete-set">Lernstapel löschen</button>`)}</div>${cards.length?`<section class="study-banner" aria-labelledby="learning-progress-title"><div class="learning-progress-copy"><h2 id="learning-progress-title">Lernfortschritt</h2><p>${cards.length} ${cards.length===1?'Karte':'Karten'} · ${progress.secure} sicher · ${progress.practice} zu üben · ${progress.new} neu</p>${libraryProgressBar(progress.percentage)}<small class="study-progress-caption">${progress.percentage}% sicher beherrscht · mindestens zwei richtige Antworten.</small></div><div class="study-banner-actions"><button class="primary-button" id="start-study">${studyLabel}</button><button class="quiet-button" id="reset-progress">Lernfortschritt zurücksetzen</button></div></section>`:''}<section class="library-section"><div class="section-head"><h2>Lernkarten <span class="count-label">${cards.length}</span></h2><div class="section-actions"><button class="quiet-button" id="import-this">Karten importieren</button><button class="${cards.length?'quiet-button':'primary-button'}" id="add-card">＋ Karte erstellen</button></div></div>${cards.length?renderCardList(cards,positions):empty('Noch keine Lernkarten','Erstelle deine erste Karte oder importiere mehrere Begriffe aus Text.')}</section>`;
+    $('#content').innerHTML=`<div class="subpage-heading">${backButton(previous,item.subjectId,item.folderId||null)}<div><div class="page-context">${esc(parentFolder?.name||parent?.name||'Lernstapel')}</div><h1 class="page-title">${esc(item.name)}</h1><p class="page-subtitle">${cards.length} ${cards.length===1?'Lernkarte':'Lernkarten'}</p></div>${libraryDetailActions('set',item,`<button id="edit-set">Lernstapel bearbeiten</button><button data-move-item="set" data-item-id="${esc(item.id)}">Lernstapel verschieben …</button><button id="swap-card-sides" ${cards.length?'':'disabled'}>Vorder- und Rückseiten tauschen</button><button class="danger-action" id="delete-set">Lernstapel löschen</button>`)}</div>${cards.length?`<section class="study-banner" aria-labelledby="learning-progress-title"><div class="learning-progress-copy"><h2 id="learning-progress-title">Letzter vollständiger Durchgang</h2><p>${round?`${round.percentage} % gewusst · ${round.known} von ${round.cardCount} richtig`:'Noch kein Ergebnis'}</p>${libraryProgressBar(round)}<small class="study-progress-caption">Über alle Lernrunden · ${progress.secure} sicher · ${progress.practice} zu üben · ${progress.new} neu</small></div><div class="study-banner-actions"><button class="primary-button" id="start-study">${studyLabel}</button><button class="quiet-button" id="reset-progress">Lernfortschritt zurücksetzen</button></div></section>`:''}<section class="library-section"><div class="section-head"><h2>Lernkarten <span class="count-label">${cards.length}</span></h2><div class="section-actions"><button class="quiet-button" id="import-this">Karten importieren</button><button class="${cards.length?'quiet-button':'primary-button'}" id="add-card">＋ Karte erstellen</button></div></div>${cards.length?renderCardList(cards,positions):empty('Noch keine Lernkarten','Erstelle deine erste Karte oder importiere mehrere Begriffe aus Text.')}</section>`;
     $('#go-back').onclick=()=>{librarySorting=false;activeSet=null;activeFolder=item.folderId||null;render()};$('#edit-set').onclick=()=>editEntity('set',item.id);$('#delete-set').onclick=()=>deleteSet(item.id);$('#start-study')?.addEventListener('click',()=>beginStudy(item.id));$('#reset-progress')?.addEventListener('click',()=>openResetProgress(item.id));$('#swap-card-sides').onclick=()=>swapSetSides(item.id);$('#add-card').onclick=()=>openEntity('card');$('#import-this').onclick=()=>openImport(item.id);
     bindCardList(cards,positions);bindSubjectCards();
     if(isExam(returnExam)){
@@ -1656,11 +1658,21 @@ import './exam-view.css';
   $('#reset-progress-cancel').addEventListener('click',()=>{$('#reset-progress-dialog').close();resetSetId=null});
   $('#reset-progress-close').addEventListener('click',()=>{$('#reset-progress-dialog').close();resetSetId=null});
   $('#reset-progress-dialog').addEventListener('close',event=>{if(!event.currentTarget.open)resetSetId=null});
-  function completeSession(record){if(session?.completionRecorded)return;const ticket=analyticsTicket(),owner=data;delete data.studySessions[record.setId];data.studyHistory.unshift(window.WortwerkModel.summarizeSession(record,new Date().toISOString()));data.studyHistory=data.studyHistory.slice(0,30);if(session)session.completionRecorded=true;trackSaved(save(),owner,ticket,'study_completed')}
+  function completeSession(record){
+    if(session?.completionRecorded)return;
+    const ticket=analyticsTicket(),owner=data;
+    const summary=window.WortwerkModel.summarizeSession(record,new Date().toISOString());
+    window.WortwerkModel.rememberFullRound(setById(record.setId),cardsBySet.get(record.setId)||[],record,summary);
+    delete data.studySessions[record.setId];
+    data.studyHistory.unshift(summary);
+    data.studyHistory=data.studyHistory.slice(0,30);
+    if(session)session.completionRecorded=true;
+    trackSaved(save(),owner,ticket,'study_completed');
+  }
   function saveSessionProgress(){
     if(!session)return;
     const results=window.WortwerkModel.getStudyResults(session),index=window.WortwerkModel.getStudyCurrentIndex(session);
-    const record={id:session.id,setId:session.setId,startedAt:session.startedAt,cardIds:session.cards.map(card=>card.id),results,resultsByCardId:{...session.resultsByCardId},historyCardIds:session.historyCardIds.slice(),historyIndex:session.historyIndex,currentCardId:session.currentCardId,shuffleRemainingCardIds:session.shuffleRemainingCardIds.slice(),index:Math.max(0,Math.min(index,session.cards.length-1)),missedCardIdsCopied:[...(session.missedCardIdsCopied||[])]};
+    const record={id:session.id,setId:session.setId,startedAt:session.startedAt,isRetry:session.isRetry,cardIds:session.cards.map(card=>card.id),results,resultsByCardId:{...session.resultsByCardId},historyCardIds:session.historyCardIds.slice(),historyIndex:session.historyIndex,currentCardId:session.currentCardId,shuffleRemainingCardIds:session.shuffleRemainingCardIds.slice(),index:Math.max(0,Math.min(index,session.cards.length-1)),missedCardIdsCopied:[...(session.missedCardIdsCopied||[])]};
     data.studySessions[session.setId]=record;return save();
   }
   let activeSlotIndex = 0;
@@ -1728,7 +1740,7 @@ import './exam-view.css';
     const sessionState=window.WortwerkModel.createStudySession(cards,saved);
     session={...sessionState,id:saved?.id||id(),setId:key,startedAt:saved?.startedAt||new Date().toISOString(),flipped:false,missedCardIdsCopied:new Set(Array.isArray(saved?.missedCardIdsCopied)?saved.missedCardIdsCopied:[]),missedSetPending:false};
     const lastStudiedAt=new Date().toISOString();setById(key).lastStudiedAt=lastStudiedAt;data.recent=data.recent.filter(entry=>entry.setId!==key);data.recent.unshift({setId:key,at:lastStudiedAt});data.recent=data.recent.slice(0,30);
-    $('#study-title').textContent=setById(key)?.name||'Lernsession';$('#study-complete').hidden=true;$('#shuffle-toggle').setAttribute('aria-pressed','false');$('#study-dialog').classList.remove('is-fullscreen');$('#study-dialog').showModal();renderStudyCard();
+    $('#study-title').textContent=`${session.isRetry?'Wiederholung · ':''}${setById(key)?.name||'Lernsession'}`;$('#study-complete').hidden=true;$('#study-dialog').classList.remove('is-fullscreen');$('#study-dialog').showModal();renderStudyCard();
     const pending=saveSessionProgress();if(!saved)trackSaved(pending,owner,activityTicket,'study_started');
   }
   function updateStudyScoreCounts(){
@@ -1937,7 +1949,7 @@ import './exam-view.css';
     studySlots.forEach(stopStudyFlip);
     syncStudySpeech();
     const results=window.WortwerkModel.getStudyResults(session);
-    if(!session.completionRecorded)completeSession({id:session.id,setId:session.setId,startedAt:session.startedAt,cardIds:session.cards.map(card=>card.id),results});
+    if(!session.completionRecorded)completeSession({id:session.id,setId:session.setId,startedAt:session.startedAt,isRetry:session.isRetry,cardIds:session.cards.map(card=>card.id),results});
     const {known,missed,unrated,percentage}=window.WortwerkModel.summarizeResults(results);
     const evaluated=known+missed,circumference=2*Math.PI*42;
     const knownLength=evaluated?circumference*known/evaluated:0;
@@ -1961,11 +1973,10 @@ import './exam-view.css';
     const cards=session.cards.filter(card=>window.WortwerkModel.getStudyResult(session,card.id)===false);
     if(!cards.length)return;
     const retryState=window.WortwerkModel.createStudySession(cards);
-    session={...retryState,id:id(),setId:session.setId,startedAt:new Date().toISOString(),flipped:false,missedCardIdsCopied:new Set(),missedSetPending:false};
+    session={...retryState,isRetry:true,id:id(),setId:session.setId,startedAt:new Date().toISOString(),flipped:false,missedCardIdsCopied:new Set(),missedSetPending:false};
     activeSlotIndex=0;
     $('#study-title').textContent=`Wiederholung · ${setById(session.setId)?.name||'Lernsession'}`;
     $('#study-complete').hidden=true;
-    $('#shuffle-toggle').setAttribute('aria-pressed','false');
     renderStudyCard({restoreCardFocus:true});
     saveSessionProgress();
   }
@@ -2088,7 +2099,6 @@ import './exam-view.css';
     session.flipped=false;
     activeSlotIndex=1-activeSlotIndex;
     renderStudyCard({restoreCardFocus});
-    $('#shuffle-toggle').setAttribute('aria-pressed','true');
     saveSessionProgress();
     toast('Alle Karten neu gemischt. Bewertungen bleiben erhalten.');
   };
@@ -2170,6 +2180,7 @@ import './exam-view.css';
         if(repository.getPendingRecovery()?.token!==recovery.token){offerPendingRecovery();return}
         const restored=repository.mergePendingLibrary(data,recovery.library,{changes:recovery.changes,preserveOrganisation:recovery.preserveOrganisation});
         data=window.WortwerkModel.normalizeLibrary(restored);
+        window.WortwerkModel.restoreLegacyRoundScores(data);
       }catch(error){
         warning.textContent=error?.code==='RECOVERY_CONFLICT'
           ?recovery.changes
@@ -2198,6 +2209,7 @@ import './exam-view.css';
       if(version!==libraryLoadVersion)return false;
       libraryLoadFailed=false;
       data=loaded;
+      window.WortwerkModel.restoreLegacyRoundScores(data);
       render();
       if(offerRecovery)offerPendingRecovery();
       return true;

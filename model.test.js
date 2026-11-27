@@ -2,7 +2,7 @@
 
 const assert = require('node:assert/strict');
 const { nextCardPosition, moveCardInOrder } = require('./model.js');
-const { normalizeLibrary, getLibrarySiblings, reorderLibraryItems, canMoveLibraryItem, moveLibraryItem, nextLibraryPosition, getFolderDescendantIds, createImportedCards, createCopiedCards, nextSetName, swapSetCardSides, recordCardAnswer, updateCardAnswer, createStudySession, getStudyResults, getStudyResult, getStudyCurrentIndex, getStudyCard, getNextStudyCardId, navigateStudySession, shuffleStudyCards, setStudyAnswer, getSetProgress, resetSetProgress, summarizeResults, summarizeSession, nextUnratedIndex } = require('./model.js');
+const { normalizeLibrary, getLibrarySiblings, reorderLibraryItems, canMoveLibraryItem, moveLibraryItem, nextLibraryPosition, getFolderDescendantIds, createImportedCards, createCopiedCards, nextSetName, swapSetCardSides, recordCardAnswer, updateCardAnswer, createStudySession, getStudyResults, getStudyResult, getStudyCurrentIndex, getStudyCard, getNextStudyCardId, navigateStudySession, shuffleStudyCards, setStudyAnswer, getSetProgress, getLastFullRound, rememberFullRound, restoreLegacyRoundScores, resetSetProgress, summarizeResults, summarizeSession, nextUnratedIndex } = require('./model.js');
 
 assert.deepEqual(normalizeLibrary(null), { subjects: [], folders: [], sets: [], cards: [], recent: [], studySessions: {}, studyHistory: [] });
 const malformedCollections = normalizeLibrary({
@@ -50,6 +50,48 @@ assert.equal(nextUnratedIndex([true, false], 0), -1, 'a fully rated set has no u
 const completedSummary = summarizeSession({ id: 'session-1', setId: 'set-1', startedAt: '2026-10-05T12:00:00.000Z', cardIds: ['a', 'b'], results: [true, false] }, '2026-10-05T12:03:00.000Z');
 assert.deepEqual([completedSummary.cardCount, completedSummary.known, completedSummary.missed, completedSummary.percentage], [2, 1, 1, 50]);
 
+const roundSet = { id: 'set-1' };
+const roundCards = [{ id: 'a' }, { id: 'b' }];
+function finishRound(cardIds, results, isRetry = false) {
+  const record = { cardIds, results, isRetry };
+  rememberFullRound(roundSet, roundCards, record, summarizeSession(record, '2026-10-05T13:00:00.000Z'));
+}
+assert.equal(getLastFullRound(roundSet), null);
+finishRound(['a', 'b'], [false, false]);
+assert.deepEqual(getLastFullRound(roundSet), { known: 0, cardCount: 2, percentage: 0 });
+finishRound(['a', 'b'], [true, false]);
+for (const [ids, answers, retry] of [
+  [['a', 'b'], [true, null], false],
+  [['a'], [true], false],
+  [['a', 'c'], [true, true], false],
+  [['a', 'b'], [true, true], true]
+]) {
+  finishRound(ids, answers, retry);
+  assert.equal(getLastFullRound(roundSet).percentage, 50);
+}
+finishRound(['b', 'a'], [true, true]);
+assert.equal(getLastFullRound(roundSet).percentage, 100);
+assert.equal(getLastFullRound({lastFullRound: {known: 999, cardCount: 1000}}).percentage, 99);
+assert.equal(getLastFullRound({lastFullRound: {known: 3, cardCount: 2}}), null);
+assert.equal(createStudySession(roundCards, { isRetry: true, cardIds: ['b'] }).isRetry, true);
+
+const legacyRound = { ...completedSummary };
+delete legacyRound.isRetry;
+const legacyScores = normalizeLibrary({
+  sets: [{ id: 'set-1' }],
+  cards: roundCards.map(card => ({ ...card, setId: 'set-1', lastReviewedAt: '2026-10-05T12:02:00.000Z' })),
+  studyHistory: [legacyRound]
+});
+const ambiguousScores = structuredClone(legacyScores);
+ambiguousScores.cards[0].lastReviewedAt = null;
+restoreLegacyRoundScores(ambiguousScores);
+assert.equal(getLastFullRound(ambiguousScores.sets[0]), null);
+restoreLegacyRoundScores(legacyScores);
+assert.equal(getLastFullRound(legacyScores.sets[0]).percentage, 50);
+resetSetProgress(legacyScores, 'set-1');
+restoreLegacyRoundScores(legacyScores);
+assert.equal(getLastFullRound(legacyScores.sets[0]), null);
+
 const restoredSession = normalizeLibrary({ studySessions: {
   'set-1': { id: 'session-2', setId: 'set-1', cardIds: ['card-1', 'card-2'], results: [true, null], index: 1, missedCardIdsCopied: ['card-old'] }
 }, studyHistory: [completedSummary] });
@@ -83,7 +125,7 @@ assert.deepEqual(resetLibrary.cards.slice(0, 2).map(({ id, front, back, position
   { id: 'reset-card-2', front: 'die Katze', back: 'le chat', position: 1 }
 ]);
 assert.deepEqual(resetLibrary.cards[2], untouchedCard, 'reset leaves cards in other sets unchanged');
-assert.deepEqual(resetLibrary.sets[0], untouchedSet, 'reset leaves set settings unchanged');
+assert.deepEqual(resetLibrary.sets[0], { ...untouchedSet, lastFullRound: null }, 'reset clears only the round score on the set');
 assert.equal(resetLibrary.studySessions['set-1'], undefined, 'reset removes the saved resume point');
 assert.equal(resetLibrary.studySessions['set-2'].id, 'keep-this', 'reset preserves other sets’ sessions');
 assert.deepEqual(resetLibrary.studyHistory, historyBeforeReset, 'reset preserves completed-session history');

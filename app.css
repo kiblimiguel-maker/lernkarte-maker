@@ -758,11 +758,6 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .study-top-actions { display: flex; align-items: center; gap: var(--space-2); }
 .study-top .icon-button { width: 44px; min-height: 44px; }
 .study-top svg, .study-controls svg { width: 16px; height: 16px; flex: none; }
-.study-top-actions .quiet-button[aria-pressed="true"]:not(:disabled) {
-  border-color: var(--accent-border);
-  background: var(--accent-subtle);
-  color: var(--accent-text);
-}
 .study-heading { min-width: 0; }
 .study-kicker { margin-bottom: 2px; color: var(--muted); font-size: 11px; }
 .study-set-name {
@@ -888,18 +883,18 @@ button:disabled { opacity: .45; cursor: not-allowed; }
   align-items: center;
   justify-content: center;
   padding: 40px clamp(14px, 4vw, 44px) 36px;
-  border: 1px solid var(--study-front-border, #465262);
+  border: 1px solid var(--study-front-border, #31A9E1);
   border-radius: var(--study-card-radius);
-  background: var(--study-front-surface, #242A33);
-  color: var(--study-front-text, #F2F5FA);
+  background: var(--study-front-surface, #4FC3F7);
+  color: var(--study-front-text, #0B0D10);
   box-shadow: var(--shadow-soft);
   backface-visibility: hidden;
   -webkit-backface-visibility: hidden;
 }
 .study-back {
-  border-color: var(--study-back-border, #4D6181);
-  background: var(--study-back-surface, #26344A);
-  color: var(--study-back-text, #F2F5FA);
+  border-color: var(--study-back-border, #C6D0D6);
+  background: var(--study-back-surface, #DDE3EA);
+  color: var(--study-back-text, #0B0D10);
 }
 .study-face > .study-copy {
   display: flex;
@@ -928,15 +923,15 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .study-example {
   max-width: min(100%, 55ch);
   overflow-wrap: anywhere;
-  color: var(--study-front-muted, #BAC5D5);
+  color: var(--study-front-muted, #0B0D10);
   font-size: clamp(14px, 1.6vw, 18px);
   font-weight: 450;
   line-height: 1.55;
   white-space: pre-wrap;
 }
-.study-back .study-example { color: var(--study-back-muted, #BAC5D5); }
-.study-front { --gender-masculine-color: var(--study-front-gender-masculine, #8DBDFF); --gender-feminine-color: var(--study-front-gender-feminine, #FF8E9E); }
-.study-back { --gender-masculine-color: var(--study-back-gender-masculine, #8DBDFF); --gender-feminine-color: var(--study-back-gender-feminine, #FF8E9E); }
+.study-back .study-example { color: var(--study-back-muted, #0B0D10); }
+.study-front { --gender-masculine-color: var(--study-front-gender-masculine, #004580); --gender-feminine-color: var(--study-front-gender-feminine, #8B142D); }
+.study-back { --gender-masculine-color: var(--study-back-gender-masculine, #0057B8); --gender-feminine-color: var(--study-back-gender-feminine, #B00020); }
 .gender-masculine { color: var(--gender-masculine-color, var(--gender-masculine-dark-surface)); }
 .gender-feminine { color: var(--gender-feminine-color, var(--gender-feminine-dark-surface)); }
 .study-copy-main .gender-masculine, .study-copy-main .gender-feminine { font-weight: 700; }
@@ -964,7 +959,7 @@ span.card-bullet-list > span { display: list-item; list-style-type: disc; }
 .study-face .card-side-label {
   position: absolute;
   top: 14px;
-  color: var(--study-front-muted, #BAC5D5);
+  color: var(--study-front-muted, #0B0D10);
   font-size: 10px;
   font-weight: 600;
   letter-spacing: .1em;
@@ -973,11 +968,11 @@ span.card-bullet-list > span { display: list-item; list-style-type: disc; }
 .study-face .flip-hint {
   position: absolute;
   bottom: 12px;
-  color: var(--study-front-muted, #BAC5D5);
+  color: var(--study-front-muted, #0B0D10);
   font-size: 11px;
 }
 
-.study-back .card-side-label, .study-back .flip-hint { color: var(--study-back-muted, #BAC5D5); }
+.study-back .card-side-label, .study-back .flip-hint { color: var(--study-back-muted, #0B0D10); }
 
 /* The pronunciation controls sit above the card, outside its flip button. */
 .study-speech {
@@ -988,12 +983,12 @@ span.card-bullet-list > span { display: list-item; list-style-type: disc; }
   width: min(calc(var(--study-card-width) - 12px), 440px);
   margin-inline: auto;
   pointer-events: none;
-  --speech-text: var(--study-back-text, #F2F5FA);
-  --speech-surface: var(--study-back-surface, #26344A);
+  --speech-text: var(--study-back-text, #0B0D10);
+  --speech-surface: var(--study-back-surface, #DDE3EA);
 }
 .study-speech[data-side="front"] {
-  --speech-text: var(--study-front-text, #F2F5FA);
-  --speech-surface: var(--study-front-surface, #242A33);
+  --speech-text: var(--study-front-text, #0B0D10);
+  --speech-surface: var(--study-front-surface, #4FC3F7);
 }
 .study-stage:has(.study-speech[data-side="back"]:not([hidden])) .is-active .study-back,
 .study-stage:has(.study-speech[data-side="front"]:not([hidden])) .is-active .study-front { padding-block-end: 58px; }

@@ -31,7 +31,7 @@ const cardCount = Math.max(20, Number.parseInt(process.env.QA_CARD_COUNT || '181
 assert.ok(Number.isFinite(cardCount), 'QA_CARD_COUNT muss eine Zahl sein.');
 const fixture = {
   subjects: [{ id: 'fr', name: 'Französisch', color: '#7D9DBD', emoji: '🇫🇷', position: 0 }],
-  folders: [{ id: 'unit', subjectId: 'fr', name: 'Unterricht', parentId: null, position: 0, color: '#7D9DBD' }],
+  folders: [{ id: 'unit', subjectId: 'fr', name: 'Unterricht', parentId: null, position: 0, color: '#7D9DBD' }, { id: 'exam', subjectId: 'fr', parentId: null, name: 'Vokabeltest', kind: 'exam', examDate: '2027-01-15', examSetIds: ['vocab'], position: 1 }],
   sets: [{ id: 'vocab', subjectId: 'fr', folderId: 'unit', name: 'Vokabeln', position: 0 }, { id: 'extra', subjectId: 'fr', folderId: 'unit', name: 'Weitere Karten', position: 1 }],
   cards: Array.from({ length: cardCount }, (_, index) => ({ id: `card-${String(index).padStart(8, '0')}`, setId: index < 20 ? 'vocab' : 'extra', front: `Deutsch ${index}`, back: `Französisch ${index}`, position: index, correctCount: 0, incorrectCount: 0 })),
   study_sessions: [], study_history: []
@@ -142,7 +142,9 @@ async function verifyStudy(browser, origin, engine, viewport, reduced) {
       document.querySelector('[data-open-folder="unit"]').click();
       document.querySelector('[data-quick-edit="vocab"]').click();
     });
+    assert.equal(await page.locator('.learning-progress-copy p').textContent(), 'Noch kein Ergebnis');
     const beginMs = await page.evaluate(() => { const time = performance.now(); document.querySelector('#start-study').click(); return performance.now() - time; });
+    assert.equal(await page.locator('html').getAttribute('data-card-theme'), 'ion-blue-drift-silver');
     const card = page.locator('.study-card-slot.is-active .study-card');
     for (const back of [true, false]) {
       if (!back) await card.press('Space');
@@ -236,7 +238,25 @@ async function verifyStudy(browser, origin, engine, viewport, reduced) {
       requestAnimationFrame(tick);
     }));
     assert.equal(await page.locator('.study-card-slot.is-active .study-copy-main').first().textContent(), 'Deutsch 3');
-    await page.locator('#shuffle-toggle').click();
+    const expand = page.locator('#study-expand');
+    const shuffle = page.locator('#shuffle-toggle');
+    await page.mouse.move(0, 0);
+    const restingBackground = await expand.evaluate(element => getComputedStyle(element).backgroundColor);
+    if (viewport.width < 800) await expand.tap();
+    else await expand.press('Enter');
+    await page.waitForFunction(() => document.querySelector('#study-expand').getAttribute('aria-pressed') === 'true');
+    await page.waitForFunction(color => getComputedStyle(document.querySelector('#study-expand')).backgroundColor === color, restingBackground);
+    if (viewport.width >= 800) {
+      assert.equal(await expand.evaluate(element => element.matches(':focus-visible')), true);
+    }
+    if (viewport.width < 800) await expand.tap();
+    else await expand.press('Enter');
+    await page.waitForFunction(() => document.querySelector('#study-expand').getAttribute('aria-pressed') === 'false');
+    if (viewport.width < 800) await shuffle.tap();
+    else await shuffle.click();
+    await page.mouse.move(0, 0);
+    assert.equal(await shuffle.getAttribute('aria-pressed'), null);
+    await page.waitForFunction(color => getComputedStyle(document.querySelector('#shuffle-toggle')).backgroundColor === color, restingBackground);
     assert.equal(await page.locator('#known-count').textContent(), '2');
     assert.equal(await page.locator('#missed-count').textContent(), '1');
     await page.evaluate(() => { for (let index = 0; index < 30 && document.querySelector('#study-complete').hidden; index++) document.querySelector('#answer-yes').click(); });
@@ -246,6 +266,7 @@ async function verifyStudy(browser, origin, engine, viewport, reduced) {
     await page.locator('#finish-study').click();
     assert.equal(await page.locator('#study-dialog').evaluate(dialog => dialog.open), false);
     assert.equal(await page.evaluate(() => document.activeElement.id), 'start-study');
+    assert.equal(await page.locator('.learning-progress-copy').getByRole('meter').getAttribute('aria-valuenow'), '100');
     await page.locator('#start-study').click();
     await page.evaluate(() => { document.querySelector('#answer-no').click(); for (let index = 0; index < 30 && document.querySelector('#study-complete').hidden; index++) document.querySelector('#answer-yes').click(); });
     assert.equal(await page.locator('#result-missed').textContent(), '1');
@@ -257,6 +278,20 @@ async function verifyStudy(browser, origin, engine, viewport, reduced) {
     assert.equal(await page.locator('#result-known').textContent(), '1');
     await page.keyboard.press('Escape');
     assert.equal(await page.locator('#study-dialog').evaluate(dialog => dialog.open), false);
+    await page.locator('#go-back').click();
+    const tile = page.locator('[data-open-set="vocab"]');
+    assert.equal(await tile.getByRole('meter').getAttribute('aria-valuenow'), '95', '19 von 20 Karten im letzten ganzen Durchgang, auch nach Wiederholung der einen falschen Karte');
+    await tile.locator('[data-quick-study]').click();
+    await page.locator('#answer-no').click();
+    await page.locator('#study-close').click();
+    assert.equal(await tile.getByRole('meter').getAttribute('aria-valuenow'), '95', 'Eine angefangene Runde ersetzt den letzten Abschluss nicht');
+    await page.waitForFunction(() => document.querySelector('#save-status').dataset.state === 'saved');
+    await page.reload();
+    await page.getByRole('heading', { name: 'Bibliothek', exact: true }).waitFor();
+    if (viewport.width <= 760) await page.locator('#navigation-toggle').click();
+    await page.locator('[data-view="tests"]').click();
+    await page.locator('[data-exam-open="exam"]').click();
+    assert.equal(await tile.getByRole('meter').getAttribute('aria-valuenow'), '95', 'Ergebnis im Test nach dem Neuladen');
     assert.deepEqual(errors, []);
     assert.deepEqual(unexpected, []);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, 'Horizontales Überlaufen');

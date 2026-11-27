@@ -397,6 +397,7 @@
       id: saved?.id,
       setId: saved?.setId,
       startedAt: saved?.startedAt,
+      isRetry: saved?.isRetry === true,
       cards: orderedCards,
       resultsByCardId,
       historyCardIds,
@@ -523,8 +524,60 @@
       card.nextReviewAt = null;
       resetCount++;
     }
+    const set = library.sets?.find(item => item.id === setId);
+    if (set) set.lastFullRound = null;
     if (isRecord(library.studySessions)) delete library.studySessions[setId];
     return resetCount;
+  }
+
+  function roundPercentage(known, total) {
+    if (!total) return 0;
+    return known === total ? 100 : Math.min(99, Math.round(100 * known / total));
+  }
+
+  function getLastFullRound(set) {
+    const round = set?.lastFullRound;
+    if (!Number.isSafeInteger(round?.cardCount) || round.cardCount <= 0 ||
+        !Number.isSafeInteger(round.known) || round.known < 0 || round.known > round.cardCount) return null;
+    return { known: round.known, cardCount: round.cardCount, percentage: roundPercentage(round.known, round.cardCount) };
+  }
+
+  function rememberFullRound(set, cards, record, summary) {
+    if (!set || record.isRetry || !cards.length || summary.evaluated !== cards.length ||
+        record.cardIds.length !== cards.length) return;
+    const reviewedIds = new Set(record.cardIds);
+    if (cards.every(card => reviewedIds.has(card.id))) {
+      set.lastFullRound = { known: summary.known, cardCount: cards.length };
+    }
+  }
+
+  // Older history saved totals but no card IDs or round type. Only recover a
+  // score when each current card can be traced to that completed session.
+  function restoreLegacyRoundScores(library) {
+    const candidates = new Map();
+    for (const entry of library.studyHistory) {
+      if (entry.isRetry !== undefined || !(entry.cardCount > 0) || entry.unrated !== 0 ||
+          entry.evaluated !== entry.cardCount || entry.known + entry.missed !== entry.cardCount ||
+          !Number.isSafeInteger(entry.known) || entry.known < 0 || entry.known > entry.cardCount ||
+          !entry.startedAt || !entry.completedAt) continue;
+      const newest = candidates.get(entry.setId);
+      if (!newest || entry.completedAt > newest.completedAt) candidates.set(entry.setId, entry);
+    }
+    if (!candidates.size) return;
+    const cardsBySet = new Map();
+    for (const card of library.cards) {
+      if (!candidates.has(card.setId)) continue;
+      if (!cardsBySet.has(card.setId)) cardsBySet.set(card.setId, []);
+      cardsBySet.get(card.setId).push(card);
+    }
+    for (const set of library.sets) {
+      if (Object.hasOwn(set, 'lastFullRound')) continue;
+      const entry = candidates.get(set.id), cards = cardsBySet.get(set.id);
+      if (cards?.length && cards.length === entry.cardCount && cards.every(card =>
+        card.lastReviewedAt >= entry.startedAt && card.lastReviewedAt <= entry.completedAt)) {
+        set.lastFullRound = { known: entry.known, cardCount: entry.cardCount };
+      }
+    }
   }
 
   function summarizeResults(results) {
@@ -535,7 +588,7 @@
     }
     const unrated = results.length - known - missed;
     const evaluated = known + missed;
-    return { known, missed, unrated, evaluated, percentage: evaluated ? Math.round(known / evaluated * 100) : 0 };
+    return { known, missed, unrated, evaluated, percentage: roundPercentage(known, evaluated) };
   }
 
   function summarizeSession(session, completedAt) {
@@ -544,6 +597,7 @@
       setId: session.setId,
       startedAt: session.startedAt,
       completedAt,
+      isRetry: session.isRetry === true,
       cardCount: session.cardIds.length,
       ...summarizeResults(session.results)
     };
@@ -557,7 +611,7 @@
     return -1;
   }
 
-  const api = { normalizeLibrary, getLibrarySiblings, reorderLibraryItems, canMoveLibraryItem, moveLibraryItem, nextLibraryPosition, getFolderDescendantIds, nextCardPosition, moveCardInOrder, createImportedCards, createCopiedCards, nextSetName, swapSetCardSides, recordCardAnswer, updateCardAnswer, createStudySession, getStudyResults, getStudyResult, getStudyCurrentIndex, getStudyCard, getNextStudyCardId, visitStudyCard, navigateStudySession, shuffleStudyCards, setStudyAnswer, getCardProgress, getSetProgress, resetSetProgress, summarizeResults, summarizeSession, nextUnratedIndex };
+  const api = { normalizeLibrary, getLibrarySiblings, reorderLibraryItems, canMoveLibraryItem, moveLibraryItem, nextLibraryPosition, getFolderDescendantIds, nextCardPosition, moveCardInOrder, createImportedCards, createCopiedCards, nextSetName, swapSetCardSides, recordCardAnswer, updateCardAnswer, createStudySession, getStudyResults, getStudyResult, getStudyCurrentIndex, getStudyCard, getNextStudyCardId, visitStudyCard, navigateStudySession, shuffleStudyCards, setStudyAnswer, getCardProgress, getSetProgress, getLastFullRound, rememberFullRound, restoreLegacyRoundScores, resetSetProgress, summarizeResults, summarizeSession, nextUnratedIndex };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (typeof globalThis !== 'undefined') globalThis.WortwerkModel = api;
 })();

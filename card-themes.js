@@ -2,7 +2,7 @@
   'use strict';
 
   const STORAGE_KEY = 'wortwerk-card-theme-v1';
-  const DEFAULT_THEME_ID = 'graphite';
+  const DEFAULT_THEME_ID = 'ion-blue-drift-silver';
 
   // Card surfaces use the exact reference colors. Text and gender markers are
   // chosen per surface so that the cards remain readable in every palette.
