@@ -2,13 +2,12 @@ import assert from 'node:assert/strict';
 import { analyticsConfig } from './analytics-config.mjs';
 import { ANALYTICS_CONSENT_KEY, createAnalyticsController } from './analytics.mjs';
 
-const approved = { ...analyticsConfig, enabled: true, legalApproved: true, minorsEligibilityVerified: true,
-  enhancedMeasurementVerifiedDisabled: true, advertisingAndSharingVerifiedDisabled: true, cookieExpiresSeconds: 3600, consentMaxAgeDays: 1 };
+const approved = { ...analyticsConfig, enabled: true, releaseApproved: true, cookieExpiresSeconds: 3600, consentMaxAgeDays: 1 };
 const runtime = { productionBuild: true, deploymentEnvironment: 'production' };
 const origin = 'https://lernkarte-maker.vercel.app';
 const choiceCookie = '__Host-lernkarten-statistics-choice';
 const verified = {id: 'test-user', app_metadata: {privacy_analytics_grant: '42deb866-0000-4321-8123-000000000001'}};
-async function fixture({ config = approved, url = origin, saved, savedCookie = saved?.choice === 'accepted' ? `on.${Date.parse(saved.updatedAt)}` : null, clock = Date.parse('2026-11-25T12:00:00Z'), storageFailure = false, readOnly = false, environment = runtime, legalReady = true, audience = verified } = {}) {
+async function fixture({ config = approved, url = origin, saved, savedCookie = saved?.choice === 'accepted' ? `on.${Date.parse(saved.updatedAt)}` : null, clock = Date.parse('2026-11-25T12:00:00Z'), storageFailure = false, readOnly = false, environment = runtime, privacyReady = true, audience = verified } = {}) {
   const values = new Map(saved ? [[ANALYTICS_CONSENT_KEY, JSON.stringify(saved)]] : []);
   const storage = {
     getItem(key) { if (storageFailure) throw Error(); return values.get(key) ?? null; },
@@ -42,7 +41,7 @@ async function fixture({ config = approved, url = origin, saved, savedCookie = s
     createElement(type) { if(type==='meta')return {tagName:'META'};assert.equal(type,'script');return { remove() { this.removed = true; } }; },
     querySelector() { return scripts.find(script=>!script.removed) || null; }
   };
-  const api = createAnalyticsController({window:win,document:doc,storage,config,legalReady,runtime:environment,now:()=>clock,
+  const api = createAnalyticsController({window:win,document:doc,storage,config,privacyReady,runtime:environment,now:()=>clock,
     reload() { reloads.push({disabled:win[`ga-disable-${config.measurementId}`],choice:api.readConsent(),cookieNames:[...cookies.keys()]}); }});
   if (audience) await api.updateAudience(audience, async () => audience);
   return {api,win,doc,storage,values,cookies,deleted,scripts,timers,reloads,listeners,
@@ -56,11 +55,9 @@ async function fixture({ config = approved, url = origin, saved, savedCookie = s
 }
 const record = choice => ({...(choice === 'accepted' ? {grant:verified.app_metadata.privacy_analytics_grant} : {}),version:approved.consentVersion,choice,updatedAt:'2026-11-25T12:00:00.000Z'});
 
-assert.equal(analyticsConfig.enabled,false);assert.equal(analyticsConfig.legalApproved,false);
-assert.equal(analyticsConfig.minorsEligibilityVerified,false);assert.equal(analyticsConfig.enhancedMeasurementVerifiedDisabled,false);
-assert.equal(analyticsConfig.advertisingAndSharingVerifiedDisabled, false);
+assert.equal(analyticsConfig.enabled,false);assert.equal(analyticsConfig.releaseApproved,false);
 assert.equal(analyticsConfig.cookieExpiresSeconds,180 * 86_400);assert.equal(analyticsConfig.consentMaxAgeDays,180);
-for(const [key,value]of [['enabled',false],['legalApproved',false],['minorsEligibilityVerified',false],['enhancedMeasurementVerifiedDisabled',false],['advertisingAndSharingVerifiedDisabled',false],['cookieExpiresSeconds',null],['cookieExpiresSeconds',86_401],['consentMaxAgeDays',null]]){
+for(const [key,value]of [['enabled',false],['releaseApproved',false],['releaseApproved','true'],['measurementId','GTM-TEST'],['consentVersion',''],['cookieExpiresSeconds',null],['cookieExpiresSeconds',86_401],['consentMaxAgeDays',null]]){
   const f=await fixture({config:{...approved,[key]:value},saved:record('accepted')});f.api.navigate('library');
   assert.equal(f.api.isAvailable(),false,key);assert.equal(f.scripts.length,0);assert.equal(f.api.consent('accepted'),false);f.api.dispose();
 }
@@ -218,10 +215,12 @@ for(const saved of [{...record('accepted'),version:'old'},{...record('accepted')
   g.api.dispose();
 }
 {
-  const f=await fixture({legalReady:false});
+  const f=await fixture({privacyReady:false, saved:record('accepted')});
+  f.api.navigate('library');
   let checks=0;
   assert.equal(await f.api.updateAudience(verified,async()=>{checks++;return verified;}),false);
   assert.equal(checks,0,'disabled deployments require no extra Auth request');
+  assert.equal(f.scripts.length,0,'previous consent cannot bypass a missing public privacy statement');
   assert.equal(f.api.isAvailable(),false);f.api.dispose();
 }
 {

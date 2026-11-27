@@ -21,8 +21,8 @@ import {createAnalyticsController} from '/analytics.mjs';
 window.analyticsFixtureWasReloaded = sessionStorage.getItem('analytics-fixture-reloaded') === 'yes';
 window.initAnalytics=async function(enabled=true){
   window.api?.dispose();
-  window.api=createAnalyticsController({window,document,legalReady:true,
-    config:{...analyticsConfig,enabled,legalApproved:true,minorsEligibilityVerified:true,enhancedMeasurementVerifiedDisabled:true,advertisingAndSharingVerifiedDisabled:true,
+  window.api=createAnalyticsController({window,document,privacyReady:true,
+    config:{...analyticsConfig,enabled,releaseApproved:true,
       productionOrigins:[${JSON.stringify(origin)}],measurementId:${JSON.stringify(measurementId)},cookieExpiresSeconds:3600,consentMaxAgeDays:1},
     runtime:{productionBuild:true,deploymentEnvironment:'production'},
     reload(){sessionStorage.setItem('analytics-fixture-reloaded','yes');window.location.reload();}});

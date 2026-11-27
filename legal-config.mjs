@@ -1,5 +1,3 @@
-import { analyticsConfig } from './analytics-config.mjs';
-
 // Enter only information supplied by the legally responsible operator.
 // Never populate these fields from an account, repository or hosting profile.
 export const legalConfig = Object.freeze({
@@ -17,7 +15,10 @@ export const legalConfig = Object.freeze({
   }),
   supportEmail: 'lernkartenmaker@gmail.com',
   privacyEmail: 'lernkartenmaker@gmail.com',
-  publication: Object.freeze({ published: false, legallyReviewed: false, version: '2026-11-25.1', updatedAt: '2026-11-25' }),
+  publication: Object.freeze({
+    privacyApproved: false, published: false, legallyReviewed: false,
+    version: '2026-11-25.1', updatedAt: '2026-11-25'
+  }),
   processing: Object.freeze({
     supabaseRegion: 'Irland (eu-west-1)',
     recipientCountries: '',
@@ -26,8 +27,7 @@ export const legalConfig = Object.freeze({
     backupPolicy: '',
     minorUsagePolicy: '',
     legalBasesAndScope: '',
-    processorsReviewed: false,
-    googleAnalyticsTermsReviewed: false
+    processorsReviewed: false
   })
 });
 
@@ -43,13 +43,14 @@ export function contactEmail(value) {
   return labels.every(label => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i.test(label)) ? email : '';
 }
 
-export function legalPublicationIssues(config = legalConfig) {
+const hasPublicValue = value => typeof value === 'string' && value.trim() &&
+  !/\[INTERN OFFEN\b|^(?:noch festzulegen|noch offen|TODO|TBD)$/i.test(value.trim());
+
+function privacyPublicationIssues(config) {
   const issues = [];
   const fields = [
     ['publication.version', 'Versionsbezeichnung der Rechtstexte eintragen'],
     ['operator.name', 'Rechtlich verantwortlichen Betreiber eintragen'],
-    ['operator.street', 'Geeignete Kontakt- oder Geschäftsadresse eintragen'],
-    ['operator.postalCode', 'Postleitzahl eintragen'], ['operator.city', 'Ort eintragen'],
     ['processing.supabaseRegion', 'Tatsächlich verwendete Supabase-Region bestätigen'],
     ['processing.recipientCountries', 'Tatsächliche Empfängerstaaten prüfen und angeben'],
     ['processing.transferSafeguards', 'Anwendbare Garantien für Auslandübermittlungen bestätigen'],
@@ -60,7 +61,7 @@ export function legalPublicationIssues(config = legalConfig) {
   ];
   for (const [path, label] of fields) {
     const value = path.split('.').reduce((current, key) => current?.[key], config);
-    if (typeof value !== 'string' || !value.trim() || /\[INTERN OFFEN\b|^(?:noch festzulegen|noch offen|TODO|TBD)$/i.test(value.trim())) issues.push(label);
+    if (!hasPublicValue(value)) issues.push(label);
   }
   const date = config.publication?.updatedAt;
   const timestamp = typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date) ? Date.parse(date) : NaN;
@@ -68,7 +69,25 @@ export function legalPublicationIssues(config = legalConfig) {
   if (!contactEmail(config.operator?.email)) issues.push('Gültige Betreiber-E-Mail-Adresse eintragen');
   if (!contactEmail(config.supportEmail)) issues.push('Gültige Support-E-Mail-Adresse eintragen');
   if (config.processing?.processorsReviewed !== true) issues.push('Auftragsbearbeitung, Verträge und Unterauftragsbearbeiter prüfen');
-  if (analyticsConfig.enabled && config.processing?.googleAnalyticsTermsReviewed !== true) issues.push('Google-Bedingungen und allfälligen Analytics-Einsatz einschliesslich Minderjährigenschutz prüfen');
+  return issues;
+}
+
+export function privacyPublicationReady(config = legalConfig) {
+  const publication = config.publication;
+  const approved = publication?.privacyApproved === true ||
+    (publication?.published === true && publication?.legallyReviewed === true);
+  return approved && privacyPublicationIssues(config).length === 0;
+}
+
+export function legalPublicationIssues(config = legalConfig) {
+  const issues = privacyPublicationIssues(config);
+  for (const [key, label] of [
+    ['street', 'Geeignete Kontakt- oder Geschäftsadresse eintragen'],
+    ['postalCode', 'Postleitzahl eintragen'],
+    ['city', 'Ort eintragen']
+  ]) {
+    if (!hasPublicValue(config.operator?.[key])) issues.push(label);
+  }
   if (config.publication?.legallyReviewed !== true) issues.push('Rechtstexte abschliessend rechtlich prüfen');
   return issues;
 }

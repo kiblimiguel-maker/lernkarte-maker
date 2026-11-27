@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
-import { legalConfig, contactEmail, legalPublicationIssues, legalPublicationReady } from './legal-config.mjs';
+import { legalConfig, contactEmail, legalPublicationIssues, legalPublicationReady, privacyPublicationReady } from './legal-config.mjs';
 import { existsSync } from 'node:fs';
 import { analyticsConfig } from './analytics-config.mjs';
 import { readLegalPage, legalRouteHash, contactMailto } from './legal-ui.mjs';
 
 assert.equal(legalConfig.appName,'Lernkarten Maker');
 assert.equal(legalPublicationReady(),false,'unfinished legal texts cannot be published');
+assert.equal(privacyPublicationReady(),false,'the current privacy draft is not approved');
 assert.ok(legalPublicationIssues().some(item=>item.includes('Minderjährig')));
 const ready=structuredClone(legalConfig);
 ready.operator={name:'Verantwortliche Testorganisation',street:'Testweg 1',postalCode:'1000',city:'Testort',email:'operator@example.org'};
@@ -13,8 +14,18 @@ ready.supportEmail='support@example.org';
 ready.privacyEmail='privacy@example.org';
 for(const key of Object.keys(ready.processing))ready.processing[key]=typeof ready.processing[key]==='boolean'?true:'Geprüfte Angabe für eine isolierte Textprüfung.';
 ready.publication={...ready.publication,published:true,legallyReviewed:true};
-ready.processing.googleAnalyticsTermsReviewed = false;
-assert.equal(legalPublicationReady(ready),true,'A review of inactive analytics must not block the documents.');
+assert.equal(legalPublicationReady(ready),true);
+assert.equal(privacyPublicationReady(ready),true,'full approval includes the privacy statement');
+const privacyOnly = structuredClone(ready);
+privacyOnly.publication = { ...privacyOnly.publication, privacyApproved: true, published: false, legallyReviewed: false };
+Object.assign(privacyOnly.operator, { street: '', postalCode: '', city: '' });
+assert.equal(legalPublicationReady(privacyOnly),false,'privacy-only approval cannot publish the imprint or terms');
+assert.equal(privacyPublicationReady(privacyOnly),true,'privacy publication can use the controller name and email without a postal address');
+for (const key of Object.keys(privacyOnly.processing)) {
+  const invalid = structuredClone(privacyOnly);
+  invalid.processing[key] = key === 'processorsReviewed' ? false : '';
+  assert.equal(privacyPublicationReady(invalid),false,key);
+}
 if (existsSync(new URL('./legal-content.mjs', import.meta.url))) {
   const { legalDrafts, legalSources } = await import('./legal-content.mjs');
   const currentDrafts = legalDrafts();
@@ -24,6 +35,7 @@ if (existsSync(new URL('./legal-content.mjs', import.meta.url))) {
   assert.ok(legalSources.every(source=>new URL(source.url).protocol==='https:'));
   const { privacy, terms, imprint } = legalDrafts(ready);
   const textOf = document => document.sections.flatMap(section => section.paragraphs).join(' ');
+  assert.ok(!textOf(legalDrafts(privacyOnly).privacy).includes('[INTERN OFFEN:'));
   const expectedAddress = 'Testweg 1, 1000 Testort, Schweiz';
   for (const document of [privacy, terms, imprint]) {
     const text = textOf(document);

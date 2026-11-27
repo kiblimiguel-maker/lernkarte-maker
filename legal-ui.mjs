@@ -1,6 +1,7 @@
-import { legalConfig, legalPages, legalPublicationReady, contactEmail, contactCategories } from './legal-config.mjs';
+import { legalConfig, legalPages, contactEmail, contactCategories } from './legal-config.mjs';
 import { publicLegalNotice } from './legal-public-notices.mjs';
 
+const publishedDocuments = typeof __PUBLISHED_LEGAL_DOCUMENTS__ === 'undefined' ? {} : __PUBLISHED_LEGAL_DOCUMENTS__;
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
 const renderSections = sections => sections.map(section =>
   `<section class="legal-section"><h3>${esc(section.title)}</h3>${section.paragraphs.map(text => `<p>${esc(text)}</p>`).join('')}${
@@ -64,8 +65,7 @@ export function createLegalUI({ analytics = null, config = legalConfig, win = wi
   banner.hidden = true;
   banner.innerHTML = '<div class="consent-banner-copy"><h2 id="consent-banner-title">Deine Privatsphäre</h2><p>Wir verwenden notwendige Technologien, damit Lernkarten Maker zuverlässig funktioniert. Mit deiner Zustimmung nutzen wir Google Analytics 4 für freiwillige Nutzungsstatistiken. <a class="consent-privacy-link" href="#legal=privacy" data-legal-page="privacy">Datenschutzerklärung</a></p></div><div class="consent-banner-actions"><button type="button" class="quiet-button" data-consent-choice="accepted">Statistik erlauben</button><button type="button" class="quiet-button" data-consent-choice="necessary">Nur notwendige</button><button type="button" class="text-button" data-cookie-settings>Einstellungen</button></div><p class="legal-error" data-banner-error role="alert" hidden></p>';
   doc.body.append(banner);
-  let page = null, generation = 0, busy = false, destroyed = false, opener = null;
-  let documentModule;
+  let page = null, busy = false, destroyed = false, opener = null;
   const available = () => analytics?.isAvailable?.() === true;
   const consent = () => analytics?.readConsent?.() || null;
   const setFooter = content => { footer.innerHTML = content; };
@@ -108,33 +108,24 @@ export function createLegalUI({ analytics = null, config = legalConfig, win = wi
   function syncRoute() {
     const next=readLegalPage(win.location.hash);
     if(next===page)return;
-    page=next;generation++;
+    page=next;
     if(!page){dialog.close();if(opener?.isConnected)opener.focus({preventScroll:true});opener=null;return;}
     if(!dialog.open)opener=doc.activeElement;
     render();
     if(!dialog.open)dialog.showModal();
     title.focus({preventScroll:true});
   }
-  async function renderDocument() {
-    if ((import.meta.env.PROD && !__LEGAL_DOCUMENTS_RELEASED__) || !legalPublicationReady(config)) {
+  function renderDocument() {
+    const document = publishedDocuments[page];
+    setFooter(closeButton);
+    if (!document) {
       const notice = publicLegalNotice(page, config);
       body.innerHTML = `<div class="legal-notice"><h3>${esc(notice.title)}</h3><p>${esc(notice.status)}</p></div>
         ${renderSections(notice.sections)}
         ${notice.email ? `<p class="legal-contact-address"><a class="legal-mail" href="mailto:${esc(notice.email)}">${esc(notice.email)}</a></p>` : ''}`;
-      setFooter(closeButton);
       return;
     }
-    const version=generation,requestedPage=page;
-    body.innerHTML='<p class="legal-status" role="status">Informationen werden geladen …</p>';setFooter(closeButton);
-    try{
-      const drafts = Object.values(import.meta.glob('./legal-content.mjs'))[0];
-      if (!drafts) throw new Error('Legal document source unavailable');
-      documentModule??=drafts();
-      const {legalDrafts}=await documentModule;
-      if(version!==generation||page!==requestedPage)return;
-      const document=legalDrafts(config, undefined, {automaticDeletion: __ACCOUNT_DELETION_RELEASED__})[requestedPage];
-      body.innerHTML=`<p class="legal-version">Stand ${esc(document.date)} · Version ${esc(document.version)}</p>${renderSections(document.sections)}`;
-    }catch{documentModule=null;if(version===generation)showError('Die rechtlichen Informationen konnten nicht geladen werden. Bitte versuche es erneut.');}
+    body.innerHTML=`<p class="legal-version">Stand ${esc(document.date)} · Version ${esc(document.version)}</p>${renderSections(document.sections)}`;
   }
   function renderCookies() {
     const ready=available(), current=consent();
@@ -225,6 +216,6 @@ export function createLegalUI({ analytics = null, config = legalConfig, win = wi
   syncConsent();syncRoute();
   return {
     open,close,
-    destroy(){destroyed=true;generation++;unsubscribe?.();observer?.disconnect();win.removeEventListener('hashchange',syncRoute);doc.removeEventListener('click',externalClick);dialog.remove();banner.remove();doc.body.removeAttribute('data-consent-banner');doc.documentElement.style.removeProperty('--consent-banner-space');}
+    destroy(){destroyed=true;unsubscribe?.();observer?.disconnect();win.removeEventListener('hashchange',syncRoute);doc.removeEventListener('click',externalClick);dialog.remove();banner.remove();doc.body.removeAttribute('data-consent-banner');doc.documentElement.style.removeProperty('--consent-banner-space');}
   };
 }

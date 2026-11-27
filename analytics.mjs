@@ -1,5 +1,4 @@
 import { analyticsConfig } from './analytics-config.mjs';
-import { legalPublicationReady } from './legal-config.mjs';
 
 export const ANALYTICS_CONSENT_KEY = 'lernkarten-privacy-choice-v1';
 const CHOICE_COOKIE = '__Host-lernkarten-statistics-choice';
@@ -28,8 +27,7 @@ const ENUMS = Object.freeze({
 });
 
 function validConfig(config, runtime, win) {
-  return config.enabled === true && config.legalApproved === true && config.minorsEligibilityVerified === true &&
-    config.enhancedMeasurementVerifiedDisabled === true && config.advertisingAndSharingVerifiedDisabled === true &&
+  return config.enabled === true && config.releaseApproved === true &&
     /^G-[A-Z0-9]{6,20}$/.test(config.measurementId || '') &&
     typeof config.consentVersion === 'string' && config.consentVersion.length > 0 &&
     Number.isInteger(config.cookieExpiresSeconds) && config.cookieExpiresSeconds >= 0 &&
@@ -109,14 +107,15 @@ function clearAnalyticsCookies(doc, win) {
 /** Dependency-injected for isolated tests; never pass user data to this API. */
 export function createAnalyticsController({
   window: win = globalThis.window, document: doc = globalThis.document,
-  storage, config = analyticsConfig, legalReady = legalPublicationReady(),
+  storage, config = analyticsConfig,
+  privacyReady = typeof __PRIVACY_DOCUMENT_RELEASED__ !== 'undefined' && __PRIVACY_DOCUMENT_RELEASED__,
   runtime = { productionBuild: import.meta.env?.PROD === true, deploymentEnvironment: import.meta.env?.VITE_VERCEL_ENV },
   now = () => Date.now(), reload = () => win.location.reload()
 } = {}) {
   if (storage === undefined) { try { storage = win?.localStorage; } catch { storage = null; } }
   let currentPage = null, lastSentPage = null, script = null, loaded = false, stopped = false, generation = 0, reloadRequested = false;
   let disposed = false, loadFailed = false, consentStorageFailed = false, expiryTimer = null;
-  const configured = legalReady === true && validConfig(config, runtime, win);
+  const configured = privacyReady === true && validConfig(config, runtime, win);
   const privacyOrigin = win?.location?.protocol === 'https:' && config.productionOrigins?.includes(win.location.origin);
   let audience = null, audienceOwner = null, audienceGeneration = 0;
   const listeners = new Set();
