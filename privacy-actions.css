@@ -1,0 +1,21 @@
+.settings-legal,.settings-account { margin-top: 24px; padding-top: 22px; border-top: 1px solid var(--line); }
+.settings-legal h3,.settings-account h3 { margin: 0 0 12px; font-size: 15px; font-weight: 620; }
+.settings-link-list { border: 1px solid var(--line); border-radius: var(--radius-control); overflow: hidden; }
+.settings-link { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 52px; margin: 0; padding: 12px 14px; border: 0; border-radius: 0; background: var(--surface); color: var(--text); font: inherit; font-size: 14px; text-align: left; cursor: pointer; }
+.settings-link+.settings-link { border-top: 1px solid var(--line); }
+.settings-link>svg { flex: none; color: var(--muted); }
+.settings-link>span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.settings-link .settings-link-chevron { margin-left: auto; }
+.settings-link:focus-visible { outline-offset: -3px; }
+.settings-link:active { background: var(--surface-hover); }
+.privacy-danger,.settings-link.privacy-danger>svg,.account-action-button.privacy-danger { color: var(--danger); }
+.privacy-account-dialog p { line-height: 1.65; }
+.privacy-account-dialog input { text-transform: none; }
+.privacy-account-dialog .danger-button { color: var(--danger); border-color: var(--danger); background: var(--danger-surface); }
+.auth-footer { display: grid; justify-items: center; gap: 10px; }
+.auth-legal-links { display: flex; justify-content: center; flex-wrap: wrap; gap: 8px 16px; }
+.auth-legal-links a { color: var(--muted); text-decoration: none; font-size: 12px; padding-block: 5px; }
+.auth-legal-links a:hover { color: var(--text); text-decoration: underline; text-underline-offset: 3px; }
+@media (hover:hover) { .settings-link:hover { background: var(--surface-hover); } }
+@media (prefers-reduced-motion:no-preference) { .settings-link { transition: var(--motion-colors); } }
+@media (max-width:480px) { .settings-link { min-height: 54px; padding-inline: 12px; } }

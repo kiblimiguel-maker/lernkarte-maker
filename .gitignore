@@ -1,5 +1,9 @@
 node_modules/
 dist/
+supabase/.temp/
 .env
 .env.*
 !.env.example
+
+# Unapproved legal text. Only add this module to the public repository after review.
+/legal-content.mjs

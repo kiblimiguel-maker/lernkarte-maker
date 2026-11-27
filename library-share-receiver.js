@@ -13,6 +13,7 @@ export function createLibraryShareReceiver({ signIn }) {
   const status = find('status');
   const error = find('error');
   const action = find('action');
+  const report = find('report');
   const dismissButtons = dialog.querySelectorAll('[data-dismiss-shared-library]');
   let token = null;
   let routeVersion = 0;
@@ -28,6 +29,7 @@ export function createLibraryShareReceiver({ signIn }) {
 
   function render() {
     if (token === null) return;
+    if(new URLSearchParams(window.location.hash.slice(1)).has('legal')){if(dialog.open)dialog.close();return;}
     const isFolder = preview?.kind === 'folder';
     const isExam = preview?.kind === 'exam';
     const label = isExam ? 'Test' : isFolder ? 'Ordner' : 'Lernstapel';
@@ -44,6 +46,7 @@ export function createLibraryShareReceiver({ signIn }) {
       ? 'Du erhältst eine eigenständige Kopie des Tests mit Datum, Notizen, Links und Lernkarten. Wähle dein Zielfach; der Test übernimmt dessen Farbe. Das Löschen des Originals ändert deine Kopie und diesen Link nicht.'
       : 'Du erhältst eine private, eigenständige Kopie in deiner Bibliothek.';
     description.hidden = !preview || Boolean(result);
+    if(report){report.hidden=!preview;report.disabled=busy;}
     destination.hidden = !preview || Boolean(result) || authState !== 'ready';
     subject.disabled = busy;
     action.hidden = false;
@@ -102,7 +105,7 @@ export function createLibraryShareReceiver({ signIn }) {
 
   function syncRoute() {
     const nextToken = readShareRoute();
-    if (nextToken === token) return;
+    if (nextToken === token) {if(token!==null)render();return;}
     token = nextToken;
     routeVersion++;
     preview = null;
@@ -185,6 +188,7 @@ export function createLibraryShareReceiver({ signIn }) {
 
   dialog.querySelector('form').addEventListener('submit', event => event.preventDefault());
   dismissButtons.forEach(button => button.addEventListener('click', dismiss));
+  report?.addEventListener('click',()=>{if(!busy)dialog.close();});
   dialog.addEventListener('cancel', event => { event.preventDefault(); dismiss(); });
   action.addEventListener('click', () => {
     if (previewState === 'error') void loadPreview();

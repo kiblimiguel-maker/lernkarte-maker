@@ -64,14 +64,16 @@ async function setup(browser, origin, viewport, reduced, colorScheme) {
   const db = Object.fromEntries(Object.entries(fixture).map(([table, records]) => [table, new Map(records.map(data => [data.id, toRow(structuredClone(data))]))]));
   const errors = [], unexpected = [];
   await context.addInitScript(session => {
-    localStorage.setItem('sb-interaction-fixture-auth-token', JSON.stringify(session));
+    if (!sessionStorage.getItem('test-bootstrap-complete')) {
+      localStorage.setItem('sb-interaction-fixture-auth-token', JSON.stringify(session));
+      sessionStorage.setItem('test-bootstrap-complete', '1');
+    }
     localStorage.setItem('wortwerk-donation-reminder-enabled-v1', 'false');
     localStorage.setItem('lernkarten-appearance-v1', 'system');
   }, session);
   await context.route('**/*', async route => {
     const request = route.request(), url = new URL(request.url());
     if (url.origin === origin) return route.continue();
-    if (url.hostname === 'va.vercel-scripts.com') return route.fulfill({ status: 200, body: '' });
     if (url.origin !== backend) { unexpected.push(`${url.origin}${url.pathname}`); return route.abort(); }
     if (request.method() === 'OPTIONS') return route.fulfill(json(null));
     if (url.pathname === '/auth/v1/user') return route.fulfill(json(user));
@@ -232,6 +234,92 @@ async function verifyAccountMenu(browser, origin, engine, viewport, reduced, col
   } finally { await context.close(); }
 }
 
+
+async function verifyAccountRights(browser, origin, engine, viewport, colorScheme) {
+  const { page, context, errors, unexpected } = await setup(browser, origin, viewport, false, colorScheme);
+  page.setDefaultTimeout(10_000);
+  const dialog = page.locator('.privacy-account-dialog');
+  const submit = dialog.locator('#privacy-account-submit');
+  const phrase = dialog.locator('#privacy-delete-text');
+  const otherCache = 'wortwerk-library-v1:another-fixture:pending';
+  const ownCache = `wortwerk-library-v1:${user.id}`;
+  const apiCalls = [];
+  let deletionStatus = 'error';
+  try {
+    await page.route(`${origin}/api/delete-account`, async route => {
+      const req = route.request();
+      assert.equal(req.headers().authorization, `Bearer ${session.access_token}`);
+      if (req.method() === 'GET') return route.fulfill(json({ available: true, recentAuthenticationRequired: true }));
+      assert.equal(req.method(), 'POST');
+      assert.deepEqual(req.postDataJSON(), { confirmation: 'KONTO LÖSCHEN' });
+      apiCalls.push(deletionStatus);
+      if (deletionStatus === 'success') return route.fulfill(json({ deleted: true }));
+      if (deletionStatus === 'reauth') return route.fulfill({ ...json({ error: 'Bitte erneut anmelden.', code: 'REAUTH_REQUIRED' }), status: 401 });
+      return route.fulfill({ ...json({ error: 'Löschung konnte nicht bestätigt werden.', code: 'DELETE_FAILED' }), status: 503 });
+    });
+    await page.route(`${backend}/auth/v1/logout*`, route => route.fulfill(json(null)));
+
+    if (viewport.width < 800) await page.locator('#navigation-toggle').click();
+    await page.locator('#card-theme-open').click();
+    await page.locator('#settings-dialog [data-privacy-action="delete"]').click();
+    await dialog.getByRole('heading', { name: 'Konto und Daten löschen' }).waitFor();
+    assert.deepEqual(apiCalls, [], 'Das Öffnen der Einstellungen oder des Dialogs darf das Konto nicht löschen.');
+    await dialog.getByRole('button', { name: 'Abbrechen' }).click();
+    if (await page.locator('#settings-dialog').isVisible()) await page.locator('#settings-done').click();
+
+    await page.locator('.account-menu summary').click();
+    await page.locator('.account-menu [data-privacy-action="delete"]').click();
+    await dialog.getByRole('heading', { name: 'Konto und Daten löschen' }).waitFor();
+    assert.equal(await submit.isDisabled(), true);
+    await phrase.fill('LÖSCHEN');
+    assert.equal(await submit.isDisabled(), true);
+    await phrase.fill('KONTO LÖSCHEN');
+    await submit.click();
+    await dialog.getByRole('alert').waitFor();
+    assert.match(await dialog.getByRole('alert').textContent(), /nicht bestätigt/);
+    assert.ok(await page.locator('#app-shell').isVisible());
+    assert.deepEqual(apiCalls, ['error']);
+
+    deletionStatus = 'reauth';
+    await submit.click();
+    await dialog.locator('#privacy-reauthenticate').waitFor();
+    assert.equal(await submit.isDisabled(), true);
+    const authorize = page.waitForRequest(req => req.url().startsWith(`${backend}/auth/v1/authorize`));
+    await dialog.locator('#privacy-reauthenticate').click();
+    const redirect = new URL((await authorize).url());
+    assert.equal(redirect.searchParams.get('prompt'), 'select_account');
+    assert.equal(redirect.searchParams.get('max_age'), '0');
+    await page.waitForURL(`${backend}/auth/v1/authorize?*`);
+    // The fake OAuth provider gives control back to the same fixture account.
+    await page.goto(origin);
+    await dialog.getByRole('heading', { name: 'Konto und Daten löschen' }).waitFor();
+    assert.equal(await phrase.inputValue(), '');
+    assert.equal(await submit.isDisabled(), true);
+    assert.deepEqual(apiCalls, ['error', 'reauth'], 'OAuth-Rückkehr darf kein Konto löschen');
+    await page.evaluate(([other, own]) => {
+      localStorage.setItem(other, 'preserved');
+      localStorage.setItem(own, JSON.stringify({ subjects: [] }));
+    }, [otherCache, ownCache]);
+    deletionStatus = 'success';
+    await phrase.fill('KONTO LÖSCHEN');
+    await submit.click();
+    await dialog.getByRole('heading', { name: 'Konto gelöscht' }).waitFor();
+    await dialog.getByRole('button', { name: 'Schliessen', exact: true }).last().click();
+    await page.locator('#auth-screen').waitFor();
+    assert.equal(await page.locator('#app-shell').isVisible(), false);
+    assert.deepEqual(apiCalls, ['error', 'reauth', 'success']);
+    assert.deepEqual(await page.evaluate(([other, own]) => [
+      localStorage.getItem(other), localStorage.getItem(own), localStorage.getItem('sb-interaction-fixture-auth-token')
+    ], [otherCache, ownCache]), ['preserved', null, null]);
+    await page.reload();
+    await page.locator('#auth-screen').waitFor();
+    assert.equal(await page.locator('#app-shell').isVisible(), false);
+    assert.deepEqual(errors, []);
+    assert.deepEqual(unexpected, []);
+    console.log(`PASS privacy account UI ${engine} ${viewport.width}px ${colorScheme}: 503, reauth, confirmation, logout and local cleanup`);
+  } finally { await context.close(); }
+}
+
 let server;
 try {
   server = await startServer();
@@ -240,6 +328,10 @@ try {
     const launch = engine === 'chromium' && process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE } : {};
     const browser = await playwright[engine].launch(launch);
     try {
+      for (const [width, height, scheme] of [[1366, 768, 'light'], [390, 740, 'dark']]) {
+        await verifyAccountRights(browser, server.origin, engine, { width, height }, scheme);
+      }
+      if (process.env.QA_ACCOUNT_SCENARIOS === 'privacy') continue;
       for (const [viewport, reduced, colorScheme] of [[{ width: 1366, height: 768 }, false, 'light'], [{ width: 834, height: 650 }, false, 'dark'], [{ width: 390, height: 740 }, false, 'dark'], [{ width: 320, height: 480 }, true, 'light'], [{ width: 740, height: 320 }, true, 'dark']]) {
         await verifyAccountMenu(browser, server.origin, engine, viewport, reduced, colorScheme);
       }

@@ -1,26 +1,16 @@
-import { inject } from '@vercel/analytics';
-import { isSupabaseConfigured, supabase } from './supabaseClient.js';
+import { isSupabaseConfigured, supabase, supabaseAuthStorageKey } from './supabaseClient.js';
 import { createAuthLifecycle } from './auth-lifecycle.mjs';
 import { getAppAppearance } from './appearance.mjs';
 import { createLibraryShareReceiver } from './library-share-receiver.js';
 import { forgetShareForSignIn, rememberShareForSignIn } from './library-sharing.mjs';
 import { bindAppInstall } from './app-install.mjs';
+import { getAnalytics } from './analytics.mjs';
+import './privacy-actions.css';
 
 // Apply the same saved surface during authentication and in the library.
 getAppAppearance();
 bindAppInstall();
 
-inject({
-  mode: import.meta.env.PROD ? 'production' : 'development',
-  beforeSend(event) {
-    // OAuth callbacks can include one-time codes or tokens in the URL.
-    // Keep those parameters out of analytics while retaining the page view.
-    const url = new URL(event.url, window.location.origin);
-    url.search = '';
-    url.hash = '';
-    return { ...event, url: url.toString() };
-  }
-});
 
 const authScreen = document.querySelector('#auth-screen');
 const bootScreen = document.querySelector('#boot-screen');
@@ -35,12 +25,108 @@ const switchAccountButton = document.querySelector('#account-switch');
 const accountMenu = document.querySelector('.account-menu');
 const accountError = document.querySelector('#account-error');
 
+const showAccountDeletion = import.meta.env.DEV || __ACCOUNT_DELETION_RELEASED__;
+if (showAccountDeletion) {
+  document.querySelectorAll('[data-account-deletion-entry]').forEach(entry => { entry.hidden = false; });
+}
+
+
 let authEventObserved = false;
 let signingIn = false;
 let signingOut = false;
 let switchingAccount = false;
 let reloadingApp = false;
 let accountUserId = null;
+const analytics = getAnalytics();
+let legalUI, legalLoad, privacyActions, privacyLoad;
+
+async function currentPrivacySession() {
+  const result = await supabase?.auth.getSession();
+  if (result?.error) throw new Error('Die Anmeldung konnte nicht geprüft werden.');
+  return result?.data?.session || null;
+}
+
+function loadLegal() {
+  legalLoad ??= Promise.all([import('./legal-ui.mjs'), import('./legal-ui.css')]).then(([{ createLegalUI }]) => {
+    legalUI = createLegalUI({ analytics });
+    return legalUI;
+  }).catch(error => { legalLoad = null; throw error; });
+  return legalLoad;
+}
+
+function loadPrivacyActions() {
+  privacyLoad ??= import('./privacy-account.mjs').then(({ createPrivacyActions }) => {
+    privacyActions = createPrivacyActions({
+      getSession: currentPrivacySession, analytics, authStorageKey: supabaseAuthStorageKey,
+      flush: () => window.WortwerkRepository.flushLibraryWrites(),
+      async reauthenticate(expectedUser) {
+        if ((await currentPrivacySession())?.user.id !== expectedUser ||
+            await window.WortwerkRepository.flushLibraryWrites() !== expectedUser || accountUserId !== expectedUser) {
+          throw new Error('Das aktive Konto hat sich geändert.');
+        }
+        const { error } = await supabase.auth.signInWithOAuth({
+          provider: 'google',
+          options: {
+            redirectTo: new URL(window.location.pathname, window.location.origin).toString(),
+            queryParams: { prompt: 'select_account', max_age: '0' }
+          }
+        });
+        if (error) throw new Error('Die erneute Anmeldung konnte nicht gestartet werden.');
+      },
+      async onDeleted(expectedUser) {
+        if (accountUserId !== expectedUser) return false;
+        try { await supabase.auth.signOut({ scope: 'local' }); } catch { /* Server already deleted the account. */ }
+        if (accountUserId === expectedUser) await applySession(null);
+        return accountUserId === null;
+      },
+      onClose: () => window.LernkartenRestoreAnalyticsPage?.()
+    });
+    return privacyActions;
+  }).catch(error => { privacyLoad = null; throw error; });
+  return privacyLoad;
+}
+
+function showPrivacyFailure() {
+  window.alert('Dieser Bereich konnte nicht geladen werden. Prüfe deine Verbindung und versuche es nochmals.');
+}
+
+function openLegalRoute() {
+  const page = new URLSearchParams(window.location.hash.slice(1)).get('legal');
+  if (page) {
+    analytics.navigate(page);
+    void loadLegal().catch(showPrivacyFailure);
+  } else if (accountUserId && !appShell.hidden) {
+    window.LernkartenRestoreAnalyticsPage?.();
+  }
+}
+window.addEventListener('hashchange', openLegalRoute);
+openLegalRoute();
+analytics.subscribe(() => {
+  if (analytics.isAvailable() && !analytics.readConsent() && !legalUI) void loadLegal().catch(showPrivacyFailure);
+});
+
+document.addEventListener('click', event => {
+  const link = event.target.closest('[data-legal-page]');
+  if (link && !legalUI) {
+    event.preventDefault();
+    void loadLegal().then(ui => ui.open(link.dataset.legalPage)).catch(showPrivacyFailure);
+  }
+  const action = event.target.closest('[data-privacy-action]');
+  if (showAccountDeletion && action?.dataset.privacyAction === 'delete' && !action.disabled) {
+    event.preventDefault();
+    const owner = accountUserId;
+    void loadPrivacyActions().then(ui => {
+      if (owner && accountUserId === owner) return ui.open();
+    }).catch(showPrivacyFailure);
+  }
+});
+
+function resumePrivacyAction() {
+  const action = new URLSearchParams(window.location.hash.slice(1)).get('privacy-action');
+  let pending;
+  try { pending = sessionStorage.getItem('lernkarten-delete-reauth-v1'); } catch { /* Storage is optional. */ }
+  if (pending || action === 'delete') void loadPrivacyActions().then(ui => ui.resume()).catch(showPrivacyFailure);
+}
 const sharedLibrary = createLibraryShareReceiver({ signIn: startGoogleSignIn });
 
 // An open tab can still request chunks from the build preceding a deployment.
@@ -68,6 +154,7 @@ function setError(message = '') {
 function updateAccountActions() {
   const busy = signingOut || switchingAccount;
   signOutButton.disabled = busy;
+  document.querySelectorAll('[data-privacy-action]').forEach(button=>{button.disabled=busy;});
   switchAccountButton.disabled = busy;
   switchAccountButton.setAttribute('aria-busy', String(switchingAccount));
   switchAccountButton.querySelector('span').textContent = switchingAccount ? 'Weiter zu Google …' : 'Konto wechseln';
@@ -98,7 +185,7 @@ function readOAuthError() {
     ? 'Die Anmeldung wurde abgebrochen. Du kannst es jederzeit erneut versuchen.'
     : codeExchangeFailed
       ? 'Google hat die Anmeldung zurückgegeben, aber Supabase konnte den kurzlebigen Code nicht gegen Tokens tauschen. Prüfe in Supabase, ob Google-Client-ID und Client-Secret aus demselben Google-Webclient stammen.'
-      : 'Google/Supabase konnte die Anmeldung nicht abschließen. Bitte prüfe die OAuth-Einstellungen und versuche es erneut.';
+      : 'Google/Supabase konnte die Anmeldung nicht abschliessen. Bitte prüfe die OAuth-Einstellungen und versuche es erneut.';
   const callbackKeys = ['code', 'error', 'error_description', 'error_code', 'state', 'sb_flow_id', 'access_token', 'refresh_token', 'token_type', 'expires_in', 'expires_at'];
   const url = new URL(window.location.href);
   callbackKeys.forEach(key => url.searchParams.delete(key));
@@ -110,7 +197,10 @@ function readOAuthError() {
 }
 
 function showSignedOut(message = '') {
+  if (accountUserId) privacyActions?.accountChanged();
   accountUserId = null;
+  void analytics.updateAudience(null);
+  analytics.suspend();
   accountMenu.open = false;
   setAccountError('');
   bootScreen.hidden = true;
@@ -142,7 +232,11 @@ const lifecycle = createAuthLifecycle({
   reloadApp: () => window.WortwerkReloadLibrary?.(),
   updateAccount(user) {
     setError('');
-    if (accountUserId !== user.id) setAccountError('');
+    if (accountUserId !== user.id) {
+      setAccountError('');
+      privacyActions?.accountChanged();
+        }
+    void analytics.updateAudience(user, async () => (await supabase.auth.getUser()).data.user);
     accountUserId = user.id;
     accountEmail.textContent = user.email || 'Angemeldet';
     updateAccountActions();
@@ -159,6 +253,7 @@ const lifecycle = createAuthLifecycle({
     appShell.hidden = false;
     authScreen.hidden = true;
     sharedLibrary.setAuth('ready', { id: accountUserId });
+    if (showAccountDeletion) resumePrivacyAction();
   },
   showSignedOut,
   resetWorkspace: () => window.WortwerkResetWorkspace?.(),
@@ -231,6 +326,8 @@ switchAccountButton.addEventListener('click', async () => {
     if (error || !data?.url || accountUserId !== ownerId) throw error || new Error('Account switch unavailable');
     const destination = new URL(data.url);
     if (!['http:', 'https:'].includes(destination.protocol)) throw new Error('Invalid login URL');
+    // Stop measurement in the old account before sending the browser to OAuth.
+    analytics.suspend({ reloadPage: false });
     window.location.assign(destination.toString());
   } catch {
     failed = true;

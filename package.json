@@ -8,13 +8,16 @@
     "preview": "vite preview",
     "test:interactions": "node scripts/interaction-browser.test.mjs",
     "test:account-menu": "node scripts/account-menu-browser.test.mjs",
-    "test": "node parser.test.js && node learning-goals.test.mjs && node french-verbs.test.mjs && node exam-date.test.mjs && node exams.test.mjs && node model.test.js && node shuffle.test.js && node presentation.test.js && node card-themes.test.js && node appearance.test.mjs && node study-keyboard.test.mjs && node study-speech.test.mjs && node auth-lifecycle.test.mjs && node library-view.test.mjs && node library-drag-visuals.test.mjs && node repository.test.mjs && node donation.test.mjs && node web-app-manifest.test.mjs && node app-install.test.mjs",
+    "test": "node parser.test.js && node learning-goals.test.mjs && node french-verbs.test.mjs && node exam-date.test.mjs && node exams.test.mjs && node model.test.js && node shuffle.test.js && node presentation.test.js && node card-themes.test.js && node appearance.test.mjs && node study-keyboard.test.mjs && node study-speech.test.mjs && node auth-lifecycle.test.mjs && node library-view.test.mjs && node library-drag-visuals.test.mjs && node repository.test.mjs && node donation.test.mjs && node web-app-manifest.test.mjs && node app-install.test.mjs && npm run test:privacy",
     "test:exams": "node scripts/exams-browser.test.mjs",
-    "test:sharing-db": "node scripts/exam-sharing-db.test.mjs"
+    "test:sharing-db": "node scripts/exam-sharing-db.test.mjs",
+    "test:privacy": "node analytics.test.mjs && node legal.test.mjs && node privacy-account.test.mjs && node privacy-backend.test.mjs",
+    "test:privacy-db": "node scripts/privacy-db.test.mjs",
+    "test:analytics-browser": "node scripts/analytics-browser.test.mjs",
+    "test:legal-browser": "node scripts/legal-browser.test.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "2.117.2",
-    "@vercel/analytics": "^2.0.1",
     "stripe": "^23.1.0"
   },
   "devDependencies": {

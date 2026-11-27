@@ -8,10 +8,12 @@ const supabaseKey = (
 ).trim();
 
 export const isSupabaseConfigured = Boolean(supabaseUrl && supabaseKey);
+export const supabaseAuthStorageKey = supabaseUrl ? `sb-${new URL(supabaseUrl).hostname.split('.')[0]}-auth-token` : null;
 
 export const supabase = isSupabaseConfigured
   ? createClient(supabaseUrl, supabaseKey, {
       auth: {
+        storageKey: supabaseAuthStorageKey,
         autoRefreshToken: true,
         detectSessionInUrl: true,
         persistSession: true,

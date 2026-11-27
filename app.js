@@ -1,4 +1,5 @@
 import { supabase } from './supabaseClient.js';
+import { getAnalytics } from './analytics.mjs';
 import { cardListPage, libraryCardsBySet, searchLibrary } from './library-view.mjs';
 import { bindLibraryDrag } from './library-drag.mjs';
 import { studyKeyboardAction } from './study-keyboard.mjs';
@@ -82,6 +83,28 @@ import './exam-view.css';
   // Sidebar disclosure is independent from the current library location.
   const expandedSidebarSubjects = new Set();
   let formContext = null, importRows = [], importChecked = false, importHasErrors = false, importErrors=[],importPreviewLimit=100, session = null;
+  const analytics = getAnalytics();
+  function analyticsTicket() {
+    if (!analytics.isAvailable()) return null;
+    const choice = analytics.readConsent();
+    return choice?.choice === 'accepted' ? `${choice.version}:${choice.updatedAt}` : null;
+  }
+  function trackSuccessful(ticket, name, parameters) {
+    if (ticket && ticket === analyticsTicket()) analytics.track(name, parameters);
+  }
+  function trackSaved(pending, owner, ticket, name, parameters) {
+    if (!ticket) return;
+    pending.then(() => {
+      if (data === owner) trackSuccessful(ticket, name, parameters);
+    }).catch(() => {});
+  }
+  function trackCurrentPage() {
+    if (new URLSearchParams(location.hash.slice(1)).has('legal')) return;
+    if (session) analytics.navigate('study');
+    else if (['tests', 'guide', 'donations'].includes(view)) analytics.navigate(view);
+    else analytics.navigate(activeSet ? 'deck' : activeFolder ? 'folder' : activeSubject ? 'subject' : 'library');
+  }
+  window.LernkartenRestoreAnalyticsPage = trackCurrentPage;
   function save(){const pending=window.WortwerkRepository.saveLibrary(data);pending.catch(()=>{});return pending}
   const subject = key => data.subjects.find(x=>x.id===key);
   const folder = key => data.folders.find(x=>x.id===key);
@@ -195,6 +218,7 @@ import './exam-view.css';
   function render(){
     const location=view==='donations'?'donations':`${view}:${activeSubject||''}:${activeFolder||''}:${activeSet||''}:${view==='tests'?activeExamId||'':''}`;
     const changedLocation=location!==renderedLocation;
+    if (changedLocation) trackCurrentPage();
     const navigating=changedLocation&&Boolean(renderedLocation);
     const restorePageFocus=navigating&&$('#app-shell').contains(document.activeElement);
     if(renderedLocation==='donations'&&changedLocation&&donationSubmitting)donationCheckoutRequestId=null;
@@ -742,8 +766,10 @@ import './exam-view.css';
         return;
       }
       if(!isCurrentShare(context))return;
+      const analyticsConsent=analyticsTicket();
       const token=await createLibraryShare(context.kind,context.itemId,userId);
       if(!isCurrentShare(context))return;
+      trackSuccessful(analyticsConsent,'share_created',{entity_type:context.kind==='set'?'deck':context.kind==='exam'?'test':'folder'});
       shareUrlField.value=libraryShareUrl(token);
       $('#share-link-field').hidden=false;
       shareUrlField.setSelectionRange(0,0);
@@ -1317,7 +1343,7 @@ import './exam-view.css';
       grid.querySelectorAll('[data-emoji]').forEach(button=>{button.hidden=!!query&&!button.dataset.search.includes(query)});
     });
   }
-  async function submitEntity(){if(!formContext||entitySaving||librarySortSaving)return;const type=formContext.type;const form=$('#entity-form');if(!form.reportValidity())return;const awaitSave=['subject','folder'].includes(type)||(type==='set'&&!formContext.copyCards?.length),owner=data,snapshot=awaitSave?{subjects:structuredClone(data.subjects),folders:structuredClone(data.folders),sets:structuredClone(data.sets)}:null,previousLocation={activeSubject,activeFolder,activeSet,view,examReturnId};$('#form-save-error').hidden=true;const fd=new FormData(form);let successNotice=null;if(type==='subject'){const v={name:fd.get('name').trim(),color:fd.get('color'),emoji:fd.get('emoji')||'📚'};if(!v.name){toast('Der Fachname darf nicht leer sein.');return} if(formContext.key)Object.assign(subject(formContext.key),v,{updatedAt:new Date().toISOString()});else{const timestamp=new Date().toISOString();const s={id:id(),...v,icon:v.emoji,createdAt:timestamp,updatedAt:timestamp};s.position=window.WortwerkModel.nextLibraryPosition(data,'subject',s);data.subjects.push(s);activeSubject=s.id;activeFolder=null}}
+  async function submitEntity(){if(!formContext||entitySaving||librarySortSaving)return;const type=formContext.type;const form=$('#entity-form');if(!form.reportValidity())return;const creationEvent=!formContext.key?{subject:'subject_created',folder:'folder_created',set:'deck_created',card:'flashcard_created'}[type]:null,activityTicket=analyticsTicket();const awaitSave=['subject','folder'].includes(type)||(type==='set'&&!formContext.copyCards?.length),owner=data,snapshot=awaitSave?{subjects:structuredClone(data.subjects),folders:structuredClone(data.folders),sets:structuredClone(data.sets)}:null,previousLocation={activeSubject,activeFolder,activeSet,view,examReturnId};$('#form-save-error').hidden=true;const fd=new FormData(form);let successNotice=null;if(type==='subject'){const v={name:fd.get('name').trim(),color:fd.get('color'),emoji:fd.get('emoji')||'📚'};if(!v.name){toast('Der Fachname darf nicht leer sein.');return} if(formContext.key)Object.assign(subject(formContext.key),v,{updatedAt:new Date().toISOString()});else{const timestamp=new Date().toISOString();const s={id:id(),...v,icon:v.emoji,createdAt:timestamp,updatedAt:timestamp};s.position=window.WortwerkModel.nextLibraryPosition(data,'subject',s);data.subjects.push(s);activeSubject=s.id;activeFolder=null}}
     if(type==='folder'){const name=fd.get('name').trim();if(!name){toast('Der Ordnername darf nicht leer sein.');return}if(!activeSubject||!subject(activeSubject)){toast('Wähle zuerst ein Fach für den Ordner.');return}if(formContext.key)Object.assign(folder(formContext.key),{name,color:fd.get('color'),updatedAt:new Date().toISOString()});else{const timestamp=new Date().toISOString();const created={id:id(),name,color:fd.get('color'),subjectId:activeSubject,parentId:activeFolder||null,createdAt:timestamp,updatedAt:timestamp};created.position=window.WortwerkModel.nextLibraryPosition(data,'folder',created);data.folders.push(created)}}
     if(type==='set'){
       const existing=formContext.key?setById(formContext.key):null;
@@ -1375,10 +1401,10 @@ import './exam-view.css';
     refreshLibraryOrder();const keepStudyView=type==='set'&&Boolean(formContext?.copyCards?.length);
     if(awaitSave){
       entitySaving=true;form.inert=true;form.setAttribute('aria-busy','true');const submitLabel=$('#form-submit').textContent;$('#form-submit').textContent='Wird gespeichert …';
-      try{await save();if(data!==owner)return;$('#form-dialog').close();render();toast(successNotice||'Änderungen gespeichert.','success');}
+      try{await save();if(data!==owner)return;if(creationEvent)trackSuccessful(activityTicket,creationEvent,{count:1,source:'manual'});$('#form-dialog').close();render();toast(successNotice||'Änderungen gespeichert.','success');}
       catch(error){if(data!==owner)return;Object.assign(data,snapshot);if(error?.code!=='40001')window.WortwerkRepository.stagePendingRecovery?.(data);activeSubject=previousLocation.activeSubject;activeFolder=previousLocation.activeFolder;activeSet=previousLocation.activeSet;view=previousLocation.view;examReturnId=previousLocation.examReturnId;toast(error?.code==='40001'?'Die Ablage wurde zwischenzeitlich geändert. Schliess den Dialog und lade den aktuellen Stand über den Hinweis oben.':'Speichern fehlgeschlagen. Deine Eingaben bleiben geöffnet. Bitte erneut versuchen.');}
       finally{entitySaving=false;form.inert=false;form.removeAttribute('aria-busy');$('#form-submit').textContent=submitLabel;}
-    }else{save();$('#form-dialog').close();if(!keepStudyView)render();if(successNotice)toast(successNotice)}
+    }else{const pending=save();if(creationEvent)trackSaved(pending,owner,activityTicket,creationEvent,{count:1,source:'manual'});$('#form-dialog').close();if(!keepStudyView)render();if(successNotice)toast(successNotice)}
   }
   $('#form-dialog').addEventListener('cancel',event=>{if(entitySaving)event.preventDefault()});
   function moveCard(key,direction){if(!window.WortwerkModel.moveCardInOrder(setCards(activeSet),key,direction,new Date().toISOString()))return;save();render()}
@@ -1394,7 +1420,7 @@ import './exam-view.css';
       if(speechSide)item.frenchSpeechSide=speechSide==='back'?'front':'back';
     }
     save();render();toast(`Vorder- und Rückseiten von ${count} Karten getauscht`)}
-  let importPreviewFormat=null;
+  let importPreviewFormat=null, importSource='text';
   const importRemovedLines=new Set();
   let importUpdateCheck=null;
   function checkImportAppVersion(){
@@ -1468,6 +1494,7 @@ import './exam-view.css';
   }
   function openImport(targetSet,{source='',format='auto'}={}){
     if(!data.sets.length){toast('Erstelle zuerst einen Lernstapel für den Import.');return}
+    importSource='text';
     $('#import-text').value=source;
     $('#import-file').value='';
     $('#import-file-name').textContent='TXT · UTF-8';
@@ -1541,7 +1568,7 @@ import './exam-view.css';
     updateImportActionState();
   }
   $('#import-mode').addEventListener('change',()=>{updateImportFormat();resetImportPreview()});
-  $('#import-text').addEventListener('input',()=>{updateImportFormat();resetImportPreview()});
+  $('#import-text').addEventListener('input',()=>{importSource='text';updateImportFormat();resetImportPreview()});
   $('#import-app-reload').addEventListener('click',async()=>{
     const input=$('#import-text');
     try{
@@ -1580,7 +1607,7 @@ import './exam-view.css';
       renderImportPreview();
     }
   });
-  $('#import-file').addEventListener('change',async e=>{const file=e.target.files?.[0];if(!file)return;$('#import-file-name').textContent=file.name;const draft=$('#import-text').value;try{const text=await file.text();if(!$('#import-dialog').open||$('#import-file').files?.[0]!==file||$('#import-text').value!==draft)return;$('#import-text').value=text;updateImportPreview({reveal:true})}catch(error){console.error('Textdatei konnte nicht gelesen werden.',error);toast('Die Textdatei konnte nicht gelesen werden.')} });
+  $('#import-file').addEventListener('change',async e=>{const file=e.target.files?.[0];if(!file)return;$('#import-file-name').textContent=file.name;const draft=$('#import-text').value;try{const text=await file.text();if(!$('#import-dialog').open||$('#import-file').files?.[0]!==file||$('#import-text').value!==draft)return;$('#import-text').value=text;importSource='file';updateImportPreview({reveal:true})}catch(error){console.error('Textdatei konnte nicht gelesen werden.',error);toast('Die Textdatei konnte nicht gelesen werden.')} });
   function cancelEntityForm(){if(formContext?.copyCards?.length&&session?.id===formContext.sourceSessionId){session.missedSetPending=false;updateMissedSetActions()}formContext=null;$('#form-dialog').close()}
   document.querySelectorAll('#entity-form [value="cancel"]').forEach(button=>button.addEventListener('click',cancelEntityForm));
   $('#form-dialog').addEventListener('close',event=>{
@@ -1600,9 +1627,12 @@ import './exam-view.css';
     });
     const timestamp=new Date().toISOString(),position=window.WortwerkModel.nextCardPosition(data.cards,setId);
     const newCards=window.WortwerkModel.createImportedCards(rows,{setId,position,timestamp,createId:id});
+    const activityTicket=analyticsTicket(),owner=data;
     data.cards=data.cards.concat(newCards);
     deck.updatedAt=timestamp;
-    save();
+    const pending=save(),format={vocabulary:'plain','french-verbs':'french_verbs','learning-goals':'learning_goals'}[importPreviewFormat]||'mixed';
+    trackSaved(pending,owner,activityTicket,'import_completed',{count:newCards.length,format,source:importSource});
+    trackSaved(pending,owner,activityTicket,'flashcard_created',{count:newCards.length,source:importSource});
     $('#import-dialog').close();
     if(activeSet===setId)render();
     toast(`${newCards.length} ${newCards.length===1?'Karte':'Karten'} erstellt`);
@@ -1626,12 +1656,12 @@ import './exam-view.css';
   $('#reset-progress-cancel').addEventListener('click',()=>{$('#reset-progress-dialog').close();resetSetId=null});
   $('#reset-progress-close').addEventListener('click',()=>{$('#reset-progress-dialog').close();resetSetId=null});
   $('#reset-progress-dialog').addEventListener('close',event=>{if(!event.currentTarget.open)resetSetId=null});
-  function completeSession(record){if(session?.completionRecorded)return;delete data.studySessions[record.setId];data.studyHistory.unshift(window.WortwerkModel.summarizeSession(record,new Date().toISOString()));data.studyHistory=data.studyHistory.slice(0,30);if(session)session.completionRecorded=true;save()}
+  function completeSession(record){if(session?.completionRecorded)return;const ticket=analyticsTicket(),owner=data;delete data.studySessions[record.setId];data.studyHistory.unshift(window.WortwerkModel.summarizeSession(record,new Date().toISOString()));data.studyHistory=data.studyHistory.slice(0,30);if(session)session.completionRecorded=true;trackSaved(save(),owner,ticket,'study_completed')}
   function saveSessionProgress(){
     if(!session)return;
     const results=window.WortwerkModel.getStudyResults(session),index=window.WortwerkModel.getStudyCurrentIndex(session);
     const record={id:session.id,setId:session.setId,startedAt:session.startedAt,cardIds:session.cards.map(card=>card.id),results,resultsByCardId:{...session.resultsByCardId},historyCardIds:session.historyCardIds.slice(),historyIndex:session.historyIndex,currentCardId:session.currentCardId,shuffleRemainingCardIds:session.shuffleRemainingCardIds.slice(),index:Math.max(0,Math.min(index,session.cards.length-1)),missedCardIdsCopied:[...(session.missedCardIdsCopied||[])]};
-    data.studySessions[session.setId]=record;save();
+    data.studySessions[session.setId]=record;return save();
   }
   let activeSlotIndex = 0;
   let studyTransition = null;
@@ -1677,6 +1707,7 @@ import './exam-view.css';
   });
   function beginStudy(key){
     const cards=setCards(key);if(!cards.length){toast('Dieses Set enthält noch keine Karten.');return}
+    const activityTicket=analyticsTicket(),owner=data;analytics.navigate('study');
     $('#finish-study').textContent=view==='tests'?'Zur Testvorbereitung':'Zum Lernstapel';
     stopStudyTransition();
     for(const slot of studySlots)slot.card=null;
@@ -1687,7 +1718,7 @@ import './exam-view.css';
     session={...sessionState,id:saved?.id||id(),setId:key,startedAt:saved?.startedAt||new Date().toISOString(),flipped:false,missedCardIdsCopied:new Set(Array.isArray(saved?.missedCardIdsCopied)?saved.missedCardIdsCopied:[]),missedSetPending:false};
     const lastStudiedAt=new Date().toISOString();setById(key).lastStudiedAt=lastStudiedAt;data.recent=data.recent.filter(entry=>entry.setId!==key);data.recent.unshift({setId:key,at:lastStudiedAt});data.recent=data.recent.slice(0,30);
     $('#study-title').textContent=setById(key)?.name||'Lernsession';$('#study-complete').hidden=true;$('#shuffle-toggle').setAttribute('aria-pressed','false');$('#study-dialog').classList.remove('is-fullscreen');$('#study-dialog').showModal();renderStudyCard();
-    saveSessionProgress();
+    const pending=saveSessionProgress();if(!saved)trackSaved(pending,owner,activityTicket,'study_started');
   }
   function updateStudyScoreCounts(){
     const {known,missed,evaluated:reviewed}=window.WortwerkModel.summarizeResults(window.WortwerkModel.getStudyResults(session));
@@ -1917,7 +1948,7 @@ import './exam-view.css';
     const result=appAppearance.setPreference(input.value);
     if(!result.persisted)toast('Die Darstellung wurde geändert, konnte aber in diesem Browser nicht gespeichert werden.');
   });
-  $('#card-theme-open').onclick=()=>{closeNavigation();syncAppearanceOptions();renderCardThemeOptions();$('#donation-reminder-enabled').checked=isDonationReminderEnabled();openFormDialog(settingsDialog)};
+  $('#card-theme-open').onclick=()=>{closeNavigation();analytics.track('feature_used',{feature:'settings'});syncAppearanceOptions();renderCardThemeOptions();$('#donation-reminder-enabled').checked=isDonationReminderEnabled();openFormDialog(settingsDialog)};
   $('#donation-reminder-enabled').addEventListener('change',event=>{
     const saved=setDonationReminderEnabled(event.currentTarget.checked);
     if(!saved)toast('Diese Einstellung konnte in diesem Browser nicht gespeichert werden.');
@@ -2004,6 +2035,7 @@ import './exam-view.css';
     syncFullscreenButton();
     if(setId){
       render();
+      trackCurrentPage();
       const opener=activeSet===setId?$('#start-study'):$(`[data-quick-study="${CSS.escape(setId)}"]`);
       opener?.focus({preventScroll:true});
     }
