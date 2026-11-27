@@ -81,6 +81,12 @@ async function setup(browser, origin, viewport, reduced) {
   }, session);
   await context.route('**/*', async route => {
     const request = route.request(), url = new URL(request.url());
+    if (url.origin === origin && url.pathname === '/' && request.isNavigationRequest()) {
+      const response = await route.fetch();
+      // Production CSS minification expresses this custom property in seconds.
+      const body = (await response.text()).replace('<head>', '<head><style>:root{--study-flip-duration:.42s!important;--study-step-duration:.16s!important;--study-swipe-duration:.22s!important}</style>');
+      return route.fulfill({ response, body });
+    }
     if (url.origin === origin) return route.continue();
     if (url.hostname === 'va.vercel-scripts.com') return route.fulfill({ status: 200, body: '' });
     if (url.origin !== backend) { unexpected.push(`${url.origin}${url.pathname}`); return route.abort(); }
@@ -137,29 +143,63 @@ async function verifyStudy(browser, origin, engine, viewport, reduced) {
       document.querySelector('[data-quick-edit="vocab"]').click();
     });
     const beginMs = await page.evaluate(() => { const time = performance.now(); document.querySelector('#start-study').click(); return performance.now() - time; });
+    const card = page.locator('.study-card-slot.is-active .study-card');
+    for (const back of [true, false]) {
+      if (!back) await card.press('Space');
+      else if (viewport.width < 800) await card.tap();
+      else await card.click();
+      await page.locator(`.study-card-slot.is-active .study-card[aria-pressed="${back}"]`).waitFor();
+      const flip = await card.evaluate(async button => {
+        const faces = [...button.querySelectorAll('.study-face')];
+        const animations = faces.flatMap(face => face.getAnimations());
+        const visible = () => faces.map(face => getComputedStyle(face).visibility === 'visible');
+        if (!animations.length) return { duration: 0, end: visible() };
+        const duration = animations[0].effect.getTiming().duration;
+        for (const animation of animations) animation.pause();
+        await Promise.all(animations.map(animation => animation.ready));
+        const samples = [.3, .7].map(fraction => {
+          for (const animation of animations) animation.currentTime = duration * fraction;
+          const face = faces.find(face => getComputedStyle(face).visibility === 'visible');
+          return { visible: visible(), tilt: Math.abs(new DOMMatrix(getComputedStyle(face).transform).m13) };
+        });
+        for (const animation of animations) animation.finish();
+        return { duration, samples, end: visible() };
+      });
+      assert.equal(flip.duration, reduced ? 0 : 420, 'Full flip duration with production CSS units');
+      if (!reduced) {
+        assert.deepEqual(flip.samples.map(sample => sample.visible), [[back, !back], [!back, back]]);
+        assert.ok(flip.samples.every(sample => sample.tilt > .1), 'Both halves rotate in 3D');
+      }
+      assert.deepEqual(flip.end, [!back, back], 'Only the correct face remains visible');
+      assert.equal(await card.getAttribute('aria-pressed'), String(back));
+    }
     const quick = await page.evaluate(() => {
       const active = () => document.querySelector('.study-card-slot.is-active .study-card');
       const read = () => ({ count: document.querySelectorAll('.study-card-slot.is-active').length, front: document.querySelector('.study-card-slot.is-active .study-copy-main').textContent, pressed: active().getAttribute('aria-pressed') });
+      const exitDuration = () => document.querySelector('.is-leaving .study-card-swipe-layer')?.getAnimations()[0]?.effect.getTiming().duration ?? 0;
       active().focus();
       for (let index = 0; index < 15; index++) active().click();
       const flips = read();
       document.querySelector('#study-next').click();
       const next = read();
+      const forwardDuration = exitDuration();
       if (active() !== document.activeElement) throw new Error('Kartenfokus ging beim Wechsel verloren.');
       for (let index = 0; index < 8; index++) { document.querySelector('#study-next').click(); document.querySelector('#study-prev').click(); }
       document.querySelector('#study-prev').click();
-      const back = read(), time = performance.now();
+      const back = read(), backDuration = exitDuration(), time = performance.now();
       document.querySelector('#answer-yes').click();
+      const ratingDuration = exitDuration();
       const scoreMs = performance.now() - time;
       document.querySelector('#answer-yes').click();
       document.querySelector('#answer-no').click();
-      return { flips, next, back, scoreMs, current: read(), known: document.querySelector('#known-count').textContent, missed: document.querySelector('#missed-count').textContent, reviewed: document.querySelector('#study-progress-track').getAttribute('aria-valuenow') };
+      return { flips, next, back, forwardDuration, backDuration, ratingDuration, scoreMs, current: read(), known: document.querySelector('#known-count').textContent, missed: document.querySelector('#missed-count').textContent, reviewed: document.querySelector('#study-progress-track').getAttribute('aria-valuenow') };
     });
     assert.equal(quick.flips.pressed, 'true');
     assert.equal(quick.flips.count, 1);
     assert.equal(quick.next.front, 'Deutsch 1');
     assert.equal(quick.next.pressed, 'false');
     assert.equal(quick.back.front, 'Deutsch 0');
+    assert.deepEqual([quick.forwardDuration, quick.backDuration, quick.ratingDuration], reduced ? [0, 0, 0] : [160, 160, 220]);
     assert.equal(quick.current.front, 'Deutsch 3');
     assert.equal(quick.known, '2');
     assert.equal(quick.missed, '1');

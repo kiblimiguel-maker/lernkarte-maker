@@ -65,7 +65,7 @@
   --space-8: 32px;
   --study-step-duration: 160ms;
   --study-swipe-duration: 220ms;
-  --study-flip-duration: 250ms;
+  --study-flip-duration: 420ms;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -866,22 +866,18 @@ button:disabled { opacity: .45; cursor: not-allowed; }
   border-radius: var(--study-card-radius);
   background: transparent;
   cursor: pointer;
-  perspective: 1200px;
-  transform-style: preserve-3d;
 }
 .study-card:focus-visible { outline-offset: 4px; }
 
-/* Card Inner 3D container */
+/* Both faces turn around the same centre. The resting side is set immediately. */
 .study-card-inner {
   position: relative;
   display: block;
   width: 100%;
   height: 100%;
-  transform-style: preserve-3d;
 }
-.study-card-inner.flipped {
-  transform: rotateY(180deg);
-}
+.study-card-inner.flipped .study-front,
+.study-card-inner:not(.flipped) .study-back { visibility: hidden; }
 
 /* Faces: IDENTICAL colors in active and stack state.
    Depth is expressed through geometry and stack-base, NEVER by darkening the card face. */
@@ -901,7 +897,6 @@ button:disabled { opacity: .45; cursor: not-allowed; }
   -webkit-backface-visibility: hidden;
 }
 .study-back {
-  transform: rotateY(180deg);
   border-color: var(--study-back-border, #4D6181);
   background: var(--study-back-surface, #26344A);
   color: var(--study-back-text, #F2F5FA);
@@ -1095,6 +1090,7 @@ span.card-bullet-list > span { display: list-item; list-style-type: disc; }
 .study-card-slot.is-stack .study-face {
   box-shadow: 0 9px 20px rgba(0, 0, 0, 0.24);
 }
+.study-card-slot.is-stack .study-face > * { visibility: hidden; }
 
 .study-feedback {
   position: absolute;

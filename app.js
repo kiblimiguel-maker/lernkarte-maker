@@ -1668,8 +1668,18 @@ import './exam-view.css';
   const reducedStudyMotion=window.matchMedia('(prefers-reduced-motion: reduce)');
   const studyMotion=(()=>{
     const styles=getComputedStyle(document.documentElement);
-    const duration=(name,fallback)=>Number.parseFloat(styles.getPropertyValue(`--study-${name}-duration`))||fallback;
-    return {step:duration('step',160),swipe:duration('swipe',220),flip:duration('flip',250),easing:styles.getPropertyValue('--motion-ease-out').trim()||'ease-out'};
+    function duration(name, fallback) {
+      // CSS minification can turn 420ms into .42s. Web Animations takes milliseconds.
+      const value = styles.getPropertyValue(`--study-${name}-duration`).trim();
+      const time = /^(\d*\.?\d+)(ms|s)$/.exec(value);
+      return time ? Number(time[1]) * (time[2] === 's' ? 1000 : 1) : fallback;
+    }
+    return {
+      step: duration('step', 160),
+      swipe: duration('swipe', 220),
+      flip: duration('flip', 420),
+      easing: styles.getPropertyValue('--motion-ease-out').trim() || 'ease-out'
+    };
   })();
   const studySlots=[0,1].map(idx=>({
       slot:$(`#study-slot-${idx}`),
@@ -1697,7 +1707,8 @@ import './exam-view.css';
     if(settle)prepareStudyStack(outgoing,nextCardId);
   }
   function stopStudyFlip(slot){
-    slot.flipAnimation?.animation.cancel();
+    slot.flipAnimation?.front.cancel();
+    slot.flipAnimation?.back.cancel();
     slot.flipAnimation=null;
   }
   reducedStudyMotion.addEventListener('change',event=>{
@@ -1822,6 +1833,25 @@ import './exam-view.css';
     syncStudySpeech(card);
     return nextCardId;
   }
+  function animateStudyFlip(slot, from, to) {
+    const timing = {duration: studyMotion.flip * Math.abs(to - from) / 180, easing: 'ease-in-out', fill: 'backwards'};
+    const angles = [from];
+    if (Math.min(from, to) < 90 && Math.max(from, to) > 90) angles.push(90);
+    angles.push(to);
+    function turn(face, back) {
+      const frames = angles.map(angle => ({
+        offset: (angle - from) / (to - from),
+        transform: `perspective(1200px) rotateY(${back ? Math.max(-90, angle - 180) : Math.min(90, angle)}deg)`,
+        visibility: (back ? angle > 90 : angle < 90) ? 'visible' : 'hidden'
+      }));
+      return face.animate(frames, timing);
+    }
+    slot.flipAnimation = {
+      front: turn(slot.inner.querySelector('.study-front'), false),
+      back: turn(slot.inner.querySelector('.study-back'), true),
+      from, to
+    };
+  }
   function flip(){
     if(!session||!$('#study-complete').hidden)return;
     const previousAngle=session.flipped?180:0;
@@ -1830,16 +1860,11 @@ import './exam-view.css';
     active.inner.classList.toggle('flipped',session.flipped);
     if(canAnimateStudy()){
       const moving=active.flipAnimation;
-      const progress=moving?.animation.effect.getComputedTiming().progress??0;
-      const from=moving&&moving.animation.playState!=='finished'?moving.from+(moving.to-moving.from)*progress:previousAngle;
+      const progress=moving?.front.effect.getComputedTiming().progress??0;
+      const from=moving&&moving.front.playState!=='finished'?moving.from+(moving.to-moving.from)*progress:previousAngle;
       const to=session.flipped?180:0;
       stopStudyFlip(active);
-      if(Math.abs(to-from)>=1){
-        const animation=active.inner.animate([{transform:`rotateY(${from}deg)`},{transform:`rotateY(${to}deg)`}],{
-          duration:Math.max(70,studyMotion.flip*Math.abs(to-from)/180),easing:studyMotion.easing,fill:'backwards'
-        });
-        active.flipAnimation={animation,from,to};
-      }
+      if(Math.abs(to-from)>=1)animateStudyFlip(active,from,to);
     }
     const card=window.WortwerkModel.getStudyCard(session);
     active.button.setAttribute('aria-label',describeCardSide(card,session.flipped?'back':'front'));
@@ -2059,7 +2084,9 @@ import './exam-view.css';
     saveSessionProgress();
     toast('Alle Karten neu gemischt. Bewertungen bleiben erhalten.');
   };
-  document.addEventListener('keydown',event=>{
+  function handleStudyKey(event) {
+    const releasing = event.type === 'keyup';
+    if (releasing && event.key !== ' ') return;
     const action=studyKeyboardAction(event,{
       open:studyDialog.open,
       blocked:Boolean(document.querySelector('dialog[open]:not(#study-dialog)')),
@@ -2067,13 +2094,17 @@ import './exam-view.css';
     });
     if(!action)return;
     event.preventDefault();
+    // A touch-focused button can still synthesise a click on Space release.
+    if (releasing) return;
     if(action==='missed')scoreCard(false);
     else if(action==='known')scoreCard(true);
     else if(action==='flip')flip();
     else if(action==='previous')moveStudy(-1);
     else if(action==='next')nextStudyCard();
     else if(action==='close')endStudy();
-  });
+  }
+  document.addEventListener('keydown', handleStudyKey);
+  document.addEventListener('keyup', handleStudyKey);
   $('#import-form').onsubmit=e=>e.preventDefault();
   let unsavedChanges=false,saveFailed=false;
   const saveStatus=$('#save-status'),saveRetry=$('#save-retry');
