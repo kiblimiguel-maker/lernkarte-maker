@@ -11,11 +11,11 @@ export const analyticsConfig = Object.freeze({
   streamId: '16413316024',
   streamName: 'Lernkarten App Web',
   productionOrigins: Object.freeze(['https://lernkarte-maker.vercel.app']),
-  consentVersion: '2026-11-26.1',
+  consentVersion: '2026-11-27.1',
   // Reported in the GA4 property. Update when confirming the final settings.
   retention: Object.freeze({ eventMonths: 14, userMonths: 14, resetUserOnActivity: true }),
-  // Unresolved operator decisions. Null deliberately prevents activation.
-  // Cookie lifetime: 0 = session cookie. Persistent cookies are limited by consent expiry.
-  cookieExpiresSeconds: null,
-  consentMaxAgeDays: null
+  // Project limits for a future release. These do not authorize GA4.
+  // Persistent analytics cookies are limited by the remaining consent lifetime.
+  cookieExpiresSeconds: 180 * 86_400,
+  consentMaxAgeDays: 180
 });

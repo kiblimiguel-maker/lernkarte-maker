@@ -33,7 +33,8 @@ export function publicLegalNotice(page, config) {
       {
         title: 'Cookie-Einstellungen und Statistik',
         paragraphs: [
-          'Google Analytics ist derzeit ausgeschaltet. Die App lädt keinen Analytics-Tag und setzt keine Google-Analytics-Cookies.'
+          'Google Analytics ist derzeit ausgeschaltet. Die App lädt keinen Analytics-Tag und setzt keine Google-Analytics-Cookies.',
+          'Wenn du «Nur notwendige» wählst, speichert die App die Auswahl im Browser. Ist der lokale Speicher gesperrt, kann ein Cookie dieser Website die Auswahl und ihren Zeitpunkt für höchstens 180 Tage festhalten.'
         ]
       },
       {

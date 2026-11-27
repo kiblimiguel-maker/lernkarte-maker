@@ -117,6 +117,17 @@ async function verify(browser,origin,engine,viewport,colorScheme,reduced){
     assert.deepEqual(await page.evaluate(()=>window.__analytics.calls),['accepted']);
     await open('cookies');assert.equal(await page.locator('#legal-analytics-enabled').isChecked(),true);await page.locator('#legal-analytics-enabled').uncheck();await page.locator('[data-cookie-save]').click();
     assert.deepEqual(await page.evaluate(()=>window.__analytics.calls),['accepted','revoked'],'Revocation does not double-save through a fallback.');await screenshot('cookies');await close();
+    await page.evaluate(() => {
+      const analytics = window.__analytics;
+      analytics.current = { choice: 'accepted', version: 'test', updatedAt: '2026-11-25T12:00:00Z' };
+      analytics.revoke = () => { analytics.current = null; return false; };
+    });
+    await open('cookies');
+    assert.equal(await page.locator('#legal-analytics-enabled').isChecked(), true);
+    await page.locator('#legal-dialog [data-consent-choice="necessary"]').click();
+    assert.equal(await page.locator('#legal-analytics-enabled').isChecked(), false);
+    assert.match(await page.locator('.legal-body [role="alert"]').innerText(), /dauerhaften Widerruf blockiert/);
+    await close();
     await page.goto(`${origin}/legal-fixture?contacts&private_query=not-for-mail#share=${token}&access_token=not-for-mail&legal=report`);
     const mail = () => page.locator('[data-contact-send]').getAttribute('href').then(href => new URL(href));
     const directReport = await mail();

@@ -7,3 +7,4 @@ supabase/.temp/
 
 # Unapproved legal text. Only add this module to the public repository after review.
 /legal-content.mjs
+/INTERNE_FREIGABE.md

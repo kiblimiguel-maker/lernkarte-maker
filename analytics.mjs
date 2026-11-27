@@ -2,6 +2,8 @@ import { analyticsConfig } from './analytics-config.mjs';
 import { legalPublicationReady } from './legal-config.mjs';
 
 export const ANALYTICS_CONSENT_KEY = 'lernkarten-privacy-choice-v1';
+const CHOICE_COOKIE = '__Host-lernkarten-statistics-choice';
+const CHOICE_STORAGE_CHECK = `${ANALYTICS_CONSENT_KEY}-write-check`;
 const SCRIPT_ID = 'lernkarten-ga4-script';
 const SINGLETON = Symbol.for('LernkartenMaker.analytics');
 const AD_DENIED = Object.freeze({ ad_storage: 'denied', ad_user_data: 'denied', ad_personalization: 'denied' });
@@ -115,13 +117,51 @@ export function createAnalyticsController({
   let currentPage = null, lastSentPage = null, script = null, loaded = false, stopped = false, generation = 0, reloadRequested = false;
   let disposed = false, loadFailed = false, consentStorageFailed = false, expiryTimer = null;
   const configured = legalReady === true && validConfig(config, runtime, win);
+  const privacyOrigin = win?.location?.protocol === 'https:' && config.productionOrigins?.includes(win.location.origin);
   let audience = null, audienceOwner = null, audienceGeneration = 0;
   const listeners = new Set();
   const disableKey = `ga-disable-${config.measurementId}`;
   if (win) win[disableKey] = true;
+  let revocations;
+  if (privacyOrigin && typeof win.BroadcastChannel === 'function') {
+    try { revocations = new win.BroadcastChannel(CHOICE_COOKIE); }
+    catch { /* Storage events still cover normal writes. */ }
+  }
+
+  function readChoiceCookie() {
+    try {
+      const prefix = `${CHOICE_COOKIE}=`;
+      const entry = doc.cookie.split(';').map(item => item.trim()).find(item => item.startsWith(prefix));
+      return entry?.slice(prefix.length) ?? null;
+    } catch { return null; }
+  }
+
+  function writeChoiceCookie(value, maxAge) {
+    try {
+      doc.cookie = `${CHOICE_COOKIE}=${value}; Max-Age=${maxAge}; Path=/; Secure; SameSite=Lax`;
+      return readChoiceCookie() === (maxAge > 0 ? value : null);
+    } catch { return false; }
+  }
+
+  function broadcastRevocation(saved) {
+    try { revocations?.postMessage(saved ? 'saved' : 'unsaved'); }
+    catch { /* The current tab is already stopped. */ }
+  }
 
   function storedConsent() {
-    try { return parseChoice(storage?.getItem(ANALYTICS_CONSENT_KEY), config, now()); }
+    const cookie = privacyOrigin ? readChoiceCookie() : null;
+    if (cookie?.startsWith('off.')) {
+      const revokedAt = Number(cookie.slice(4));
+      if (!Number.isSafeInteger(revokedAt) || revokedAt <= 0 || revokedAt > 8.64e15) return null;
+      return { version: config.consentVersion, choice: 'necessary', updatedAt: new Date(revokedAt).toISOString() };
+    }
+    try {
+      const record = parseChoice(storage?.getItem(ANALYTICS_CONSENT_KEY), config, now());
+      // An older opt-in stays invalid if the browser later discards a
+      // fallback denial cookie or caps its lifetime.
+      if (record?.choice === 'accepted' && cookie !== `on.${Date.parse(record.updatedAt)}`) return null;
+      return record;
+    }
     catch { return null; }
   }
   function readConsent() {
@@ -236,6 +276,17 @@ export function createAnalyticsController({
     if (doc.querySelector(`script[src*="googletagmanager.com"],script[src*="google-analytics.com"]`)) {
       stop({ reloadPage: false }); return;
     }
+    // A readable opt-in from an earlier visit cannot start the tag in a
+    // browser where the choice can no longer be updated.
+    try {
+      storage.setItem(CHOICE_STORAGE_CHECK, '1');
+      if (storage.getItem(CHOICE_STORAGE_CHECK) !== '1') throw new Error('Consent storage is read-only');
+      storage.removeItem(CHOICE_STORAGE_CHECK);
+    } catch {
+      consentStorageFailed = true;
+      stop({ reloadPage: false });
+      return;
+    }
     const choice = readConsent();
     if (!choice) return;
     const consentExpiresAt = Date.parse(choice.updatedAt) + config.consentMaxAgeDays * 86_400_000;
@@ -298,35 +349,59 @@ export function createAnalyticsController({
     if (!safe) return false;
     return command('event', name, { ...safePage(), ...safe, send_to: config.measurementId });
   }
+  function saveChoice(record) {
+    try {
+      const value = JSON.stringify(record);
+      storage.setItem(ANALYTICS_CONSENT_KEY, value);
+      return storage.getItem(ANALYTICS_CONSENT_KEY) === value;
+    } catch { return false; }
+  }
+
   function consent(choice) {
     if (!['accepted', 'necessary'].includes(choice)) return false;
     if (choice === 'accepted' && (!isAvailable() || reloadRequested)) return false;
-    const needsReload = choice === 'necessary' && stop({ terminal: false, reloadPage: false });
-    const record = { version: config.consentVersion, choice, updatedAt: new Date(now()).toISOString() };
-    if (choice === 'accepted') record.grant = audience;
-    try {
-      if (!storage) throw new Error('Consent storage unavailable');
-      storage.setItem(ANALYTICS_CONSENT_KEY, JSON.stringify(record));
-      if (storage.getItem(ANALYTICS_CONSENT_KEY) !== JSON.stringify(record)) throw new Error('Consent not saved');
-    } catch {
-      // A failed write must not revive the earlier opt-in on our own reload.
-      consentStorageFailed = true;
-      stop({ reloadPage: false });
-      if (choice === 'necessary') {
+    const timestamp = now();
+    const record = { version: config.consentVersion, choice, updatedAt: new Date(timestamp).toISOString() };
+    const maxAge = Math.ceil(config.consentMaxAgeDays * 86_400);
+    if (choice === 'necessary') {
+      const needsReload = stop({ terminal: false, reloadPage: false });
+      let saved = saveChoice(record);
+      if (saved && privacyOrigin && readChoiceCookie() !== null) writeChoiceCookie('', 0);
+      if (!saved && privacyOrigin && maxAge > 0) {
+        saved = writeChoiceCookie(`off.${timestamp}`, maxAge);
+      }
+      if (!saved) {
         try {
           storage.removeItem(ANALYTICS_CONSENT_KEY);
-          if (needsReload && storage.getItem(ANALYTICS_CONSENT_KEY) === null) requestReload();
-        } catch { /* Keep this document stopped if persistent revocation fails. */ }
+          saved = storage.getItem(ANALYTICS_CONSENT_KEY) === null;
+        } catch { /* No durable storage is writable. */ }
       }
+      consentStorageFailed = !saved;
+      broadcastRevocation(saved);
       notify();
-      return false;
+      if (saved && needsReload) requestReload();
+      return saved;
     }
-    consentStorageFailed = false;
+
+    consentStorageFailed = !saveChoice({ ...record, grant: audience }) ||
+      !writeChoiceCookie(`on.${timestamp}`, maxAge);
+    if (consentStorageFailed) stop({ reloadPage: false });
+    else {
+      stopped = false;
+      activate();
+    }
     notify();
-    if (choice === 'accepted') { stopped = false; activate(); }
-    else if (needsReload) requestReload();
-    return true;
+    return !consentStorageFailed;
   }
+
+  if (revocations) revocations.onmessage = event => {
+    if (event.data === 'saved') syncStoredChoice();
+    if (event.data === 'unsaved') {
+      consentStorageFailed = true;
+      stop({ reloadPage: false });
+      notify();
+    }
+  };
   function syncStoredChoice(event) {
     if (event && event.type === 'storage' && event.key !== null && event.key !== ANALYTICS_CONSENT_KEY) return;
     if (event?.storageArea && event.storageArea !== storage) return;
@@ -354,6 +429,7 @@ export function createAnalyticsController({
     subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); },
     dispose() {
       stop({ reloadPage: false }); disposed = true;
+      revocations?.close();
       win?.removeEventListener('storage', syncStoredChoice);
       win?.removeEventListener('pageshow', syncStoredChoice);
       win?.removeEventListener('hashchange', onEnvironmentChange);

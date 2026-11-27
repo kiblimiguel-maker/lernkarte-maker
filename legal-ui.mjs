@@ -3,7 +3,11 @@ import { publicLegalNotice } from './legal-public-notices.mjs';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
 const renderSections = sections => sections.map(section =>
-  `<section class="legal-section"><h3>${esc(section.title)}</h3>${section.paragraphs.map(text => `<p>${esc(text)}</p>`).join('')}</section>`
+  `<section class="legal-section"><h3>${esc(section.title)}</h3>${section.paragraphs.map(text => `<p>${esc(text)}</p>`).join('')}${
+    section.links?.filter(link => link.url.startsWith('https://')).map(link =>
+      `<p><a class="legal-mail" href="${esc(link.url)}" target="_blank" rel="noopener noreferrer">${esc(link.title)}</a></p>`
+    ).join('') ?? ''
+  }</section>`
 ).join('');
 const reportCategory = 'Inhalt melden';
 const privacyCategories = new Set(['Datenschutzanfragen', 'Auskunft über meine Daten', 'Kontolöschung anfragen']);
@@ -196,7 +200,12 @@ export function createLegalUI({ analytics = null, config = legalConfig, win = wi
       if (saved === false) throw new Error('Auswahl nicht gespeichert');
       syncConsent();
       if(page==='cookies')renderCookies();
-    }catch{showError('Die Auswahl konnte nicht gespeichert werden. Die Analyse ist in diesem Tab gestoppt. Prüfe die Browser-Einstellungen und versuche es erneut.',errorTarget);}
+    }catch{
+      if (page === 'cookies' && errorTarget === body) renderCookies();
+      showError(value === 'necessary'
+        ? 'Die Analyse ist in diesem Tab gestoppt. Dein Browser hat den dauerhaften Widerruf blockiert. Erlaube die Speicherung für diese Website und wähle erneut «Nur notwendige».'
+        : 'Deine Zustimmung konnte nicht gespeichert werden. Prüfe die Browser-Einstellungen und versuche es erneut.',errorTarget);
+    }
     finally{busy=false;}
   }
   dialog.querySelector('form').addEventListener('submit',event=>event.preventDefault());

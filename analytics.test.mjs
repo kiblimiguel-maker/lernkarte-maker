@@ -6,11 +6,18 @@ const approved = { ...analyticsConfig, enabled: true, legalApproved: true, minor
   enhancedMeasurementVerifiedDisabled: true, advertisingAndSharingVerifiedDisabled: true, cookieExpiresSeconds: 3600, consentMaxAgeDays: 1 };
 const runtime = { productionBuild: true, deploymentEnvironment: 'production' };
 const origin = 'https://lernkarte-maker.vercel.app';
+const choiceCookie = '__Host-lernkarten-statistics-choice';
 const verified = {id: 'test-user', app_metadata: {privacy_analytics_grant: '42deb866-0000-4321-8123-000000000001'}};
-async function fixture({ config = approved, url = origin, saved, clock = Date.parse('2026-11-25T12:00:00Z'), storageFailure = false, environment = runtime, legalReady = true, audience = verified } = {}) {
+async function fixture({ config = approved, url = origin, saved, savedCookie = saved?.choice === 'accepted' ? `on.${Date.parse(saved.updatedAt)}` : null, clock = Date.parse('2026-11-25T12:00:00Z'), storageFailure = false, readOnly = false, environment = runtime, legalReady = true, audience = verified } = {}) {
   const values = new Map(saved ? [[ANALYTICS_CONSENT_KEY, JSON.stringify(saved)]] : []);
-  const storage = { getItem(key) { if (storageFailure) throw Error(); return values.get(key) ?? null; }, setItem(key, value) { if (storageFailure) throw Error(); values.set(key, value); } };
+  const storage = {
+    getItem(key) { if (storageFailure) throw Error(); return values.get(key) ?? null; },
+    setItem(key, value) { if (storageFailure || readOnly) throw Error(); values.set(key, value); },
+    removeItem(key) { if (storageFailure || readOnly) throw Error(); values.delete(key); }
+  };
   const cookies = new Map([['_ga','123'],['_ga_LW1QZY0HMD','456'],['sb-project-auth-token','PRIVATE_SESSION'],['theme','dark']]);
+  if (savedCookie) cookies.set(choiceCookie, savedCookie);
+  let blockCookieWrites = false;
   const deleted = [], scripts = [], timers = new Map(), listeners = new Map(), reloads = [];
   let nextTimer = 0;
   const win = {
@@ -23,7 +30,14 @@ async function fixture({ config = approved, url = origin, saved, clock = Date.pa
   const doc = {
     title: 'PRIVATE_DECK_NAME private@example.invalid',
     get cookie() { return [...cookies].map(([key,value])=>`${key}=${value}`).join('; '); },
-    set cookie(value) { deleted.push(value); if(value.includes('Max-Age=0'))cookies.delete(value.split('=')[0]); },
+    set cookie(value) {
+      if (blockCookieWrites) return;
+      deleted.push(value);
+      const [pair] = value.split(';');
+      const [name, contents] = pair.split('=');
+      if (value.includes('Max-Age=0')) cookies.delete(name);
+      else cookies.set(name, contents);
+    },
     head: { append(script) { if(script.tagName!=='META')scripts.push(script); } },
     createElement(type) { if(type==='meta')return {tagName:'META'};assert.equal(type,'script');return { remove() { this.removed = true; } }; },
     querySelector() { return scripts.find(script=>!script.removed) || null; }
@@ -32,6 +46,7 @@ async function fixture({ config = approved, url = origin, saved, clock = Date.pa
     reload() { reloads.push({disabled:win[`ga-disable-${config.measurementId}`],choice:api.readConsent(),cookieNames:[...cookies.keys()]}); }});
   if (audience) await api.updateAudience(audience, async () => audience);
   return {api,win,doc,storage,values,cookies,deleted,scripts,timers,reloads,listeners,
+    blockCookieWrites() { blockCookieWrites = true; },
     load() { scripts.at(-1)?.onload?.(); },
     commands() { return win.dataLayer || []; },
     events() { return (win.dataLayer || []).filter(command=>command[0]==='event'); },
@@ -44,7 +59,7 @@ const record = choice => ({...(choice === 'accepted' ? {grant:verified.app_metad
 assert.equal(analyticsConfig.enabled,false);assert.equal(analyticsConfig.legalApproved,false);
 assert.equal(analyticsConfig.minorsEligibilityVerified,false);assert.equal(analyticsConfig.enhancedMeasurementVerifiedDisabled,false);
 assert.equal(analyticsConfig.advertisingAndSharingVerifiedDisabled, false);
-assert.equal(analyticsConfig.cookieExpiresSeconds,null);assert.equal(analyticsConfig.consentMaxAgeDays,null);
+assert.equal(analyticsConfig.cookieExpiresSeconds,180 * 86_400);assert.equal(analyticsConfig.consentMaxAgeDays,180);
 for(const [key,value]of [['enabled',false],['legalApproved',false],['minorsEligibilityVerified',false],['enhancedMeasurementVerifiedDisabled',false],['advertisingAndSharingVerifiedDisabled',false],['cookieExpiresSeconds',null],['cookieExpiresSeconds',86_401],['consentMaxAgeDays',null]]){
   const f=await fixture({config:{...approved,[key]:value},saved:record('accepted')});f.api.navigate('library');
   assert.equal(f.api.isAvailable(),false,key);assert.equal(f.scripts.length,0);assert.equal(f.api.consent('accepted'),false);f.api.dispose();
@@ -137,8 +152,8 @@ for(const saved of [{...record('accepted'),version:'old'},{...record('accepted')
   f.api.navigate('library');
   f.load();
   f.storage.setItem = () => { throw new Error('Storage full'); };
-  f.storage.removeItem = key => f.values.delete(key);
-  assert.equal(f.api.revoke(),false);
+  f.blockCookieWrites();
+  assert.equal(f.api.revoke(),true);
   assert.ok(!f.values.has(ANALYTICS_CONSENT_KEY), 'failed writes should still remove the stored opt-in');
   assert.equal(f.reloads.length,1);
   f.api.dispose();
@@ -148,10 +163,26 @@ for(const saved of [{...record('accepted'),version:'old'},{...record('accepted')
   f.api.navigate('library');
   f.load();
   f.storage.setItem = () => { throw new Error('Storage blocked'); };
+  f.storage.removeItem = () => { throw new Error('Storage blocked'); };
+  f.blockCookieWrites();
   assert.equal(f.api.revoke(),false);
   assert.equal(f.api.readConsent(),null);
   assert.equal(f.reloads.length,0,'do not reload into an unreplaced opt-in record');
   assert.equal(f.api.track('study_completed'), false);
+  f.api.dispose();
+}
+{
+  const f = await fixture({saved:record('accepted'),readOnly:true});
+  f.api.navigate('library');
+  assert.equal(f.scripts.length,0,'old choice cannot load the tag after reopening a read-only browser');
+  assert.equal(f.api.readConsent(),null);
+  f.api.dispose();
+}
+{
+  const f = await fixture({saved:record('accepted'),savedCookie:null});
+  f.api.navigate('library');
+  assert.equal(f.scripts.length,0,'a remaining opt-in cannot start the tag after the choice cookie disappears');
+  assert.equal(f.api.readConsent(),null);
   f.api.dispose();
 }
 {

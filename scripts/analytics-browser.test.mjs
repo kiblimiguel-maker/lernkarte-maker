@@ -13,6 +13,8 @@ let playwright;
 try { playwright=require(process.env.PLAYWRIGHT_MODULE||'playwright'); }
 catch { throw new Error('Die Browserprüfung benötigt separat installiertes Playwright. Setze PLAYWRIGHT_MODULE auf dessen Modulpfad.'); }
 const root=new URL('../',import.meta.url),origin='https://analytics-fixture.invalid',measurementId='G-LMTEST0000';
+const consentKey='lernkarten-privacy-choice-v1';
+const choiceCookie='__Host-lernkarten-statistics-choice';
 const sources=Object.fromEntries(await Promise.all(['analytics.mjs','analytics-config.mjs','legal-config.mjs'].map(async name=>[name,await readFile(new URL(name,root),'utf8')])));
 const fixtureModule=`import {analyticsConfig} from '/analytics-config.mjs';
 import {createAnalyticsController} from '/analytics.mjs';
@@ -148,12 +150,81 @@ for(const name of (process.env.QA_ENGINES||'chromium,webkit').split(',')){
       entries.push(boundary);
       await probe.close();
     }
+
+    const fallback = await context.newPage();
+    fallback.on('pageerror',error=>errors.push(error.message));
+    await fallback.goto(origin);
+    await fallback.waitForFunction(()=>window.analyticsReady===true);
+    assert.equal(await fallback.evaluate(()=>api.consent('accepted')),true);
+    await fallback.waitForFunction(()=>api.track('folder_created',{count:1}),null,{timeout:20_000});
+    const openTab = await context.newPage();
+    openTab.on('pageerror',error=>errors.push(error.message));
+    await openTab.goto(origin);
+    await openTab.waitForFunction(()=>window.analyticsReady===true);
+    await openTab.waitForFunction(()=>api.track('folder_created',{count:1}),null,{timeout:20_000});
+    await fallback.waitForTimeout(1200);
+
+    const staleRecord = await fallback.evaluate(key=>localStorage.getItem(key),consentKey);
+    assert.equal(JSON.parse(staleRecord).choice,'accepted');
+    const beforeFallback = requests.length;
+    const revoked = await fallback.evaluate(key=>{
+      const {setItem,removeItem}=Storage.prototype;
+      Storage.prototype.setItem=function(name,value){
+        if(this===localStorage&&name===key)throw new DOMException('Fixture blocks consent writes','QuotaExceededError');
+        return setItem.call(this,name,value);
+      };
+      Storage.prototype.removeItem=function(name){
+        if(this===localStorage&&name===key)throw new DOMException('Fixture blocks consent removal','SecurityError');
+        return removeItem.call(this,name);
+      };
+      return api.revoke();
+    },consentKey);
+    assert.equal(revoked,true,'revocation persists despite unavailable consent writes');
+
+    for(const target of [fallback,openTab]){
+      await target.waitForFunction(()=>window.analyticsReady===true&&window.analyticsFixtureWasReloaded);
+      assert.equal(await target.evaluate(key=>localStorage.getItem(key),consentKey),staleRecord);
+      assert.equal(await target.evaluate(()=>api.readConsent()?.choice),'necessary');
+      assert.equal(await target.evaluate(()=>api.track('deck_created',{count:1})),false);
+      assert.equal(await target.locator('script[src*="googletagmanager.com"]').count(),0);
+    }
+    const reopened = await context.newPage();
+    reopened.on('pageerror',error=>errors.push(error.message));
+    await reopened.goto(origin);
+    await reopened.waitForFunction(()=>window.analyticsReady===true);
+    assert.equal(await reopened.evaluate(key=>localStorage.getItem(key),consentKey),staleRecord);
+    assert.equal(await reopened.evaluate(()=>api.readConsent()?.choice),'necessary');
+    assert.equal(await reopened.evaluate(()=>api.track('deck_created',{count:1})),false);
+    assert.equal(await reopened.locator('script[src*="googletagmanager.com"]').count(),0);
+    await reopened.waitForTimeout(1800);
+    assert.equal(requests.length,beforeFallback,'no Google request after failed localStorage write/removal, including both reloads and an independent new tab');
+    const cookies = await context.cookies(origin);
+    assert.ok(!cookies.some(cookie=>/^_ga/.test(cookie.name)),'GA cookies removed after fallback revocation');
+    const storedDenial = cookies.find(cookie=>cookie.name===choiceCookie);
+    assert.ok(storedDenial,'a first-party opt-out survives fresh documents');
+    assert.match(storedDenial.value,/^off\.\d+$/);
+    assert.deepEqual({domain:storedDenial.domain,path:storedDenial.path,secure:storedDenial.secure,sameSite:storedDenial.sameSite},
+      {domain:new URL(origin).hostname,path:'/',secure:true,sameSite:'Lax'});
+    assert.ok(storedDenial.expires>Date.now()/1000,'the fallback survives closing the browser');
+
+    await context.clearCookies({name:choiceCookie});
+    await reopened.reload();
+    await reopened.waitForFunction(()=>window.analyticsReady===true);
+    assert.equal(await reopened.evaluate(key=>localStorage.getItem(key),consentKey),staleRecord);
+    assert.equal(await reopened.evaluate(()=>api.readConsent()),null,'the stale opt-in stays invalid when the browser drops the fallback cookie');
+    assert.equal(await reopened.locator('script[src*="googletagmanager.com"]').count(),0);
+    assert.equal(requests.length,beforeFallback);
+    assert.equal(await reopened.evaluate(()=>api.consent('accepted')),true,'statistics requires a new explicit opt-in');
+    assert.match((await context.cookies(origin)).find(cookie=>cookie.name===choiceCookie)?.value ?? '',/^on\.\d+$/);
+    await reopened.waitForFunction(()=>api.track('folder_created',{count:1}),null,{timeout:20_000});
+    for(const target of [fallback,openTab,reopened])await target.close();
+
     assert.ok(requests.every(request=>!request.referer),'no outgoing HTTP referrer in any browser phase');
     assert.ok(!/PRIVATE_|17ed1620|292ff6d9/.test(JSON.stringify(requests)),'all batches omit account, grant, titles, contents and the private referring URL');
     assert.deepEqual(unexpected,[]);assert.deepEqual(errors,[]);
     reports.push({engine:name,preConsentRequests:0,deniedRequests:0,scriptRequests:requests.filter(request=>request.type==='script').length,
-      interceptedCollectRequests:collects.length,postRevocationRequests:0,privateBoundaries:entries,unexpected:unexpected.length});
-    console.log(`PASS real SDK network ${name}: no requests before consent/after revocation; generic payloads; native cross-tab reload.`);
+      interceptedCollectRequests:collects.length,postRevocationRequests:0,postFallbackRevocationRequests:0,privateBoundaries:entries,unexpected:unexpected.length});
+    console.log(`PASS real SDK network ${name}: generic payloads; no requests before consent or after normal and fallback cross-tab revocation.`);
   }finally{await context.close();await browser.close();}
 }
 if(process.env.QA_ANALYTICS_RESULTS)await writeFile(process.env.QA_ANALYTICS_RESULTS,JSON.stringify(reports,null,2));

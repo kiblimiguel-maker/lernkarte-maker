@@ -36,6 +36,12 @@ if (existsSync(new URL('./legal-content.mjs', import.meta.url))) {
   assert.match(textOf(withAnalytics), /Auswahl für 30 Tage im Browser/);
   assert.match(textOf(withAnalytics), /14 Monate für Ereignisdaten und 14 Monate für Daten auf Nutzerebene/);
   assert.match(textOf(withAnalytics), /Ein neues Ereignis startet die Frist für die pseudonyme Nutzerkennung erneut/);
+  const configuredAnalytics = legalDrafts(ready, { ...analyticsConfig, enabled: true }).privacy;
+  assert.match(textOf(configuredAnalytics), /höchstens 180 Tage/);
+  assert.match(textOf(configuredAnalytics), /Auswahl für 180 Tage im Browser/);
+  const analyticsSection = document => document.sections.find(section => section.title.endsWith('Nutzungsstatistik'));
+  assert.equal(analyticsSection(privacy).links.length, 0);
+  assert.equal(new URL(analyticsSection(configuredAnalytics).links[0].url).hostname, 'policies.google.com');
   const fixedRetention = legalDrafts(ready, {
     ...analyticsConfig, enabled: true, retention: {eventMonths: 2, userMonths: 2, resetUserOnActivity: false}
   }).privacy;
