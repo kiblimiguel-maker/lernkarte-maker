@@ -1676,8 +1676,8 @@ import './exam-view.css';
     }
     return {
       step: duration('step', 160),
-      swipe: duration('swipe', 320),
-      flip: duration('flip', 360),
+      swipe: duration('swipe', 800),
+      flip: duration('flip', 240),
       easing: styles.getPropertyValue('--motion-ease-out').trim() || 'ease-out'
     };
   })();
@@ -1884,11 +1884,19 @@ import './exam-view.css';
     // Reusing either slot cancels its visual animation before it changes role.
     // The new card is already active, including for keyboard and touch input.
     const scored=rating!==null;
-    const timing={duration:scored?studyMotion.swipe:studyMotion.step,easing:studyMotion.easing,fill:'both'};
-    const exit=outgoing.swipeLayer.animate([
-      {transform:'translate3d(0, 0, 0)',opacity:1},
-      {transform:`translate3d(${direction*(scored?105:8)}%, ${scored?-2:0}%, 0) rotate(${scored?direction*2:0}deg)`,opacity:0}
-    ],timing);
+    const timing = {
+      duration: scored ? studyMotion.swipe : studyMotion.step,
+      easing: scored ? 'cubic-bezier(.55,.04,.32,1)' : studyMotion.easing,
+      fill: 'both'
+    };
+    const exitFrames = [{offset: 0, transform: 'translate3d(0, 0, 0) rotate(0deg)', opacity: 1}];
+    // Keep the rating legible during the first part of the swipe.
+    if (scored) exitFrames.push({offset: .58, opacity: 1});
+    exitFrames.push({
+      offset: 1, opacity: 0,
+      transform: `translate3d(${direction * (scored ? 105 : 8)}%, ${scored ? -2 : 0}%, 0) rotate(${scored ? direction * 2 : 0}deg)`
+    });
+    const exit = outgoing.swipeLayer.animate(exitFrames, timing);
     const enter=getSlot(activeSlotIndex).slot.animate([
       {transform:`translate3d(${scored?0:-direction*2}%, 8px, 0) scale(.965)`,opacity:.86},
       {transform:'translate3d(0, 0, 0) scale(1)',opacity:1}
