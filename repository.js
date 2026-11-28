@@ -1,16 +1,18 @@
 import { supabase } from './supabaseClient.js';
-import { LIBRARY_TABLE_FIELDS, LIBRARY_TABLES, createLibraryLoadGuard, createLibraryWriter, createPendingRecovery, deriveRecentStudySets, claimLegacyCache, LIBRARY_STORAGE_KEY, LEGACY_MIGRATION_KEY, readLibraryRows } from './repository-core.mjs';
+import { libraryFromRows, LIBRARY_TABLES, createLibraryLoadGuard, createLibraryWriter, createPendingRecovery, deriveRecentStudySets, claimLegacyCache, LIBRARY_STORAGE_KEY, LEGACY_MIGRATION_KEY, readLibraryRows } from './repository-core.mjs';
 
 const tables = LIBRARY_TABLES;
-const fieldMap = LIBRARY_TABLE_FIELDS;
 export { readAllRows, userLibraryCacheKey, mergePendingLibrary } from './repository-core.mjs';
-const fromRow = row => row.data;
 let browserStorage;
 try { browserStorage = globalThis.localStorage; } catch { /* Browser storage can be disabled independently of network saves. */ }
 const recovery = createPendingRecovery({ storage: browserStorage });
 const loadGuard = createLibraryLoadGuard();
 const failedWrites = new Set();
-export function resetLibraryOwner() { loadGuard.reset(); }
+export function resetLibraryOwner() {
+  loadGuard.reset();
+  writer.releaseOwners();
+  failedWrites.clear();
+}
 export function getPendingRecovery() { return recovery.get(loadGuard.activeUserId); }
 export function discardPendingRecovery(token) { return recovery.discard(loadGuard.activeUserId ?? loadGuard.recoveryUserId, token); }
 function stageRecovery(userId, library, changes) {
@@ -49,9 +51,8 @@ export async function loadLibrary(normalize, { client = supabase, storage = brow
     return [table, rows];
   }));
   const rawRows = Object.fromEntries(tableResults);
-  const result = Object.fromEntries(tableResults.map(([table, rows]) => [fieldMap[table] || table, rows.map(fromRow)]));
-  const hasRemote = tables.some(table => result[fieldMap[table] || table].length > 0);
-  result.studySessions = Object.fromEntries(result.studySessions.map(record => [record.setId, record]));
+  const result = libraryFromRows(rawRows);
+  const hasRemote = tableResults.some(([, rows]) => rows.length > 0);
   const remote = normalize(result);
   remote.recent = deriveRecentStudySets(remote);
   await loadGuard.verifyOwner(ticket, client, user.id);

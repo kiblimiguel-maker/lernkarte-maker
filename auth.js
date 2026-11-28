@@ -106,7 +106,7 @@ function openLegalRoute() {
 window.addEventListener('hashchange', openLegalRoute);
 openLegalRoute();
 function offerStatisticsChoice() {
-  if (!legalUI && statistics.isAvailable() && statistics.shouldPrompt?.() !== false && !statistics.readConsent()) {
+  if (!legalUI && statistics.bannerMode()) {
     void loadLegal().catch(() => { /* A failed optional banner must not interrupt the app. */ });
   }
 }
@@ -204,9 +204,16 @@ function readOAuthError() {
   return message;
 }
 
+async function applyRestoredSession(session) {
+  const callbackMessage = readOAuthError();
+  await applySession(session, callbackMessage);
+  if (callbackMessage && session && accountUserId === session.user.id && !appShell.hidden) setAccountError(callbackMessage);
+}
+
 function showSignedOut(message = '') {
   if (accountUserId) privacyActions?.accountChanged();
   accountUserId = null;
+  accountEmail.textContent = '';
   void analytics.updateAudience(null);
   analytics.suspend();
   accountMenu.open = false;
@@ -226,11 +233,14 @@ function showSignedOut(message = '') {
 }
 
 async function loadExistingApp() {
-  await import('./parser.js');
-  await import('./presentation.js');
-  await import('./card-themes.js');
-  await import('./model.js');
-  window.WortwerkRepository = await import('./repository.js');
+  const [repository] = await Promise.all([
+    import('./repository.js'),
+    import('./parser.js'),
+    import('./presentation.js'),
+    import('./card-themes.js'),
+    import('./model.js')
+  ]);
+  window.WortwerkRepository = repository;
   await import('./app.js');
   await window.WortwerkAppReady;
 }
@@ -243,7 +253,7 @@ const lifecycle = createAuthLifecycle({
     if (accountUserId !== user.id) {
       setAccountError('');
       privacyActions?.accountChanged();
-        }
+    }
     void analytics.updateAudience(user, async () => (await supabase.auth.getUser()).data.user);
     accountUserId = user.id;
     accountEmail.textContent = user.email || 'Angemeldet';
@@ -352,10 +362,20 @@ switchAccountButton.addEventListener('click', async () => {
 });
 
 signOutButton.addEventListener('click', async () => {
-  if (!supabase || signingOut || switchingAccount) return;
+  if (!supabase || !accountUserId || signingOut || switchingAccount) return;
+  const owner = accountUserId;
+  const wasInert = appShell.inert;
   signingOut = true;
   updateAccountActions();
+  appShell.inert = true;
   try {
+    try {
+      if (await window.WortwerkRepository.flushLibraryWrites() !== owner) return;
+    } catch {
+      if (accountUserId !== owner || !window.confirm('Die Speicherung deiner Änderungen konnte nicht bestätigt werden. Trotzdem abmelden?')) return;
+    }
+    // A different tab can switch accounts while the last save is in flight.
+    if (accountUserId !== owner || (await currentPrivacySession())?.user.id !== owner) return;
     const { error } = await supabase.auth.signOut();
     if (error) throw error;
   } catch {
@@ -363,6 +383,7 @@ signOutButton.addEventListener('click', async () => {
     window.alert('Die Abmeldung ist fehlgeschlagen. Bitte versuche es erneut.');
   } finally {
     signingOut = false;
+    appShell.inert = wasInert;
     updateAccountActions();
   }
 });
@@ -379,7 +400,7 @@ if (!isSupabaseConfigured) {
       authEventObserved = true;
       // Supabase emits under its auth lock. Queue workspace loads separately:
       // repository requests may themselves ask Supabase for the current user.
-      setTimeout(() => { void applySession(session); }, 0);
+      setTimeout(() => { void applyRestoredSession(session); }, 0);
     }
   });
 
@@ -387,15 +408,13 @@ if (!isSupabaseConfigured) {
     // A real auth event received while restoration was pending is newer than
     // this bootstrap result and must not be overwritten by a stale null/error.
     if (authEventObserved) return;
-    const oauthMessage = readOAuthError();
     if (error) {
       console.error('Supabase-Session konnte nicht wiederhergestellt werden.');
-      applySession(null, oauthMessage || 'Die gespeicherte Sitzung konnte nicht geprüft werden. Bitte melde dich erneut an.');
+      applySession(null, readOAuthError() || 'Die gespeicherte Sitzung konnte nicht geprüft werden. Bitte melde dich erneut an.');
       authRetry.hidden = false;
       return;
     }
-    await applySession(data.session, data.session ? '' : oauthMessage);
-    if (data.session && oauthMessage && accountUserId === data.session.user.id && !appShell.hidden) setAccountError(oauthMessage);
+    await applyRestoredSession(data.session);
   }).catch(() => {
     if (authEventObserved) return;
     console.error('Supabase-Session konnte nicht geprüft werden.');

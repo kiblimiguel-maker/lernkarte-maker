@@ -5,6 +5,7 @@
  * Optional: PLAYWRIGHT_CHROMIUM_EXECUTABLE, QA_ENGINES=chromium.
  */
 import assert from 'node:assert/strict';
+import { applyFixtureCardChanges } from './card-write-fixture.mjs';
 import { createRequire } from 'node:module';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
@@ -59,9 +60,9 @@ async function startServer() {
   throw new Error(`Lokale Testvorschau ist nicht erreichbar: ${startup}`);
 }
 
-async function setup(browser, origin, viewport, reduced, colorScheme) {
+async function setup(browser, origin, viewport, reduced, colorScheme, sharedDatabase) {
   const context = await browser.newContext({ viewport, isMobile: viewport.width < 800, hasTouch: viewport.width < 800, colorScheme, reducedMotion: reduced ? 'reduce' : 'no-preference' });
-  const db = Object.fromEntries(Object.entries(fixture).map(([table, records]) => [table, new Map(records.map(data => [data.id, toRow(structuredClone(data))]))]));
+  const db = sharedDatabase ?? Object.fromEntries(Object.entries(fixture).map(([table, records]) => [table, new Map(records.map(data => [data.id, toRow(structuredClone(data))]))]));
   const errors = [], unexpected = [];
   await context.addInitScript(session => {
     if (!sessionStorage.getItem('test-bootstrap-complete')) {
@@ -78,6 +79,10 @@ async function setup(browser, origin, viewport, reduced, colorScheme) {
     if (request.method() === 'OPTIONS') return route.fulfill(json(null));
     if (url.pathname === '/auth/v1/user') return route.fulfill(json(user));
     if (url.pathname === '/auth/v1/authorize') return route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><title>Isolated account chooser</title><p>OAuth fixture</p>' });
+    if (url.pathname === '/rest/v1/rpc/save_card_changes') {
+      const error = applyFixtureCardChanges(db.cards, user.id, request.postDataJSON());
+      return route.fulfill({ ...json(error), status: error ? 409 : 200 });
+    }
     if (url.pathname === '/rest/v1/rpc/save_library_organisation_rows') {
       const { p_table, p_rows } = request.postDataJSON();
       assert.ok(db[p_table], 'Unbekannte Tabelle in der isolierten Speicherung');
@@ -102,7 +107,7 @@ async function setup(browser, origin, viewport, reduced, colorScheme) {
   });
   const page = await context.newPage();
   page.on('pageerror', error => errors.push(error.message));
-  await page.goto(origin);
+  await page.goto(origin, { waitUntil: 'commit' });
   await page.getByRole('heading', { name: 'Bibliothek', exact: true }).waitFor();
   return { page, context, errors, unexpected, db };
 }
@@ -202,6 +207,33 @@ async function verifyAccountMenu(browser, origin, engine, viewport, reduced, col
     assert.equal(await page.evaluate(async () => (await (await import('/supabaseClient.js')).supabase.auth.getSession()).data.session.user.id), user.id);
     assert.equal(await page.evaluate(() => window.__qaAuth.signOutCalls), 0);
 
+    // The real session stays in the fixture. Verify ordering and both choices
+    // using a deliberately unfinished write and the mocked sign-out method.
+    await page.evaluate(() => {
+      window.WortwerkRepository = {
+        ...window.__qaOriginalRepository,
+        flushLibraryWrites: () => new Promise((resolve, reject) => { window.__qaAuth.finishWrite = { resolve, reject }; })
+      };
+    });
+    const logout = page.locator('#sign-out');
+    for (const outcome of ['cancel', 'confirm', 'saved']) {
+      const before = await page.evaluate(() => window.__qaAuth.signOutCalls);
+      if (!await isOpen()) await trigger.click();
+      await logout.evaluate(button => { button.click(); button.click(); });
+      assert.equal(await page.evaluate(() => window.__qaAuth.signOutCalls), before, 'Die Abmeldung wartet auf die laufende Speicherung.');
+      assert.equal(await page.locator('#app-shell').evaluate(element => element.inert), true);
+      if (outcome === 'saved') {
+        await page.evaluate(owner => window.__qaAuth.finishWrite.resolve(owner), user.id);
+      } else {
+        page.once('dialog', dialog => outcome === 'confirm' ? dialog.accept() : dialog.dismiss());
+        await page.evaluate(() => window.__qaAuth.finishWrite.reject(new Error('Offline fixture')));
+      }
+      await page.waitForFunction(() => !document.querySelector('#sign-out').disabled);
+      assert.equal(await page.evaluate(() => window.__qaAuth.signOutCalls), before + (outcome === 'cancel' ? 0 : 1));
+      assert.equal(await page.locator('#app-shell').evaluate(element => element.inert), false);
+    }
+    await page.evaluate(() => { window.WortwerkRepository = window.__qaOriginalRepository; });
+
     await page.evaluate(async backend => {
       const { supabase } = await import('/supabaseClient.js');
       supabase.auth.signInWithOAuth = async options => {
@@ -221,10 +253,10 @@ async function verifyAccountMenu(browser, origin, engine, viewport, reduced, col
     assert.equal(target.searchParams.get('provider'), 'google');
     assert.equal(target.searchParams.get('redirect_to'), new URL('/', origin).toString());
     await page.waitForURL(`${backend}/auth/v1/authorize?*`);
-    await page.goto(`${origin}/?error=access_denied&error_description=User%20cancelled`);
+    await page.goto(`${origin}/?error=access_denied&error_description=User%20cancelled`, { waitUntil: 'commit' });
     await page.getByRole('heading', { name: 'Bibliothek', exact: true }).waitFor();
     assert.equal(await page.locator('#app-shell').isVisible(), true, 'Abgebrochene Auswahl muss das bestehende Konto behalten.');
-    assert.equal(await page.locator('#account-error').isVisible(), true);
+    await page.locator('#account-error').waitFor({ state: 'visible' });
     assert.match(await page.locator('#account-error').textContent(), /abgebrochen/);
     assert.equal(new URL(page.url()).search, '', 'OAuth-Fehlerparameter müssen bereinigt werden.');
     assert.equal(await page.evaluate(async () => (await (await import('/supabaseClient.js')).supabase.auth.getSession()).data.session.user.id), user.id);
@@ -291,7 +323,7 @@ async function verifyAccountRights(browser, origin, engine, viewport, colorSchem
     assert.equal(redirect.searchParams.get('max_age'), '0');
     await page.waitForURL(`${backend}/auth/v1/authorize?*`);
     // The fake OAuth provider gives control back to the same fixture account.
-    await page.goto(origin);
+    await page.goto(origin, { waitUntil: 'commit' });
     await dialog.getByRole('heading', { name: 'Konto und Daten löschen' }).waitFor();
     assert.equal(await phrase.inputValue(), '');
     assert.equal(await submit.isDisabled(), true);
@@ -320,6 +352,66 @@ async function verifyAccountRights(browser, origin, engine, viewport, colorSchem
   } finally { await context.close(); }
 }
 
+async function verifyConcurrentEditing(browser, origin, engine) {
+  const laptop = await setup(browser, origin, { width: 1280, height: 720 }, true, 'light');
+  const phone = await setup(browser, origin, { width: 390, height: 740 }, true, 'dark', laptop.db);
+  const cardId = 'card-00000000';
+  const row = () => laptop.db.cards.get(cardId).data;
+  async function openDeck(page) {
+    await page.locator('#library-search').fill('Vokabeln');
+    await page.locator('.library-search-result[data-open-set="vocab"]').click();
+    await page.getByRole('heading', { name: 'Vokabeln', exact: true }).waitFor();
+  }
+  async function edit(page, value) {
+    await page.locator(`[data-edit-card="${cardId}"]`).click();
+    await page.locator('#form-fields [name="back"]').fill(value);
+    await page.locator('#form-submit').click();
+  }
+  const saved = page => page.waitForFunction(() => document.querySelector('#save-status').dataset.state === 'saved');
+  const panel = laptop.page.locator('#recovery-notice');
+  try {
+    for (const selected of ['Auf diesem Gerät', 'Online gespeichert']) {
+      for (const { page } of [laptop, phone]) {
+        await page.reload();
+        await openDeck(page);
+      }
+      // Both devices really loaded the same revision. The phone commits first.
+      await edit(phone.page, 'Telefon 1 ' + selected);
+      await saved(phone.page);
+      const completed = { known: 17, cardCount: 20 };
+      laptop.db.sets.get('vocab').data.lastFullRound = completed;
+      await edit(laptop.page, 'Laptop ' + selected);
+      await laptop.page.getByRole('button', { name: 'Änderungen prüfen' }).click();
+      await panel.getByRole('heading', { name: 'Welche Kartenfassung möchtest du behalten?' }).waitFor();
+      assert.ok((await panel.textContent()).includes('Telefon 1 ' + selected));
+      assert.ok((await panel.textContent()).includes('Laptop ' + selected));
+      await panel.locator('label').filter({has:laptop.page.getByText(selected, {exact:true})}).getByRole('radio').check();
+      // Another edit after comparison invalidates that choice.
+      await edit(phone.page, 'Telefon 2 ' + selected);
+      await saved(phone.page);
+      Object.assign(row(), { correctCount: 4, attemptCount: 4 });
+      await panel.getByRole('button', { name:'Auswahl speichern' }).click();
+      await panel.getByText('Telefon 2 ' + selected, {exact:true}).waitFor();
+      assert.equal(await panel.getByRole('button', { name:'Auswahl speichern' }).isDisabled(), true);
+      await panel.locator('label').filter({has:laptop.page.getByText(selected, {exact:true})}).getByRole('radio').check();
+      await panel.getByRole('button', { name:'Auswahl speichern' }).click();
+      await saved(laptop.page);
+      const expected = (selected === 'Auf diesem Gerät' ? 'Laptop ' : 'Telefon 2 ') + selected;
+      assert.equal(row().back, expected);
+      assert.equal(row().correctCount, 4);
+      assert.deepEqual(laptop.db.sets.get('vocab').data.lastFullRound, completed);
+      await laptop.page.reload();
+      await openDeck(laptop.page);
+      await laptop.page.locator('.flash-row .definition').getByText(expected, {exact:true}).waitFor();
+    }
+    for (const device of [laptop, phone]) {
+      assert.deepEqual(device.errors, []);
+      assert.deepEqual(device.unexpected, []);
+    }
+    console.log(`PASS concurrent card editing ${engine}: two devices, both text choices, stale comparison and reload.`);
+  } finally { await Promise.all([phone.context.close(), laptop.context.close()]); }
+}
+
 let server;
 try {
   server = await startServer();
@@ -328,6 +420,8 @@ try {
     const launch = engine === 'chromium' && process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE } : {};
     const browser = await playwright[engine].launch(launch);
     try {
+      await verifyConcurrentEditing(browser, server.origin, engine);
+      if (process.env.QA_ACCOUNT_SCENARIOS === 'conflicts') continue;
       for (const [width, height, scheme] of [[1366, 768, 'light'], [390, 740, 'dark']]) {
         await verifyAccountRights(browser, server.origin, engine, { width, height }, scheme);
       }

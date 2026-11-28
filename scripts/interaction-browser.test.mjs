@@ -7,6 +7,7 @@
  * Browser binaries must already be installed. No dependency is downloaded here.
  */
 import assert from 'node:assert/strict';
+import { applyFixtureCardChanges } from './card-write-fixture.mjs';
 import { createRequire } from 'node:module';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
@@ -33,7 +34,7 @@ const fixture = {
   subjects: [{ id: 'fr', name: 'Französisch', color: '#7D9DBD', emoji: '🇫🇷', position: 0 }],
   folders: [{ id: 'unit', subjectId: 'fr', name: 'Unterricht', parentId: null, position: 0, color: '#7D9DBD' }, { id: 'exam', subjectId: 'fr', parentId: null, name: 'Vokabeltest', kind: 'exam', examDate: '2027-01-15', examSetIds: ['vocab'], position: 1 }],
   sets: [{ id: 'vocab', subjectId: 'fr', folderId: 'unit', name: 'Vokabeln', position: 0 }, { id: 'extra', subjectId: 'fr', folderId: 'unit', name: 'Weitere Karten', position: 1 }],
-  cards: Array.from({ length: cardCount }, (_, index) => ({ id: `card-${String(index).padStart(8, '0')}`, setId: index < 20 ? 'vocab' : 'extra', front: `Deutsch ${index}`, back: `Französisch ${index}`, position: index, correctCount: 0, incorrectCount: 0 })),
+  cards: Array.from({ length: cardCount }, (_, index) => ({ id: `card-${String(index).padStart(8, '0')}`, setId: index < 20 ? 'vocab' : 'extra', front: `Deutsch ${index}`, back: `Französisch ${index}`, ...(index === cardCount - 1 && {backExampleSentence: 'Un vêtement comme au théâtre.'}), position: index, correctCount: 0, incorrectCount: 0 })),
   study_sessions: [], study_history: []
 };
 const toRow = data => ({ id: data.id, user_id: user.id, data, ...(data.subjectId && { subject_id: data.subjectId }), ...(data.folderId && { folder_id: data.folderId }), ...(data.setId && { set_id: data.setId }) });
@@ -91,7 +92,12 @@ async function setup(browser, origin, viewport, reduced) {
     if (url.hostname === 'va.vercel-scripts.com') return route.fulfill({ status: 200, body: '' });
     if (url.origin !== backend) { unexpected.push(`${url.origin}${url.pathname}`); return route.abort(); }
     if (request.method() === 'OPTIONS') return route.fulfill(json(null));
+    if (url.pathname === '/auth/v1/logout' && request.method() === 'POST') return route.fulfill(json({}));
     if (url.pathname === '/auth/v1/user') return route.fulfill(json(user));
+    if (url.pathname === '/rest/v1/rpc/save_card_changes') {
+      const error = applyFixtureCardChanges(db.cards, user.id, request.postDataJSON());
+      return route.fulfill({ ...json(error), status: error ? 409 : 200 });
+    }
     if (url.pathname === '/rest/v1/rpc/save_library_organisation_rows') {
       const { p_table, p_rows } = request.postDataJSON();
       assert.ok(db[p_table], 'Unbekannte Tabelle in der isolierten Speicherung');
@@ -121,9 +127,78 @@ async function setup(browser, origin, viewport, reduced) {
   return { page, context, errors, unexpected };
 }
 
+async function verifyImportAndLogout(page) {
+  await page.locator('[data-quick-edit="vocab"]').click();
+  await page.locator('#start-study').click();
+  await page.locator('#study-close').click();
+  await page.locator('#import-this').click();
+  const input = page.locator('#import-text');
+  const file = page.locator('#import-file');
+  const submit = page.locator('#import-submit');
+  const upload = name => file.setInputFiles({ name, mimeType: 'text/plain', buffer: Buffer.from('Buch = livre') });
+  await input.fill('Entwurf = brouillon');
+  await submit.click();
+  await page.evaluate(() => {
+    const read = File.prototype.text;
+    File.prototype.text = function () {
+      if (this.name === 'langsam.txt') return new Promise(resolve => { window.finishImportRead = resolve; });
+      if (this.name === 'lesefehler.txt') return Promise.reject(new Error('Simulierter Lesefehler'));
+      return read.call(this);
+    };
+  });
+  await upload('langsam.txt');
+  assert.equal(await submit.isDisabled(), true);
+  await input.fill('Neu = nouveau');
+  await page.evaluate(() => window.finishImportRead('Veraltet = périmé'));
+  assert.equal(await input.inputValue(), 'Neu = nouveau');
+  await submit.click();
+  await upload('lesefehler.txt');
+  await page.waitForFunction(() => !document.querySelector('#import-submit').disabled);
+  assert.equal(await input.inputValue(), 'Neu = nouveau');
+  assert.equal(await submit.textContent(), 'Lernkarten erstellen');
+  await upload('wort.txt');
+  await page.waitForFunction(() => document.querySelector('#import-text').value === 'Buch = livre');
+  await submit.evaluate(button => { button.click(); button.click(); });
+  assert.equal(await page.locator('.page-subtitle').textContent(), '21 Lernkarten');
+  await page.waitForFunction(() => document.querySelector('#save-status').dataset.state === 'saved');
+  await page.locator('#import-this').click();
+  await input.fill('Privater Entwurf = brouillon');
+  await page.locator('#import-dialog [value="cancel"]').last().click();
+  await page.locator('.account-menu > summary').click();
+  await page.locator('#sign-out').click();
+  await page.locator('#auth-screen').waitFor({ state: 'visible' });
+  assert.equal(await input.inputValue(), '');
+  for (const id of ['sidebar-subjects', 'breadcrumbs', 'account-email', 'study-title', 'card-front-0', 'card-front-1', 'import-set']) {
+    assert.equal(await page.locator('#' + id).textContent(), '', 'Kontowechsel leert ' + id);
+  }
+}
+
 async function verifyStudy(browser, origin, engine, viewport, reduced) {
   const { page, context, errors, unexpected } = await setup(browser, origin, viewport, reduced);
   try {
+    await page.locator('#library-search').fill('vetement theatre');
+    const hit = page.locator('[data-search-card]');
+    const hitSet = cardCount > 20 ? 'Weitere Karten' : 'Vokabeln';
+    assert.equal(await hit.count(), 1);
+    assert.match(await hit.innerText(), new RegExp(`Französisch / Unterricht / ${hitSet}`));
+    await hit.locator('summary').press('Enter');
+    await hit.getByRole('button', { name: 'Lernstapel öffnen' }).waitFor();
+    assert.ok((await hit.locator('dd').last().innerText()).includes('Un vêtement comme au théâtre.'));
+    await hit.getByRole('button', { name: 'Lernstapel öffnen' }).click();
+    await page.getByRole('heading', {name:hitSet,exact:true}).waitFor();
+    for (const destination of ['Unterricht','Französisch','Bibliothek']) {
+      await page.locator('#go-back').click();
+      await page.getByRole('heading',{name:destination,exact:true}).waitFor();
+    }
+    const sidebarToggle = page.locator('[data-sidebar-toggle="fr"]');
+    if (viewport.width <= 760) await page.locator('#navigation-toggle').click();
+    assert.equal(await page.locator('[data-sidebar-folder]').count(), 0);
+    await sidebarToggle.press('Enter');
+    assert.equal(await sidebarToggle.getAttribute('aria-expanded'), 'true');
+    assert.equal(await page.locator('[data-sidebar-folder]').count(), 2);
+    await sidebarToggle.press('Enter');
+    assert.equal(await page.locator('[data-sidebar-folder]').count(), 0);
+    if (viewport.width <= 760) await page.keyboard.press('Escape');
     const navigation = await page.evaluate(() => {
       const samples = [];
       for (let round = 0; round < 12; round++) {
@@ -292,6 +367,7 @@ async function verifyStudy(browser, origin, engine, viewport, reduced) {
     await page.locator('[data-view="tests"]').click();
     await page.locator('[data-exam-open="exam"]').click();
     assert.equal(await tile.getByRole('meter').getAttribute('aria-valuenow'), '95', 'Ergebnis im Test nach dem Neuladen');
+    await verifyImportAndLogout(page);
     assert.deepEqual(errors, []);
     assert.deepEqual(unexpected, []);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, 'Horizontales Überlaufen');

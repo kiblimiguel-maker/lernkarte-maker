@@ -1,4 +1,50 @@
+import { plainRecord, sameRecord, previousSessionStep, matchesPreviousSession, validStoredChange } from './recovery-versions.mjs';
+import { reconcileCardRevision } from './card-revisions.mjs';
+
 export const LIBRARY_TABLE_FIELDS = { study_sessions: 'studySessions', study_history: 'studyHistory' };
+export function libraryFromRows(rawRows) {
+  const result = Object.fromEntries(Object.entries(rawRows).map(([table, rows]) => {
+    const records = rows.map(row => {
+      // ON DELETE SET NULL updates the foreign key, not the embedded JSON.
+      let record = row.data.id === row.id ? row.data : { ...row.data, id: row.id };
+      if ((table === 'folders' || table === 'sets') && record.subjectId !== row.subject_id) {
+        record = { ...record, subjectId: row.subject_id };
+      }
+      if (table === 'sets' && (record.folderId ?? null) !== (row.folder_id ?? null)) {
+        record = { ...record, folderId: row.folder_id ?? null };
+      }
+      if (table === 'cards' && typeof row.set_id === 'string' && record.setId !== row.set_id) {
+        record = { ...record, setId: row.set_id };
+      }
+      return record;
+    });
+    return [LIBRARY_TABLE_FIELDS[table] || table, records];
+  }));
+  // Database pagination is ordered by primary key. UUIDs do not reflect time.
+  const time = value => Date.parse(value) || 0;
+  result.studyHistory.sort((a, b) => time(b.completedAt) - time(a.completedAt));
+  // Two devices can start different rounds for the same deck. An older
+  // leftover row must not revive a round superseded by a completed one.
+  const completedIds = new Set();
+  const completedStarts = new Map();
+  for (const round of result.studyHistory) {
+    completedIds.add(round.id);
+    const started = Date.parse(round.startedAt);
+    if (Number.isFinite(started) && started > (completedStarts.get(round.setId) ?? -Infinity)) {
+      completedStarts.set(round.setId, started);
+    }
+  }
+  const open = new Map();
+  for (const round of result.studySessions) {
+    const started = Date.parse(round.startedAt);
+    if (completedIds.has(round.id) || started < completedStarts.get(round.setId)) continue;
+    const previous = open.get(round.setId);
+    if (!previous || (started || 0) >= time(previous.startedAt)) open.set(round.setId, round);
+  }
+  result.studySessions = Object.fromEntries(open);
+  return result;
+}
+
 export function toLibraryRows(table, library, userId) {
   const key = LIBRARY_TABLE_FIELDS[table];
   const records = key === 'studySessions' ? Object.values(library[key] || {}) : library[key || table] || [];
@@ -13,7 +59,6 @@ export const userLibraryPendingKey = userId => `${userLibraryCacheKey(userId)}:p
 const recordList = value => Array.isArray(value) ? value.filter(record => record && typeof record === 'object') : [];
 const recoveryTables = ['subjects', 'folders', 'sets', 'cards', 'studySessions', 'studyHistory'];
 const organisationFields = { subjects: ['position'], folders: ['position', 'subjectId', 'parentId'], sets: ['position', 'subjectId', 'folderId'] };
-const plainRecord = value => value && typeof value === 'object' && !Array.isArray(value);
 
 function withServerOrganisation(key, record, current) {
   if (!record || !current || !organisationFields[key]) return record;
@@ -25,34 +70,37 @@ function withServerOrganisation(key, record, current) {
   return restored;
 }
 
-function sameRecord(left, right) {
-  if (left === right) return true;
-  if (!left || !right || typeof left !== 'object' || typeof right !== 'object' ||
-    Array.isArray(left) !== Array.isArray(right)) return false;
-  const keys = Object.keys(left);
-  return keys.length === Object.keys(right).length &&
-    keys.every(key => Object.hasOwn(right, key) && sameRecord(left[key], right[key]));
-}
-
-function mergeRecoveryChanges(server, changes, preserveOrganisation) {
+function mergeRecoveryChanges(server, changes, preserveOrganisation, cardChoices) {
   const maps = new Map();
   const accepted = [];
   let conflictCount = 0;
+  const cardConflicts = [];
   for (const key of recoveryTables) {
     const sessions = key === 'studySessions';
     const recordId = record => sessions ? record.setId : record.id;
     const serverRecords = sessions ? Object.values(server[key] || {}) : server[key];
     const records = new Map(recordList(serverRecords).map(record => [recordId(record), record]));
     maps.set(key, records);
-    for (const { before, after } of changes[key] || []) {
+    for (const { before, after, intermediate = [], sessionSteps } of changes[key] || []) {
       const id = recordId(after);
       const current = records.get(id);
       const expected = preserveOrganisation ? withServerOrganisation(key, before, current) : before;
-      const desired = preserveOrganisation ? withServerOrganisation(key, after, current) : after;
+      let desired = preserveOrganisation ? withServerOrganisation(key, after, current) : after;
       if (sameRecord(current, desired)) continue;
-      if (!sameRecord(current ?? null, expected)) {
-        conflictCount += 1;
-        continue;
+      if (!sameRecord(current ?? null, expected) && !intermediate.some(record =>
+        sameRecord(current, preserveOrganisation ? withServerOrganisation(key, record, current) : record)) &&
+        !(sessions && matchesPreviousSession(current, after, sessionSteps))) {
+        // Editing a card also touches its deck timestamp. Keep concurrent deck
+        // metadata rather than treating that timestamp as a second text conflict.
+        if (key === 'sets' && before && current && sameRecord({ ...before, updatedAt: after.updatedAt }, after)
+            && !sameRecord(before, after)) continue;
+        const revision = key === 'cards' && !sameRecord(before, after) && reconcileCardRevision(before, after, current, cardChoices?.get(id));
+        if (!revision?.merged) {
+          if (revision?.conflict) cardConflicts.push(revision.conflict);
+          conflictCount += 1;
+          continue;
+        }
+        desired = revision.merged;
       }
       records.set(id, desired);
       accepted.push([key, desired]);
@@ -70,7 +118,7 @@ function mergeRecoveryChanges(server, changes, preserveOrganisation) {
   if (conflictCount) {
     throw Object.assign(new Error('Lokaler und gespeicherter Lernstand enthalten unterschiedliche Änderungen am selben Inhalt.'), {
       code: 'RECOVERY_CONFLICT',
-      conflictCount
+      conflictCount, cardConflicts
     });
   }
   const merged = { ...server };
@@ -79,8 +127,8 @@ function mergeRecoveryChanges(server, changes, preserveOrganisation) {
   return merged;
 }
 
-export function mergePendingLibrary(server = {}, pending = {}, { preserveOrganisation = false, changes } = {}) {
-  if (changes) return mergeRecoveryChanges(server, changes, preserveOrganisation);
+export function mergePendingLibrary(server = {}, pending = {}, { preserveOrganisation = false, changes, cardChoices } = {}) {
+  if (changes) return mergeRecoveryChanges(server, changes, preserveOrganisation, cardChoices);
   // Older drafts contain no baseline. Confirm only rows already present in
   // the saved library; a difference could be a newer remote edit or deletion.
   const legacy = Object.fromEntries(recoveryTables.map(key => {
@@ -153,8 +201,7 @@ export function createPendingRecovery({ storage, now = () => new Date().toISOStr
         if (!pending?.token) return null;
         const validChanges = pending.version === 2 && plainRecord(pending.changes) &&
           Object.entries(pending.changes).every(([key, entries]) => recoveryTables.includes(key) && Array.isArray(entries) &&
-            entries.every(entry => plainRecord(entry) && (entry.before === null || plainRecord(entry.before)) && typeof entry.after?.id === 'string' &&
-              (key !== 'studySessions' || typeof entry.after.setId === 'string')));
+            entries.every(entry => validStoredChange(key, entry)));
         const content = validChanges ? { changes: pending.changes } : pending.version === 1 && plainRecord(pending.library) ? { library: pending.library } : null;
         return content && { ...content, savedAt: pending.savedAt, token: pending.token,
           ...(inMemory && { inMemoryOnly: true }), ...(pending.preserveOrganisation === true && { preserveOrganisation: true }) };
@@ -267,16 +314,22 @@ export function libraryOrganisationChanges(before, after, rawRows, userId) {
   return { p_expected: expected, p_changes: changes };
 }
 
-function pendingChanges(next, previous) {
+function pendingChanges(next, previous, queued) {
   if (!previous) return undefined;
   const changes = {};
   for (const [table, nextRows] of next) {
     const known = previous.get(table);
+    const key = LIBRARY_TABLE_FIELDS[table] || table;
+    const priorById = new Map((queued?.[key] || []).map(change =>
+      [table === 'study_sessions' ? change.after.setId : change.after.id, change]));
     let sessionsBySet;
     for (const [id, serialized] of nextRows) {
       const oldRow = known.get(id);
-      if (oldRow === serialized) continue;
+      if (oldRow === serialized && !priorById.size) continue;
+      if (oldRow === serialized && table !== 'study_sessions' && !priorById.has(id)) continue;
       const after = JSON.parse(serialized).data;
+      const prior = priorById.get(table === 'study_sessions' ? after.setId : id);
+      if (oldRow === serialized && !prior) continue;
       let before = oldRow ? JSON.parse(oldRow).data : null;
       if (!before && table === 'study_sessions') {
         sessionsBySet ??= new Map([...known.values()].map(row => {
@@ -285,11 +338,86 @@ function pendingChanges(next, previous) {
         }));
         before = sessionsBySet.get(after.setId) ?? null;
       }
-      const key = LIBRARY_TABLE_FIELDS[table] || table;
-      (changes[key] ??= []).push({ before, after });
+      // Earlier requests may commit after this draft is staged. Keep only
+      // actual local row versions, including when a user undoes an edit.
+      if (table === 'study_sessions') {
+        let steps = prior?.sessionSteps || [];
+        if (prior && !sameRecord(after, prior.after) && (steps.length || !sameRecord(before, prior.after))) {
+          steps = [previousSessionStep(after, prior.after), ...steps];
+        }
+        if (oldRow !== serialized || steps.length) {
+          (changes[key] ??= []).push({ before, after, ...(steps.length && { sessionSteps: steps }) });
+        }
+        continue;
+      }
+      const intermediate = prior ? [...(prior.intermediate || []), prior.after]
+        .filter(record => !sameRecord(record, before) && !sameRecord(record, after)) : [];
+      if (oldRow !== serialized || intermediate.length) {
+        (changes[key] ??= []).push({ before, after, ...(intermediate.length && { intermediate }) });
+      }
     }
   }
   return changes;
+}
+
+// A request can commit even when its response is lost. Before acknowledging
+// the next save, compare just that batch with the two versions we can explain.
+const libraryColumns = { subjects: 'id,data', folders: 'id,subject_id,data', sets: 'id,subject_id,folder_id,data',
+  cards: 'id,set_id,data', study_sessions: 'id,set_id,data', study_history: 'id,set_id,data' };
+
+function matchesRow(fields, row, serialized) {
+  if (!row || !serialized) return !row && !serialized;
+  const expected = JSON.parse(serialized);
+  return fields.every(field => sameRecord(row[field] ?? null, expected[field] ?? null));
+}
+
+function writeCardChanges(client, owner, ids, nextRows, known, stored) {
+  function version(serialized) {
+    if (!serialized) return null;
+    const { set_id, data } = JSON.parse(serialized);
+    return { set_id, data };
+  }
+  return client.rpc('save_card_changes', {
+    p_owner: owner,
+    p_changes: ids.map(id => ({
+      id,
+      expected: version(stored?.get(id) ?? known.get(id)),
+      next: version(nextRows.get(id))
+    }))
+  });
+}
+
+async function reconcileWrite(client, userId, { table, attempted }, known, stored, organisation, assertOwner) {
+  const ids = [...attempted.keys()];
+  const columns = libraryColumns[table], fields = columns.split(',');
+  // UUIDs are sent in the query string. Bound the URL length on large saves.
+  for (let offset = 0; offset < ids.length; offset += 50) {
+    const batch = ids.slice(offset, offset + 50);
+    assertOwner();
+    const { data, error } = await client.from(table).select(columns).eq('user_id', userId).in('id', batch);
+    assertOwner();
+    if (error) throw error;
+    if (!Array.isArray(data) || data.some(row => !plainRecord(row?.data) || typeof row.id !== 'string')) {
+      throw new Error('Der letzte Speichervorgang konnte nicht überprüft werden. Bitte lade die Bibliothek erneut.');
+    }
+    const found = new Map(data.map(row => [row.id, row]));
+    for (const id of batch) {
+      const row = found.get(id);
+      if (matchesRow(fields, row, stored?.get(id) ?? known.get(id))) continue;
+      const written = attempted.get(id);
+      if (!matchesRow(fields, row, written)) {
+        throw Object.assign(new Error('Der gespeicherte Inhalt hat sich inzwischen geändert. Bitte lade deine Bibliothek erneut.'), { code: '40001' });
+      }
+      stored?.delete(id);
+      if (row) {
+        known.set(id, written);
+        organisation?.set(id, organisationRecord(table, row));
+      } else {
+        known.delete(id);
+        organisation?.delete(id);
+      }
+    }
+  }
 }
 
 // Compare with the library this browser actually loaded. A snapshot from an
@@ -298,6 +426,11 @@ export function createLibraryWriter({ client, onStart = () => {}, onSuccess = ()
   let queue = Promise.resolve();
   let pending = 0;
   const baselines = new Map();
+  // Keep an extra snapshot only when the persisted row differs from the
+  // application baseline (legacy defaults, or metadata omitted by a move).
+  const storedOverrides = new Map();
+  const queuedDrafts = new Map();
+  const unconfirmed = new Map();
   const organisationBaselines = new Map();
   const encode = (library, userId) => new Map(LIBRARY_TABLES.map(table => [table,
     new Map(toLibraryRows(table, library, userId).map(row => [row.id, JSON.stringify(row)]))
@@ -305,9 +438,39 @@ export function createLibraryWriter({ client, onStart = () => {}, onSuccess = ()
   function assertCurrentOwner(isCurrentOwner) {
     if (isCurrentOwner && !isCurrentOwner()) throw new Error('Die aktive Sitzung hat sich geändert. Bitte lade deine Bibliothek erneut.');
   }
+  async function verifyCurrentUser(userId, isCurrentOwner) {
+    const { data, error } = await client.auth.getUser();
+    assertCurrentOwner(isCurrentOwner);
+    if (error || data?.user?.id !== userId) throw error || new Error('Die aktive Sitzung hat sich geändert. Bitte lade deine Bibliothek erneut.');
+  }
   return {
+    releaseOwners() {
+      // A request already on the wire may finish after sign-out. Drop all
+      // private comparison snapshots once those requests have settled.
+      queue = queue.then(() => {
+        baselines.clear();
+        storedOverrides.clear();
+        organisationBaselines.clear();
+        queuedDrafts.clear();
+        unconfirmed.clear();
+      });
+    },
     prime(userId, library, rawRows) {
-      baselines.set(userId, encode(library, userId));
+      queuedDrafts.delete(userId);
+      unconfirmed.delete(userId);
+      const known = encode(library, userId);
+      baselines.set(userId, known);
+      const stored = new Map();
+      for (const table of LIBRARY_TABLES) {
+        const rows = new Map();
+        const fields = libraryColumns[table].split(',');
+        for (const row of rawRows?.[table] || []) {
+          const serialized = known.get(table).get(row.id);
+          if (serialized && !matchesRow(fields, row, serialized)) rows.set(row.id, JSON.stringify(row));
+        }
+        stored.set(table, rows);
+      }
+      storedOverrides.set(userId, stored);
       organisationBaselines.set(userId, new Map(organisationTables.map(table => [table, new Map(
         (rawRows?.[table] || toLibraryRows(table, library, userId)).map(row => [row.id, organisationRecord(table, row)])
       )])));
@@ -317,20 +480,31 @@ export function createLibraryWriter({ client, onStart = () => {}, onSuccess = ()
         assertCurrentOwner(isCurrentOwner);
         const raw = organisationBaselines.get(userId);
         if (!raw) throw new Error('Die Bibliothek muss neu geladen werden.');
-        const { data, error: ownerError } = await client.auth.getUser();
-        assertCurrentOwner(isCurrentOwner);
-        if (ownerError || data?.user?.id !== userId) throw ownerError || new Error('Die aktive Sitzung hat sich geändert.');
+        await verifyCurrentUser(userId, isCurrentOwner);
         const payload = libraryOrganisationChanges(before, after, raw, userId);
         const { error } = await client.rpc('organise_library', payload);
         if (error) throw error;
         const known = baselines.get(userId);
+        if (!storedOverrides.has(userId)) {
+          storedOverrides.set(userId, new Map(LIBRARY_TABLES.map(table => [table, new Map()])));
+        }
         for (const table of organisationTables) {
           const next = new Map(toLibraryRows(table, after, userId).map(row => [row.id, row]));
+          const stored = storedOverrides.get(userId).get(table);
+          const fields = libraryColumns[table].split(',');
           for (const change of payload.p_changes[table]) {
             raw.get(table).set(change.id, change);
             // Compare subsequent saves with the in-memory shape. Old records may
             // omit a location key that the RPC stores explicitly as null.
-            known.get(table).set(change.id, JSON.stringify(next.get(change.id)));
+            const serialized = JSON.stringify(next.get(change.id));
+            const persisted = JSON.parse(stored.get(change.id) ?? known.get(table).get(change.id));
+            const { id, ...changedFields } = change;
+            Object.assign(persisted.data, changedFields);
+            if (table !== 'subjects') persisted.subject_id = change.subjectId;
+            if (table === 'sets') persisted.folder_id = change.folderId;
+            if (matchesRow(fields, persisted, serialized)) stored.delete(id);
+            else stored.set(id, JSON.stringify(persisted));
+            known.get(table).set(id, serialized);
           }
         }
       });
@@ -339,19 +513,32 @@ export function createLibraryWriter({ client, onStart = () => {}, onSuccess = ()
     },
     flush() { return queue; },
     recoveryChanges(library, userId) {
-      return pendingChanges(encode(library, userId), baselines.get(userId));
+      return pendingChanges(encode(library, userId), baselines.get(userId), queuedDrafts.get(userId));
     },
     save(library, userId, { onRecoveryChanges, isCurrentOwner } = {}) {
       // Capture immutable rows once when enqueuing. Decode only changed rows
       // when writing or staging recovery, keeping the comparison cheap.
       const next = encode(library, userId);
-      onRecoveryChanges?.(pendingChanges(next, baselines.get(userId)));
+      let draft;
+      if (onRecoveryChanges) {
+        draft = pendingChanges(next, baselines.get(userId), queuedDrafts.get(userId));
+        queuedDrafts.set(userId, draft);
+        onRecoveryChanges(draft);
+      }
       pending += 1;
       onStart({ pending, userId });
+      let inFlight;
       const operation = queue.then(async () => {
         if (!userId) throw new Error('Keine aktive Sitzung');
         assertCurrentOwner(isCurrentOwner);
         const previous = baselines.get(userId) || new Map(LIBRARY_TABLES.map(table => [table, new Map()]));
+        const organisation = organisationBaselines.get(userId) || new Map(organisationTables.map(table => [table, new Map()]));
+        const uncertain = unconfirmed.get(userId);
+        if (uncertain) {
+          await verifyCurrentUser(userId, isCurrentOwner);
+          await reconcileWrite(client, userId, uncertain, previous.get(uncertain.table), storedOverrides.get(userId)?.get(uncertain.table), organisation.get(uncertain.table), () => assertCurrentOwner(isCurrentOwner));
+          unconfirmed.delete(userId);
+        }
         const plan = new Map();
         for (const table of LIBRARY_TABLES) {
           const known = previous.get(table), nextRows = next.get(table);
@@ -361,10 +548,7 @@ export function createLibraryWriter({ client, onStart = () => {}, onSuccess = ()
           plan.set(table, { writes, removed });
         }
         if (![...plan.values()].some(({ writes, removed }) => writes.length || removed.length)) return;
-        const { data, error } = await client.auth.getUser();
-        assertCurrentOwner(isCurrentOwner);
-        if (error || data?.user?.id !== userId) throw error || new Error('Die aktive Sitzung hat sich geändert. Bitte lade deine Bibliothek erneut.');
-        const organisation = organisationBaselines.get(userId) || new Map(organisationTables.map(table => [table, new Map()]));
+        if (!uncertain) await verifyCurrentUser(userId, isCurrentOwner);
         organisationBaselines.set(userId, organisation);
         baselines.set(userId, previous);
         for (const table of LIBRARY_TABLES) {
@@ -377,16 +561,24 @@ export function createLibraryWriter({ client, onStart = () => {}, onSuccess = ()
             for (let offset = 0; offset < group.length; offset += LIBRARY_PAGE_SIZE) {
               assertCurrentOwner(isCurrentOwner);
               const batch = group.slice(offset, offset + LIBRARY_PAGE_SIZE);
-              const { error } = compare
-                ? await client.rpc('save_library_organisation_rows', {
+              inFlight = () => ({ table, attempted: new Map(batch.map(row => [row.id, next.get(table).get(row.id)])) });
+              let result;
+              if (table === 'cards') {
+                result = await writeCardChanges(client, userId, batch.map(row => row.id), next.get(table), known, storedOverrides.get(userId)?.get(table));
+              } else if (compare) {
+                result = await client.rpc('save_library_organisation_rows', {
                   p_table: table,
                   p_rows: batch.map(row => ({ expected: raw.get(row.id), row }))
-                })
-                : await client.from(table).upsert(batch, { onConflict: 'user_id,id' });
-              if (error) throw error;
+                });
+              } else {
+                result = await client.from(table).upsert(batch, { onConflict: 'user_id,id' });
+              }
+              if (result.error) throw result.error;
+              inFlight = undefined;
               for (const row of batch) {
                 known.set(row.id, next.get(table).get(row.id));
                 raw?.set(row.id, organisationRecord(table, row));
+                storedOverrides.get(userId)?.get(table).delete(row.id);
               }
             }
           }
@@ -396,10 +588,15 @@ export function createLibraryWriter({ client, onStart = () => {}, onSuccess = ()
           for (let offset = 0; offset < removed.length; offset += LIBRARY_PAGE_SIZE) {
             assertCurrentOwner(isCurrentOwner);
             const batch = removed.slice(offset, offset + LIBRARY_PAGE_SIZE);
-            const { error } = await client.from(table).delete().eq('user_id', userId).in('id', batch);
+            inFlight = () => ({ table, attempted: new Map(batch.map(id => [id, null])) });
+            const { error } = table === 'cards'
+              ? await writeCardChanges(client, userId, batch, next.get(table), previous.get(table), storedOverrides.get(userId)?.get(table))
+              : await client.from(table).delete().eq('user_id', userId).in('id', batch);
             if (error) throw error;
+            inFlight = undefined;
             for (const id of batch) {
               previous.get(table).delete(id);
+              storedOverrides.get(userId)?.get(table).delete(id);
               organisation.get(table)?.delete(id);
             }
           }
@@ -408,19 +605,29 @@ export function createLibraryWriter({ client, onStart = () => {}, onSuccess = ()
         // sends pending changes; a local rollback restores already-written rows.
         baselines.set(userId, next);
       });
-      queue = operation.then(() => { pending -= 1; onSuccess({ pending, userId }); }, error => { pending -= 1; onError(error, { pending, userId }); });
+      queue = operation.then(() => {
+        if (queuedDrafts.get(userId) === draft) queuedDrafts.delete(userId);
+        pending -= 1;
+        onSuccess({ pending, userId });
+      }, error => {
+        // A SQL/PostgREST rejection confirms failure. Transport errors do not.
+        if (inFlight && !/^(?:[A-Z0-9]{5}|PGRST\d{3})$/.test(error?.code || '')) {
+          unconfirmed.set(userId, inFlight());
+        }
+        pending -= 1;
+        onError(error, { pending, userId });
+      });
       return operation;
     }
   };
 }
 
-const libraryColumns = { folders: 'id,subject_id,data', sets: 'id,subject_id,folder_id,data' };
 export async function readLibraryRows(client, table, userId, pageSize = LIBRARY_PAGE_SIZE) {
   if (!Number.isInteger(pageSize) || pageSize < 1) throw new RangeError('pageSize must be a positive integer');
   const rows = [];
   let cursor;
   for (;;) {
-    let query = client.from(table).select(libraryColumns[table] || 'id,data').eq('user_id', userId).order('id', { ascending: true });
+    let query = client.from(table).select(libraryColumns[table]).eq('user_id', userId).order('id', { ascending: true });
     if (cursor !== undefined) query = query.gt('id', cursor);
     const { data, error } = await query.range(0, pageSize - 1);
     if (error) throw error;

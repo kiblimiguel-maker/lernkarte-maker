@@ -87,6 +87,18 @@ export function createLibraryShareReceiver({ signIn }) {
     if (!dialog.open) dialog.showModal();
   }
 
+  function refreshDestinations(preserveSelection = false) {
+    const previous = preserveSelection ? subject.value : '';
+    subject.replaceChildren();
+    if (authState !== 'ready' || !preview || result) return;
+    subject.add(new Option('Geteilt mit dir (Standard)', ''));
+    for (const item of window.WortwerkShareDestinations()) {
+      const option = new Option(item.name, item.id);
+      option.selected = item.id === previous;
+      subject.add(option);
+    }
+  }
+
   async function loadPreview() {
     const version = ++routeVersion;
     previewState = 'loading';
@@ -95,6 +107,7 @@ export function createLibraryShareReceiver({ signIn }) {
       const details = await previewLibraryShare(token);
       if (version !== routeVersion) return;
       preview = details;
+      refreshDestinations();
       previewState = 'loaded';
     } catch {
       if (version !== routeVersion) return;
@@ -112,6 +125,7 @@ export function createLibraryShareReceiver({ signIn }) {
     result = null;
     actionMessage = '';
     busy = false;
+    refreshDestinations();
     if (token === null) dialog.close();
     else void loadPreview();
   }
@@ -133,13 +147,7 @@ export function createLibraryShareReceiver({ signIn }) {
     authState = state;
     userId = id;
     authMessage = message;
-    if (state === 'ready') {
-      const subjects = window.WortwerkShareDestinations();
-      const previousSubject = sameAccount ? subject.value : '';
-      subject.replaceChildren(new Option('Geteilt mit dir (Standard)', ''));
-      subjects.forEach(item => subject.add(new Option(item.name, item.id)));
-      if (subjects.some(item => item.id === previousSubject)) subject.value = previousSubject;
-    }
+    refreshDestinations(sameAccount);
     render();
   }
 
@@ -173,6 +181,7 @@ export function createLibraryShareReceiver({ signIn }) {
       } else {
         preview = null;
       }
+      refreshDestinations();
     } catch (failure) {
       if (!current()) return;
       actionMessage = failure?.code === 'SHARE_LIBRARY_NOT_READY'

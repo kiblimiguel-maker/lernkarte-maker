@@ -18,7 +18,12 @@ const referrerPath = '/fixture-private-source';
 const choiceCookie = '__Host-lernkarten-vercel-choice';
 const root = new URL('../', import.meta.url);
 const sources = new Map();
-sources.set('/vercel-analytics.mjs', await readFile(new URL('vercel-analytics.mjs', root), 'utf8'));
+for (const module of ['vercel-analytics.mjs', 'legal-ui.mjs', 'legal-config.mjs', 'legal-public-notices.mjs']) {
+  sources.set('/' + module, await readFile(new URL(module, root), 'utf8'));
+}
+for (const stylesheet of ['app.css', 'legal-ui.css']) {
+  sources.set('/' + stylesheet, await readFile(new URL(stylesheet, root), 'utf8'));
+}
 sources.set('/vercel-loader.mjs', await readFile(new URL(import.meta.resolve('@vercel/analytics')), 'utf8'));
 const sdkResponse = await fetch(origin + sdkPath, { redirect: 'error', signal: AbortSignal.timeout(12_000) });
 assert.equal(sdkResponse.status, 200, 'Vercel serves its analytics SDK');
@@ -26,13 +31,15 @@ assert.match(sdkResponse.headers.get('content-type') || '', /javascript/);
 sources.set(sdkPath, await sdkResponse.text());
 sources.set('/fixture.mjs', `
   import { createVercelAnalytics } from '/vercel-analytics.mjs';
+  import { createLegalUI } from '/legal-ui.mjs';
   window.api = createVercelAnalytics({
     window, document, productionBuild: true,
     deploymentEnvironment: window.fixtureEnvironment || 'production',
     loadSdk: () => import('/vercel-loader.mjs')
   });
+  createLegalUI({ analytics: window.api, statisticsProvider: 'vercel' });
 `);
-const html = '<!doctype html><meta name="referrer" content="no-referrer"><title>Private fixture title</title><script type="module" src="/fixture.mjs"></script>';
+const html = '<!doctype html><html lang="de"><meta name="referrer" content="no-referrer"><link rel="stylesheet" href="/app.css"><link rel="stylesheet" href="/legal-ui.css"><title>Private fixture title</title><script type="module" src="/fixture.mjs"></script>';
 const privateValue = 'PrivateFixtureValue';
 
 for (const name of (process.env.QA_ENGINES || 'chromium,webkit').split(',')) {
@@ -59,7 +66,8 @@ for (const name of (process.env.QA_ENGINES || 'chromium,webkit').split(',')) {
       }
       if (url.origin === origin && sources.has(url.pathname)) {
         if (url.pathname === sdkPath) scriptRequests.push(request.url());
-        return route.fulfill({ status: 200, contentType: 'text/javascript', body: sources.get(url.pathname) });
+        const contentType = url.pathname.endsWith('.css') ? 'text/css' : 'text/javascript';
+        return route.fulfill({ status: 200, contentType, body: sources.get(url.pathname) });
       }
       if (url.origin === origin && url.pathname === '/' && request.isNavigationRequest()) {
         return route.fulfill({ status: 200, contentType: 'text/html', body: html });
@@ -95,20 +103,47 @@ for (const name of (process.env.QA_ENGINES || 'chromium,webkit').split(',')) {
 
     const page = await context.newPage();
     await open(page);
+    const banner = page.locator('.consent-banner');
+    const cookiesDialog = page.locator('#legal-dialog');
     assert.equal(await page.evaluate(() => api.isAvailable()), true);
-    assert.equal(await page.evaluate(() => api.shouldPrompt()), true);
+    assert.equal(await page.evaluate(() => api.bannerMode()), 'choice');
+    await banner.waitFor({ state: 'visible' });
     assert.deepEqual(counts(), { sdk: 0, views: 0 }, 'no SDK or view before opt-in');
 
-    assert.equal(await page.evaluate(() => api.consent('necessary')), true);
+    await banner.locator('[data-consent-choice="necessary"]').click();
+    await banner.waitFor({ state: 'hidden' });
+    assert.equal(await page.evaluate(() => api.bannerMode()), null, 'no repeat prompt in the current document');
     await open(page);
     assert.equal(await page.evaluate(() => api.readConsent()?.choice), 'necessary', 'remember denial');
-    assert.deepEqual(counts(), { sdk: 0, views: 0 }, 'denial survives reopening');
+    assert.equal(await page.evaluate(() => api.bannerMode()), 'notice');
+    await banner.waitFor({ state: 'visible' });
+    assert.equal(await banner.locator('[data-consent-choice="accepted"]').isVisible(), false, 'the reminder does not ask for consent again');
+    await banner.getByRole('button', { name: 'Hinweis schliessen' }).click();
+    await banner.waitFor({ state: 'hidden' });
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    assert.equal(await page.evaluate(() => api.bannerMode()), null, 'the dismissed reminder stays closed');
+    await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })));
+    await banner.locator('.consent-notice').waitFor({ state: 'visible' });
+    assert.equal(await page.evaluate(() => api.bannerMode()), 'notice', 'returning to a restored document shows the saved choice');
+    const shared = await context.newPage();
+    await open(shared, publicPage + '#share=' + privateValue);
+    assert.equal(await shared.evaluate(() => api.bannerMode()), null);
+    assert.equal(await shared.locator('.consent-banner').isVisible(), false, 'a private link suppresses even a pending reminder');
+    await shared.close();
+    await open(page);
+    assert.equal(await page.evaluate(() => api.bannerMode()), 'notice');
+    await banner.locator('.consent-notice [data-cookie-settings]').click();
+    await cookiesDialog.waitFor({ state: 'visible' });
+    assert.equal(await cookiesDialog.getByRole('checkbox').isChecked(), false);
+    assert.deepEqual(counts(), { sdk: 0, views: 0 }, 'denial, dismissing the reminder and reading settings produce no analytics traffic');
 
-    const [accepted] = await Promise.all([
-      page.evaluate(() => api.consent('accepted')),
+    await cookiesDialog.getByRole('checkbox').check();
+    await cookiesDialog.locator('[data-cookie-save]').click();
+    await Promise.all([
+      cookiesDialog.locator('[data-legal-close]').last().click(),
       page.waitForResponse(response => response.url() === origin + viewPath && response.status() === 204)
     ]);
-    assert.equal(accepted, true);
+    assert.equal(await page.evaluate(() => api.bannerMode()), null);
     await page.waitForLoadState('networkidle');
     assert.deepEqual(counts(), { sdk: 1, views: 1 }, 'one view following opt-in');
     assertView(views[0]);
@@ -118,6 +153,8 @@ for (const name of (process.env.QA_ENGINES || 'chromium,webkit').split(',')) {
     assert.equal(cookie.sameSite, 'Lax');
     assert.equal(cookie.domain, new URL(origin).hostname);
     assert.equal(cookie.path, '/');
+    const remainingDays = (cookie.expires * 1000 - Date.now()) / 86_400_000;
+    assert.ok(remainingDays > 179.99 && remainingDays <= 180.01, 'opt-in expires after 180 days');
     assert.ok(!cookie.value.includes(privateValue), 'the choice cookie holds no private input');
 
     await page.evaluate(() => {
@@ -133,6 +170,7 @@ for (const name of (process.env.QA_ENGINES || 'chromium,webkit').split(',')) {
     await page.waitForFunction(() => Boolean(window.api));
     await page.waitForLoadState('networkidle');
     assert.deepEqual(counts(), { sdk: 2, views: 2 }, 'valid prior consent permits one view on a new document');
+    assert.equal(await banner.isVisible(), false, 'accepted visitors do not see a banner on a new visit');
     assertView(views[1]);
 
     const allowed = counts();
@@ -144,6 +182,7 @@ for (const name of (process.env.QA_ENGINES || 'chromium,webkit').split(',')) {
     ]) {
       const excluded = await context.newPage();
       await open(excluded, url);
+      assert.equal(await excluded.evaluate(() => api.bannerMode()), null);
       await excluded.evaluate(() => {
         history.replaceState({}, '', '/');
         window.dispatchEvent(new HashChangeEvent('hashchange'));
@@ -173,18 +212,40 @@ for (const name of (process.env.QA_ENGINES || 'chromium,webkit').split(',')) {
     await preview.addInitScript(() => { window.fixtureEnvironment = 'preview'; });
     await open(preview);
     assert.equal(await preview.evaluate(() => api.isAvailable()), false, 'preview unavailable even with valid preference');
+    assert.equal(await preview.evaluate(() => api.bannerMode()), null);
     assert.deepEqual(counts(), allowed, 'no SDK in Preview');
     await preview.close();
+
+    const stale = await context.newPage();
+    await stale.clock.setFixedTime(new Date(Date.now() + 181 * 86_400_000));
+    await open(stale);
+    assert.equal(await stale.evaluate(() => api.readConsent()), null, 'an expired grant is invalid even if the cookie is still present');
+    assert.equal(await stale.evaluate(() => api.bannerMode()), null);
+    assert.deepEqual(counts(), allowed, 'an old grant cannot authorise a pageview');
+    await stale.close();
+
+    // Most browsers remove the opt-in cookie themselves on expiry.
+    await context.clearCookies({ name: choiceCookie });
+    const afterExpiry = await context.newPage();
+    await open(afterExpiry);
+    assert.equal(await afterExpiry.evaluate(() => api.readConsent()), null);
+    assert.equal(await afterExpiry.evaluate(() => api.bannerMode()), null);
+    assert.equal(await afterExpiry.locator('.consent-banner').isVisible(), false);
+    assert.deepEqual(counts(), allowed, 'remembering the dismissed banner cannot renew an expired opt-in');
+    await afterExpiry.close();
+    await context.addCookies([cookie]);
 
     assert.equal(await page.evaluate(() => api.revoke()), true);
     await page.reload();
     await page.waitForFunction(() => Boolean(window.api));
     await page.waitForLoadState('networkidle');
     assert.equal(await page.evaluate(() => api.readConsent()?.choice), 'necessary', 'revoked preference survives reload');
+    assert.equal(await page.evaluate(() => api.bannerMode()), 'notice');
+    await banner.waitFor({ state: 'visible' });
     assert.deepEqual(counts(), allowed, 'no request after revocation and reload');
     assert.deepEqual(unexpected, []);
     assert.deepEqual(errors, []);
-    console.log(`PASS Vercel SDK wire test ${name}: consent, duplicate prevention, excluded URLs and referrers, revocation, Preview.`);
+    console.log(`PASS Vercel SDK wire test ${name}: banner choices and reminders, opt-in expiry, duplicate prevention, excluded URLs and referrers, revocation, Preview.`);
   } finally {
     await browser.close();
   }

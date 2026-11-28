@@ -10,6 +10,10 @@ Neue Stapel können direkt im Test erstellt werden. Die normale Lern-, Import-, 
 
 ## Speicherung
 
+Die Reihenfolge der Kacheln lässt sich für jeden Test durch Ziehen oder mit den Pfeilen unter «Reihenfolge» ändern. Der Test speichert sie im Feld `examSetOrder`. Ein Lernstapel kann in einem anderen Test an einer anderen Stelle stehen.
+
+«Unsichere Karten üben» startet eine gemeinsame Runde mit den Karten, deren letzte Bewertung falsch war. Antworten aktualisieren die Lernstände dieser Karten. Die Ergebnisse vollständiger Stapelrunden und bereits angefangene Stapelrunden bleiben erhalten.
+
 Tests sind terminierte Bibliothekscontainer im bestehenden `folders.data`-JSON. Sie verwenden `kind: 'exam'`, `examDate`, `examNotes`, `examLinks` und `examSetIds`. Die vorhandene Fachbeziehung, Benutzerzuordnung, RLS, Schreibwarteschlange und Wiederherstellung bleiben zuständig. Eine neue Tabelle, Storage-Bucket oder Datenbankmigration ist nicht erforderlich.
 
 Referenzierte Lernstapel werden ausschliesslich aus der eigenen geladenen Bibliothek und demselben Fach aufgelöst. Ungültige oder inzwischen entfernte Verweise werden nicht geladen. Datumswerte werden als lokale Kalendertage behandelt, sodass Zeitzonen und Sommerzeit die Tagesanzeige nicht verschieben. Links erlauben HTTP und HTTPS ohne Zugangsdaten; Titel und Notizen werden als Text ausgegeben.

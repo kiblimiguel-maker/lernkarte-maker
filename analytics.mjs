@@ -420,6 +420,7 @@ export function createAnalyticsController({
   if (storedConsent()?.choice !== 'accepted' || !configured) clearAnalyticsCookies(doc || { cookie: '' }, win || { location: { hostname: '', pathname: '/' } });
   return {
     track, navigate, consent, readConsent, isAvailable, updateAudience,
+    bannerMode: () => isAvailable() && !readConsent() ? 'choice' : null,
     revoke: () => consent('necessary'),
     suspend({ reloadPage = true } = {}) {
       currentPage = null;

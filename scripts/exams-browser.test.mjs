@@ -5,6 +5,7 @@
  * Optional: PLAYWRIGHT_CHROMIUM_EXECUTABLE, QA_ENGINES=chromium.
  */
 import assert from 'node:assert/strict';
+import { applyFixtureCardChanges } from './card-write-fixture.mjs';
 import { createRequire } from 'node:module';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
@@ -94,6 +95,10 @@ async function setup(browser, origin, viewport, reduced, colorScheme) {
       for(const [table,changes] of Object.entries(p_changes))for(const change of changes){const current=db[table].get(change.id);const row={...current,data:{...current.data,...change}};if(change.subjectId)row.subject_id=change.subjectId;if(table==='sets')row.folder_id=change.folderId||null;db[table].set(row.id,row);}
       return route.fulfill(json(null));
     }
+    if (url.pathname === '/rest/v1/rpc/save_card_changes') {
+      const error = applyFixtureCardChanges(db.cards, user.id, request.postDataJSON());
+      return route.fulfill({ ...json(error), status: error ? 409 : 200 });
+    }
     if (url.pathname === '/rest/v1/rpc/save_library_organisation_rows') {
       const { p_table, p_rows } = request.postDataJSON();
       if (p_table === 'folders' && failFolderWrite) { failFolderWrite=false;return route.fulfill({ ...json({message:'Isolated save failure'}),status:500 }); }
@@ -114,8 +119,12 @@ async function setup(browser, origin, viewport, reduced, colorScheme) {
       ids.forEach(id => db[table].delete(id));
       return route.fulfill(json(null));
     }
-    const cursor = url.searchParams.get('id')?.replace(/^gt\./, ''), offset = Number(url.searchParams.get('offset') || 0), limit = Number(url.searchParams.get('limit') || 500);
-    const rows = [...db[table].values()].filter(row => !cursor || row.id > cursor).sort((a, b) => a.id.localeCompare(b.id)).slice(offset, offset + limit);
+    const idFilter = url.searchParams.get('id') || '';
+    const cursor = idFilter.startsWith('gt.') ? idFilter.slice(3) : '';
+    const requested = idFilter.startsWith('in.(') ? new Set(idFilter.slice(4, -1).split(',')) : null;
+    const offset = Number(url.searchParams.get('offset') || 0), limit = Number(url.searchParams.get('limit') || 500);
+    const rows = [...db[table].values()].filter(row => (!cursor || row.id > cursor) && (!requested || requested.has(row.id)))
+      .sort((a, b) => a.id.localeCompare(b.id)).slice(offset, offset + limit);
     return route.fulfill({ ...json(rows), headers: { ...json(rows).headers, 'content-range': rows.length ? `0-${rows.length - 1}/*` : '*/*' } });
   });
   const page = await context.newPage();
@@ -123,6 +132,156 @@ async function setup(browser, origin, viewport, reduced, colorScheme) {
   await page.goto(origin);
   await page.getByRole('heading', { name: 'Bibliothek', exact: true }).waitFor();
   return { page, context, errors, unexpected, db, rejectFolderOnce:()=>{failFolderWrite=true;}, rejectOrganisationOnce:()=>{failOrganisationWrite=true;} };
+}
+
+async function dragToTile(page,context,source,target,touch,fraction=.5) {
+  await source.scrollIntoViewIfNeeded();
+  const point=async (element,at)=>{
+    const box=await element.boundingBox();
+    assert.ok(box);
+    return {x:box.x+box.width*at,y:box.y+box.height*at};
+  };
+  const start=await point(source,.5);
+  if(touch){
+    const device=await context.newCDPSession(page);
+    try{
+      const send=(type,point)=>device.send('Input.dispatchTouchEvent',{type,touchPoints:point?[point]:[]});
+      await send('touchStart',start);
+      await page.locator('body.is-organising').waitFor();
+      await send('touchMove',await point(target,fraction));
+      await target.and(page.locator('.drop-over')).waitFor();
+      await send('touchEnd');
+    }finally{await device.detach();}
+  }else{
+    await page.mouse.move(start.x,start.y);
+    await page.mouse.down();
+    await page.mouse.move(start.x+12,start.y);
+    await page.locator('body.is-organising').waitFor();
+    const end=await point(target,fraction);
+    await page.mouse.move(end.x,end.y,{steps:4});
+    await target.and(page.locator('.drop-over')).waitFor();
+    await page.mouse.up();
+  }
+}
+
+async function verifyExamPractice(browser, origin, engine) {
+  const {page, context, db, errors, unexpected} = await setup(browser, origin, {width: 1366, height: 768}, true, 'dark');
+  const exam = {id:'practice-exam', kind:'exam', subjectId:'fr', name:'Französischprüfung', examDate:'2027-05-10', examSetIds:['vocab','extra']};
+  db.folders.set(exam.id,toRow(exam));
+  for(const [key,cardThemeId,frenchSpeechSide] of [['vocab','graphite','front'],['extra','sky-mint-graphite','off']]) {
+    db.sets.set(key,toRow({...db.sets.get(key).data,cardThemeId,frenchSpeechSide,lastFullRound:{known:1,cardCount:2}}));
+  }
+  for(const row of db.cards.values()) Object.assign(row.data,{incorrectCount:1,attemptCount:1});
+  db.cards.set('known',toRow({id:'known',setId:'vocab',front:'ja',back:'oui',correctCount:1,incorrectCount:1,attemptCount:2,lastReviewedAt:'2026-11-25T10:00:00Z',nextReviewAt:'2026-11-26T10:00:00Z'}));
+  const originalSession = {id:'regular-session',setId:'vocab',startedAt:'2026-11-26T09:00:00Z',cardIds:['known','card-home'],results:[true,null],index:1};
+  db.study_sessions.set(originalSession.id,toRow(originalSession));
+  async function openExam() {
+    await page.reload();
+    await page.getByRole('heading',{name:'Bibliothek',exact:true}).waitFor();
+    await page.locator('[data-view="tests"]').click();
+    await page.locator('[data-exam-open="practice-exam"]').click();
+  }
+  try {
+    await openExam();
+    const start = page.locator('[data-exam-practice]');
+    assert.match(await start.innerText(),/\(2\)/);
+    await start.click();
+    const active = page.locator('.study-card-slot.is-active');
+    assert.equal(await active.getAttribute('data-card-theme'),'graphite');
+    assert.equal(await page.locator('#study-speech-toolbar').isVisible(),true);
+    assert.match(await active.innerText(),/das Haus/);
+    await page.locator('#answer-yes').click();
+    assert.equal(await active.getAttribute('data-card-theme'),'sky-mint-graphite');
+    assert.equal(await page.locator('#study-speech-toolbar').isVisible(),false);
+    assert.match(await active.innerText(),/das Wort/);
+    await page.locator('#answer-no').click();
+    assert.equal(await page.locator('#score-value').innerText(),'50%');
+    await page.locator('#retry-missed').click();
+    assert.match(await active.innerText(),/das Wort/);
+    await page.locator('#answer-yes').click();
+    await page.locator('#finish-study').click();
+    assert.equal(await start.isDisabled(),true);
+    await page.evaluate(() => window.WortwerkRepository.flushLibraryWrites());
+    assert.equal(db.study_history.size,0);
+    assert.deepEqual([...db.study_sessions.values()].map(row=>row.data),[originalSession]);
+    for(const key of exam.examSetIds) assert.deepEqual(db.sets.get(key).data.lastFullRound,{known:1,cardCount:2});
+    assert.equal(db.sets.size,3);
+    assert.equal(db.cards.get('card-cell').data.attemptCount,1);
+    await openExam();
+    assert.equal(await start.isDisabled(),true,'Corrected cards stay out of the practice pool after reloading.');
+    assert.deepEqual(errors,[]);assert.deepEqual(unexpected,[]);
+    console.log(`PASS mixed exam practice ${engine}: latest answers, source themes and speech, retry and preserved full rounds and sessions`);
+  } finally { await context.close(); }
+}
+
+async function verifyExamOrder(browser,origin,engine,touch){
+  const viewport=touch?{width:390,height:740}:{width:1366,height:768};
+  const {page,context,db,errors,unexpected,rejectFolderOnce}=await setup(browser,origin,viewport,false,'light');
+  const exam={id:'sort-exam',kind:'exam',subjectId:'fr',name:'Testreihenfolge',examDate:'2027-05-10',examSetIds:['vocab']};
+  db.folders.set(exam.id,toRow(exam));
+  db.sets.set('extra',toRow({...db.sets.get('extra').data,folderId:exam.id}));
+  async function reopen(){
+    await page.reload();
+    await page.locator('[data-open-subject="fr"]').waitFor();
+    if(touch)await page.locator('#navigation-toggle').click();
+    await page.locator('[data-view="tests"]').click();
+    await page.locator('[data-exam-open="sort-exam"]').click();
+    await page.locator('.exam-detail').waitFor();
+  }
+  try{
+    await reopen();
+    const cards=page.locator('.exam-detail [data-open-set]');
+    const ids=()=>cards.evaluateAll(items=>items.map(item=>item.dataset.openSet));
+    const ready=()=>page.waitForFunction(()=>!document.querySelector('#content').inert);
+    assert.deepEqual(await ids(),['vocab','extra']);
+    const target=cards.first();
+    await target.evaluate(el=>window.scrollTo(0,el.getBoundingClientRect().top+window.scrollY-100));
+    await dragToTile(page,context,page.locator('[data-open-set="extra"] h2'),page.locator('[data-open-set="vocab"]'),touch,.25);
+    await page.waitForFunction(()=>document.querySelector('.exam-detail [data-open-set]')?.dataset.openSet==='extra');
+    await ready();
+    assert.deepEqual(db.folders.get(exam.id).data.examSetOrder,['extra','vocab']);
+    assert.deepEqual(db.folders.get(exam.id).data.examSetIds,['vocab']);
+    assert.equal(db.sets.get('extra').folder_id,exam.id);
+    assert.equal(db.sets.get('vocab').folder_id,'unit');
+    assert.equal(db.sets.get('vocab').data.position,0);
+    await reopen();
+    assert.deepEqual(await ids(),['extra','vocab']);
+    await page.locator('[data-toggle-sort]').press('Enter');
+    rejectFolderOnce();
+    const later=page.locator('[data-open-set="extra"] [data-sort-step="1"]');
+    await later.press('Enter');
+    await page.getByText('Die Reihenfolge im Test konnte nicht gespeichert werden.',{exact:false}).waitFor();
+    await ready();
+    assert.deepEqual(await ids(),['extra','vocab']);
+    await later.press('Enter');
+    await page.waitForFunction(()=>document.querySelector('.exam-detail [data-open-set]')?.dataset.openSet==='vocab');
+    await ready();
+    assert.deepEqual(db.folders.get(exam.id).data.examSetOrder,['vocab','extra']);
+    assert.deepEqual(errors,[]);assert.deepEqual(unexpected,[]);
+    console.log('PASS exam order, reload, keyboard and failed save',engine,touch?'touch':'mouse');
+  }finally{await context.close();}
+}
+
+async function verifyFolderDrop(browser, origin, engine, touch) {
+  const viewport = touch ? {width:390,height:740} : {width:1366,height:768};
+  const {page, context, errors, unexpected, db} = await setup(browser, origin, viewport, false, 'light');
+  try {
+    assert.equal(await page.locator('[data-sidebar-folder]').count(), 0);
+    await page.locator('[data-open-subject="fr"]').click();
+    const source = page.locator('[data-open-set="extra"] h2');
+    const target = page.locator(touch ? '[data-open-folder="unit"]' : '[data-sidebar-folder="unit"]');
+    await dragToTile(page,context,source,target,touch);
+    await page.waitForFunction(() => !document.querySelector('#content').inert && !document.querySelector('[data-open-set="extra"]'));
+    assert.equal(db.sets.get('extra').folder_id, 'unit');
+    assert.equal(db.cards.get('card-word').set_id, 'extra');
+    await page.reload();
+    await page.locator('[data-open-subject="fr"]').click();
+    await page.locator('[data-open-folder="unit"]').click();
+    assert.equal(await page.locator('[data-open-set="extra"]').count(), 1);
+    assert.deepEqual(errors, []);
+    assert.deepEqual(unexpected, []);
+    console.log('PASS folder drop and reload', engine, touch ? 'touch' : 'mouse/sidebar');
+  } finally { await context.close(); }
 }
 
 async function verifyExams(browser,origin,engine,viewport,reduced,colorScheme){
@@ -133,6 +292,14 @@ async function verifyExams(browser,origin,engine,viewport,reduced,colorScheme){
   try{
     assert.equal(await page.locator('[data-view="recent"]').count(),0);
     await testsNav();await page.locator('[data-exam-create]').first().click();
+    // A native close event may arrive after the same dialog has reopened.
+    await page.evaluate(async()=>{
+      const dialog=document.querySelector('#exam-dialog');
+      const closed=new Promise(resolve=>dialog.addEventListener('close',resolve,{once:true}));
+      dialog.querySelector('[data-exam-cancel]').click();
+      document.querySelector('[data-exam-create]').click();
+      await closed;
+    });
     assert.equal(await page.locator('#exam-name').inputValue(),'','New tests start without a suggested name.');
     const subjectBounds=await page.locator('#exam-subject').boundingBox();
     const dateBounds=await page.locator('#exam-date').boundingBox();
@@ -288,8 +455,13 @@ async function verifyExams(browser,origin,engine,viewport,reduced,colorScheme){
     assert.equal(db.sets.size,4);
     await page.reload();await page.getByRole('heading',{name:'Bibliothek',exact:true}).waitFor();await testsNav();
     assert.equal(await page.locator('[data-exam-open]').count(),0);
+    assert.equal(await page.locator('#shared-library-subject option').count(),0,'The hidden import form contains no personal subject names.');
+    const addedSubject={id:'later',name:'Neues Fach',position:2};
+    db.subjects.set(addedSubject.id,toRow(addedSubject));
+    await page.evaluate(()=>window.WortwerkReloadLibrary());
     await page.evaluate(token=>{window.location.hash=`share=${token}`;},token);
     await page.locator('#shared-library-destination').waitFor({state:'visible'});
+    assert.equal(await page.locator('#shared-library-subject option[value="later"]').textContent(),'Neues Fach','The dialog uses current destinations after a library refresh.');
     assert.equal(await page.locator('#shared-library-kind').textContent(),'Geteilter Test');
     assert.ok((await page.locator('#shared-library-description').textContent()).includes('dessen Farbe'));
     assert.ok((await page.locator('#shared-library-subject').boundingBox()).height>=40,'Recipient subject selection keeps a full-sized touch target.');
@@ -298,6 +470,7 @@ async function verifyExams(browser,origin,engine,viewport,reduced,colorScheme){
     await page.locator('#shared-library-action').click();
     await page.waitForFunction(()=>document.querySelector('#shared-library-action').textContent==='Test öffnen');
     await page.locator('#shared-library-action').click();await page.locator('#shared-library-dialog').waitFor({state:'hidden'});
+    assert.equal(await page.locator('#shared-library-subject option').count(),0,'Closing the share removes its destinations.');
     assert.equal(await page.locator('#exam-title').textContent(),frozenExam.name,'Sent link imports after original deletion.');
     assert.equal(await page.locator('.exam-notes').textContent(),frozenExam.examNotes);
     assert.equal(db.folders.get('shared-exam-copy').subject_id,'fr');
@@ -331,7 +504,13 @@ try{
     assert.ok(playwright[engine]);
     const browser=await playwright[engine].launch(engine==='chromium'&&process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE?{executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE}:{});
     const profiles=[[{width:1366,height:768},false,'dark'],[{width:390,height:740},false,'light'],[{width:320,height:568},true,'dark']];
-    try{for(const [viewport,reduced,colorScheme] of process.env.QA_SMOKE?profiles.slice(0,2):profiles)await verifyExams(browser,server.origin,engine,viewport,reduced,colorScheme);}
+    try{
+      await verifyExamPractice(browser,server.origin,engine);
+      await verifyExamOrder(browser,server.origin,engine,false);
+      if(engine==='chromium')await verifyExamOrder(browser,server.origin,engine,true);
+      await verifyFolderDrop(browser,server.origin,engine,false);
+      if(engine==='chromium')await verifyFolderDrop(browser,server.origin,engine,true);
+      for(const [viewport,reduced,colorScheme] of process.env.QA_SMOKE?profiles.slice(0,2):profiles)await verifyExams(browser,server.origin,engine,viewport,reduced,colorScheme);}
     finally{await browser.close();}
   }
 }finally{if(server?.child){server.child.kill();await once(server.child,'exit');}}

@@ -1,7 +1,8 @@
+import { applyFixtureCardChanges } from './scripts/card-write-fixture.mjs';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 const { normalizeLibrary, reorderLibraryItems, moveLibraryItem, getLibrarySiblings } = createRequire(import.meta.url)('./model.js');
-import { toLibraryRows, claimLegacyCache, createLibraryLoadGuard, createLibraryWriter, createPendingRecovery, deriveRecentStudySets, mergePendingLibrary, deleteStaleRows, LIBRARY_STORAGE_KEY, LEGACY_MIGRATION_KEY, readAllRows, readLibraryRows, userLibraryCacheKey, userLibraryPendingKey } from './repository-core.mjs';
+import { libraryFromRows, toLibraryRows, claimLegacyCache, createLibraryLoadGuard, createLibraryWriter, createPendingRecovery, deriveRecentStudySets, mergePendingLibrary, deleteStaleRows, LIBRARY_STORAGE_KEY, LEGACY_MIGRATION_KEY, readAllRows, readLibraryRows, userLibraryCacheKey, userLibraryPendingKey } from './repository-core.mjs';
 
 const rows = Array.from({ length: 50_251 }, (_, index) => ({ id: `card-${index}` }));
 const ranges = [];
@@ -26,7 +27,7 @@ const keyedReadClient = {
     assert.equal(table, 'cards');
     let after;
     return {
-      select(columns) { assert.equal(columns, 'id,data'); return this; },
+      select(columns) { assert.equal(columns, 'id,set_id,data'); return this; },
       eq(key, owner) { assert.equal(key, 'user_id'); assert.equal(owner, 'owner-a'); return this; },
       order(key, options) { assert.equal(key, 'id'); assert.deepEqual(options, { ascending: true }); return this; },
       gt(key, value) { assert.equal(key, 'id'); after = value; return this; },
@@ -46,6 +47,34 @@ assert.deepEqual(cursors, [undefined, 'card-2', 'card-5'], 'a cursor advances wi
 await assert.rejects(readLibraryRows({
   from() { return { select() { return this; }, eq() { return this; }, order() { return this; }, async range() { return { data: [{ id: 'bad', data: null }] }; } }; }
 }, 'cards', 'owner-a'), /unvollständigen Serverantwort/);
+
+// PostgreSQL clears folder_id when a folder disappears, including decks
+// another device added since the deletion started. The JSON can still be stale.
+const historyRows = Array.from({ length: 30 }, (_, i) => ({
+  id: String(i).padStart(2, '0'),
+  data: { id: String(i).padStart(2, '0'), setId: 'vocab', completedAt: new Date(1000 * (i + 1)).toISOString() }
+}));
+const duplicateSessions = ['older-z', 'newer-a'].map((id, i) => ({
+  id, data: { id, setId: 'vocab', startedAt: new Date(1000 * (i + 31)).toISOString(), cardIds: ['card'], results: [null], index: 0 }
+}));
+const readBack = libraryFromRows({
+  subjects: [{ id: 'fr', data: { id: 'fr' } }],
+  folders: [],
+  sets: [{ id: 'vocab', subject_id: 'fr', folder_id: null, data: { id: 'wrong-json-id', folderId: 'removed', subjectId: 'stale', name: 'Vokabeln' } }],
+  cards: [{ id: 'card', data: { id: 'card', setId: 'vocab' } }],
+  study_sessions: duplicateSessions.toReversed(),
+  study_history: historyRows
+});
+assert.deepEqual(readBack.sets[0], { id: 'vocab', subjectId: 'fr', folderId: null, name: 'Vokabeln' });
+assert.equal(readBack.studySessions.vocab.id, 'newer-a', 'duplicate saved sessions resolve by start time, never lexicographic UUID');
+assert.equal(readBack.studyHistory[0].id, '29', 'subsequent trimming drops the oldest completed round');
+const completedRow = { ...duplicateSessions[1], data: { ...duplicateSessions[1].data, completedAt: new Date(45000).toISOString() } };
+const futureSession = { id: 'later', data: { ...duplicateSessions[0].data, id: 'later', startedAt: new Date(42000).toISOString() } };
+function reloadAfterRound(sessions) {
+  return libraryFromRows({ study_sessions: sessions, study_history: [completedRow] }).studySessions;
+}
+assert.equal(reloadAfterRound(duplicateSessions).vocab, undefined, 'an older duplicate cannot return after the newer round completed');
+assert.equal(reloadAfterRound([...duplicateSessions, futureSession]).vocab.id, 'later', 'a new concurrent round survives even if it began before the previous round finished');
 
 const existing = Array.from({ length: 1201 }, (_, index) => ({ id: `old-${index}` }));
 const deleteBatches = [];
@@ -212,12 +241,27 @@ const remoteTables = new Map();
 const writes = [];
 let currentUser = 'writer-owner';
 let failNextWrite = false;
+let loseReplyAfterCommit = false;
+function replyAfterCommit() {
+  if (!loseReplyAfterCommit) return { error: null };
+  loseReplyAfterCommit = false;
+  return { error: new Error('connection lost after commit') };
+}
 let failTable = null;
 let ownerChecks = 0;
 const writerErrors = [];
 const writerClient = {
   auth: { async getUser() { ownerChecks += 1; return { data: { user: { id: currentUser } }, error: null }; } },
-  async rpc(name, { p_table: table, p_rows: records }) {
+  async rpc(name, payload) {
+    if (name === 'save_card_changes') {
+      if (!remoteTables.has('cards')) remoteTables.set('cards', new Map());
+      writes.push({ table: 'cards', action: payload.p_changes[0].next ? 'compare-write' : 'delete', count: payload.p_changes.length });
+      if (failTable === 'cards') { failTable = null; return { error: new Error('partial failure') }; }
+      if (failNextWrite) { failNextWrite = false; return { error: new Error('offline') }; }
+      const error = applyFixtureCardChanges(remoteTables.get('cards'), currentUser, payload, id => `${currentUser}:${id}`);
+      return error ? { error } : replyAfterCommit();
+    }
+    const { p_table: table, p_rows: records } = payload;
     assert.equal(name, 'save_library_organisation_rows');
     for (const { row, expected } of records) {
       const current = remoteTables.get(table).get(`${currentUser}:${row.id}`);
@@ -234,15 +278,17 @@ const writerClient = {
         if (failTable === table) { failTable = null; return { error: new Error('partial failure') }; }
         if (failNextWrite) { failNextWrite = false; return { error: new Error('offline') }; }
         for (const row of records) remoteTables.get(table).set(`${row.user_id}:${row.id}`, structuredClone(row));
-        return { error: null };
+        return replyAfterCommit();
       },
+      select() { this.reading = true; return this; },
       delete() { return this; },
       eq(column, userId) { assert.equal(column, 'user_id'); this.userId = userId; return this; },
       async in(column, ids) {
         assert.equal(column, 'id');
+        if (this.reading) return { data: ids.map(id => remoteTables.get(table).get(`${this.userId}:${id}`)).filter(Boolean), error: null };
         writes.push({ table, action: 'delete', count: ids.length });
         for (const id of ids) remoteTables.get(table).delete(`${this.userId}:${id}`);
-        return { error: null };
+        return replyAfterCommit();
       }
     };
   }
@@ -262,7 +308,7 @@ assert.equal(writes.length, 0, 'unchanged snapshots perform no database writes')
 assert.equal(ownerChecks, ownerChecksBeforeNoop, 'unchanged snapshots perform no network requests');
 writeLibrary.cards[0].correctCount = 1;
 await writer.save(writeLibrary, currentUser);
-assert.deepEqual(writes, [{ table: 'cards', action: 'upsert', count: 1 }], 'one answer updates only its changed card');
+assert.deepEqual(writes, [{ table: 'cards', action: 'compare-write', count: 1 }], 'one answer updates only its changed card');
 
 remoteTables.get('cards').set('writer-owner:from-another-tab', { user_id: 'writer-owner', id: 'from-another-tab', data: { front: 'unseen' } });
 remoteTables.get('cards').set('another-owner:writer-card-1', { user_id: 'another-owner', id: 'writer-card-1', data: { front: 'private' } });
@@ -285,6 +331,35 @@ await assert.rejects(writer.save(writeLibrary, currentUser), /offline/);
 await writer.save(writeLibrary, currentUser);
 assert.equal(remoteTables.get('cards').get('writer-owner:writer-card-0').data.back, 'recover after failure');
 assert.equal(writerErrors.length, 1, 'a failed save is surfaced and does not poison later saves');
+
+// Loss of a response does not tell the client whether the transaction committed.
+for (const action of ['edit', 'insert', 'delete']) {
+  const attempted = structuredClone(writeLibrary);
+  if (action === 'edit') attempted.cards[0].back = 'saved without a reply';
+  if (action === 'insert') attempted.cards.push({ ...attempted.cards[0], id: 'uncertain-insert' });
+  if (action === 'delete') attempted.cards.shift();
+  loseReplyAfterCommit = true;
+  await assert.rejects(writer.save(attempted, currentUser), /connection lost/);
+  await writer.save(writeLibrary, currentUser);
+  assert.deepEqual(remoteTables.get('cards').get('writer-owner:writer-card-0')?.data, writeLibrary.cards[0], `undo after an uncertain ${action} restores the original card`);
+  assert.equal(remoteTables.get('cards').has('writer-owner:uncertain-insert'), false, 'undo of an uncertain insert removes the committed card');
+}
+
+{
+  const parallelWriter = createLibraryWriter({ client: writerClient });
+  parallelWriter.prime(currentUser, writeLibrary);
+  const edited = structuredClone(writeLibrary);
+  edited.cards[0].back = 'lost local response';
+  loseReplyAfterCommit = true;
+  await assert.rejects(parallelWriter.save(edited, currentUser), /connection lost/);
+  const savedRow = remoteTables.get('cards').get('writer-owner:writer-card-0');
+  savedRow.data.back = 'newer change on another device';
+  const writeCount = writes.length;
+  await assert.rejects(parallelWriter.save(writeLibrary, currentUser), { code: '40001' });
+  assert.equal(writes.length, writeCount, 'a divergent server version stops retry before any write or delete');
+  assert.equal(savedRow.data.back, 'newer change on another device');
+  savedRow.data = structuredClone(writeLibrary.cards[0]);
+}
 
 const beforePartialSave = structuredClone(writeLibrary);
 writeLibrary.subjects[0].name = 'partially written subject';
@@ -319,12 +394,18 @@ const checkedOrganisationWrites = [];
 const organisationWrites = [];
 let organisationAccount = organisationOwner;
 let organisationError;
+let metadataReplyError;
 const organisationClient = {
   auth: { async getUser() { return { data: { user: { id: organisationAccount } }, error: null }; } },
   async rpc(name, payload) {
+    if (name === 'save_card_changes') {
+      organisationWrites.push({ table: 'cards', records: payload.p_changes });
+      return { error: null };
+    }
     if (name === 'save_library_organisation_rows') {
       const { p_table: table, p_rows: entries } = payload;
       checkedOrganisationWrites.push(structuredClone(payload));
+      if (metadataReplyError) return { error: metadataReplyError };
       for (const { expected, row } of entries) {
         const current = organisationRemote[table].find(item => item.id === row.id);
         if (!current || current.subject_id !== expected.subjectId || current.folder_id !== expected.folderId ||
@@ -343,7 +424,8 @@ const organisationClient = {
     for (const table of organisationTables) {
       for (const change of payload.p_changes[table]) {
         const row = organisationRemote[table].find(item => item.id === change.id);
-        Object.assign(row.data, change);
+        const { id, ...updatedFields } = change;
+        Object.assign(row.data, updatedFields);
         if (table !== 'subjects') row.subject_id = change.subjectId;
         if (table === 'sets') row.folder_id = change.folderId;
       }
@@ -351,7 +433,12 @@ const organisationClient = {
     return { error: null };
   },
   from(table) {
-    return { async upsert(records) { organisationWrites.push({ table, records }); return { error: null }; } };
+    return {
+      async upsert(records) { organisationWrites.push({ table, records }); return { error: null }; },
+      select() { return this; },
+      eq(field, userId) { assert.equal(field, 'user_id'); assert.equal(userId, organisationOwner); return this; },
+      async in(field, ids) { assert.equal(field, 'id'); return { data: organisationRemote[table].filter(row => ids.includes(row.id)) }; }
+    };
   }
 };
 const organisationWriter = createLibraryWriter({ client: organisationClient });
@@ -415,6 +502,32 @@ organisationAccount = organisationOwner;
 await organisationWriter.organise(afterLearning, organisationReturn, organisationOwner);
 assert.deepEqual(organisationRequests[2].payload.p_expected.sets.find(record => record.id === 'moving'),
   { id: 'moving', subjectId: 'destination', folderId: null, position: 1 }, 'the next move compares against the committed location and position');
+
+// Loading normalises legacy values, and moving only persists location fields.
+// An uncertain metadata request must compare against the actual stored shape.
+for (const moveFirst of [false, true]) {
+  const library = normalizeLibrary(Object.fromEntries(organisationTables.map(table => [table, organisationRemote[table].map(row => structuredClone(row.data))])));
+  const verified = createLibraryWriter({ client: organisationClient });
+  verified.prime(organisationOwner, library, organisationRemote);
+  const snapshot = structuredClone(library);
+  const record = snapshot.sets.find(set => set.id === 'moving');
+  if (moveFirst) {
+    moveLibraryItem(snapshot, { type: 'set', id: record.id, subjectId: 'destination', folderId: null });
+    record.updatedAt = 'client timestamp after moving';
+    await verified.organise(library, snapshot, organisationOwner);
+  } else {
+    const legacy = organisationRemote.sets.find(row => row.id === record.id);
+    delete legacy.data.updatedAt;
+    record.updatedAt = 'normalised legacy timestamp';
+    verified.prime(organisationOwner, snapshot, organisationRemote);
+  }
+  record.name = moveFirst ? 'edited after move' : 'edited legacy row';
+  metadataReplyError = new Error('network unavailable');
+  await assert.rejects(verified.save(snapshot, organisationOwner), /network unavailable/);
+  metadataReplyError = null;
+  await verified.save(snapshot, organisationOwner);
+  assert.equal(organisationRemote.sets.find(row => row.id === record.id).data.updatedAt, record.updatedAt);
+}
 
 const lifecycle = [];
 const lifecycleWriter = createLibraryWriter({ client: writerClient, onStart: state => lifecycle.push(['start', state.pending]), onSuccess: state => lifecycle.push(['success', state.pending]), onError: (_error, state) => lifecycle.push(['error', state.pending]) });
@@ -509,10 +622,85 @@ assert.equal(restoredDraft.cards.some(card => card.id === 'recovery-removed-remo
 assert.equal(restoredDraft.studySessions['recovery-set'].id, 'new-round');
 assert.deepEqual(mergePendingLibrary(restoredDraft, undefined, { changes: versionedDraft.changes }), restoredDraft, 'already-written recovery entries are idempotent');
 
+// A newer local choice can be staged while the previous save is on the wire.
+// Reloads may therefore see either the original row or an intermediate commit.
+for (const finalAnswer of ['third', 'original']) {
+  const remote = normalizeLibrary({ subjects: [{ id: 's' }], sets: [{ id: 'set', subjectId: 's' }],
+    cards: [{ id: 'c', setId: 'set', back: 'original' }] });
+  const pendingClient = { auth: { async getUser() { return { data: { user: { id: 'queued-owner' } } }; } },
+    async rpc(name) { assert.equal(name, 'save_card_changes'); return { error: null }; } };
+  const queuedWriter = createLibraryWriter({ client: pendingClient });
+  queuedWriter.prime('queued-owner', remote);
+  const edited = structuredClone(remote);
+  const writesInOrder = [];
+  let latestDelta;
+  for (const answer of ['first', 'second', finalAnswer]) {
+    edited.cards[0].back = answer;
+    writesInOrder.push(queuedWriter.save(edited, 'queued-owner', { onRecoveryChanges: delta => { latestDelta = delta; } }));
+  }
+  for (const accepted of ['original', 'first', 'second', finalAnswer]) {
+    const server = structuredClone(remote);
+    server.cards[0].back = accepted;
+    const recovered = mergePendingLibrary(server, null, { changes: latestDelta });
+    assert.equal(recovered.cards[0].back, finalAnswer, 'restore newest queued intent, even after a preceding request committed');
+  }
+  const persistedToken = recovery.stage('queued-owner', null, { changes: latestDelta });
+  assert.deepEqual(createPendingRecovery({ storage }).get('queued-owner')?.changes, latestDelta, 'intermediate versions survive browser reload');
+  recovery.acknowledge('queued-owner', persistedToken);
+  const elsewhere = structuredClone(remote);
+  elsewhere.cards[0].back = 'edited elsewhere';
+  assert.throws(() => mergePendingLibrary(elsewhere, null, { changes: latestDelta }), { code: 'RECOVERY_CONFLICT' });
+  await Promise.all(writesInOrder);
+  queuedWriter.releaseOwners();
+  await queuedWriter.flush();
+  assert.equal(queuedWriter.recoveryChanges(edited, 'queued-owner'), undefined, 'logout releases the previous account’s in-memory baseline');
+}
+
+// A long offline round must fit browser storage without losing the ability
+// to recognise an acknowledgement for any queued intermediate answer.
+{
+  const ids = Array.from({ length: 10000 }, (_, index) => `card-${String(index).padStart(27, '0')}`);
+  const initial = { id: 'offline-round', setId: 'large-set', cardIds: ids, results: Array(ids.length).fill(null), historyCardIds: [], index: 0 };
+  const initialLibrary = { ...normalizeLibrary({ subjects: [{ id: 's' }], sets: [{ id: initial.setId, subjectId: 's' }] }), studySessions: { [initial.setId]: initial } };
+  const offlineWriter = createLibraryWriter({ client: { auth: { async getUser() { throw new Error('offline'); } } } });
+  offlineWriter.prime('large-owner', initialLibrary);
+  const next = structuredClone(initialLibrary);
+  const round = next.studySessions[initial.setId];
+  let latest, intermediateServer;
+  for (let i = 0; i < 24; i++) {
+    round.results[i] = i % 2 === 0;
+    round.index++;
+    round.historyCardIds.push(ids[i]);
+    await assert.rejects(offlineWriter.save(next, 'large-owner', { onRecoveryChanges(changes) { latest = changes; } }), /offline/);
+    if (i === 12) intermediateServer = structuredClone(next);
+  }
+  assert.ok(JSON.stringify(latest).length < 2.2 * JSON.stringify(initial).length, 'intermediates use bounded space per answer in a 10000-card round');
+  const draftStore = createPendingRecovery({ storage });
+  draftStore.stage('large-owner', null, { changes: latest });
+  const fromStorage = createPendingRecovery({ storage }).get('large-owner').changes;
+  assert.deepEqual(mergePendingLibrary(intermediateServer, null, { changes: fromStorage }).studySessions, next.studySessions);
+  intermediateServer.studySessions[initial.setId].results[9999] = true;
+  assert.throws(() => mergePendingLibrary(intermediateServer, null, { changes: fromStorage }), { code: 'RECOVERY_CONFLICT' });
+}
+
 const sameCardConflict = structuredClone(freshServer);
 sameCardConflict.cards[previouslyEditedIndex].back = 'another device';
 assert.throws(() => mergePendingLibrary(sameCardConflict, undefined, { changes }), { code: 'RECOVERY_CONFLICT', conflictCount: 1 });
 assert.equal(sameCardConflict.cards[previouslyEditedIndex].back, 'another device');
+{
+  const serverCard = sameCardConflict.cards[previouslyEditedIndex];
+  const withProgress = { ...serverCard, correctCount: 12, attemptCount: 15 };
+  const snapshot = { ...sameCardConflict, cards: sameCardConflict.cards.map(c => c === serverCard ? withProgress : c) };
+  for (const source of ['local', 'remote']) {
+    const cardChoices = new Map([[serverCard.id, { source, remote: withProgress }]]);
+    const merged = mergePendingLibrary(snapshot, null, { changes, cardChoices }).cards.find(c => c.id === serverCard.id);
+    assert.equal(merged.back, source === 'remote' ? serverCard.back : changes.cards[0].after.back);
+    assert.equal(merged.correctCount, 12);
+    assert.equal(merged.attemptCount, 15);
+    assert.throws(() => mergePendingLibrary(sameCardConflict, null, { changes, cardChoices }), { code: 'RECOVERY_CONFLICT' },
+      'A selection is bound to the version actually displayed.');
+  }
+}
 assert.equal(recoveryAfterReload.get('recovery-owner').token, versionedToken, 'a conflict leaves the browser draft intact');
 const deletedEditedCard = { ...freshServer, cards: freshServer.cards.filter(card => card.id !== 'recovery-edited') };
 assert.throws(() => mergePendingLibrary(deletedEditedCard, undefined, { changes }), { code: 'RECOVERY_CONFLICT' });

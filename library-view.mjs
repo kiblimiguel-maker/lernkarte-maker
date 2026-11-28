@@ -9,12 +9,27 @@ export function libraryCardsBySet(cards) {
 }
 
 const searchable = value => String(value || '').normalize('NFKD').replace(/\p{M}/gu, '').toLocaleLowerCase('de');
+const cardTextCache = new WeakMap();
+
+// Cards can be edited in place. Cache the normalised text only while the
+// four source fields still match; discarded records can be garbage-collected.
+function matchesCard(card, words) {
+  let entry = cardTextCache.get(card);
+  const { front, back, frontExampleSentence, backExampleSentence } = card;
+  if (!entry || entry.front !== front || entry.back !== back ||
+      entry.frontExampleSentence !== frontExampleSentence || entry.backExampleSentence !== backExampleSentence) {
+    entry = { front, back, frontExampleSentence, backExampleSentence,
+      text: searchable([front, back, frontExampleSentence, backExampleSentence].join(' ')) };
+    cardTextCache.set(card, entry);
+  }
+  return words.every(word => entry.text.includes(word));
+}
 
 // Search the current library scope without changing saved order or ownership.
 // Parent names are searchable so a stack can be found by its filing location.
 export function searchLibrary(library, query, { subjectId = null, folderId = null, setIds = null, limit = 100 } = {}) {
   const words = searchable(query).trim().split(/\s+/).filter(Boolean);
-  if (!words.length) return { subjects: [], folders: [], sets: [], total: 0 };
+  if (!words.length) return { subjects: [], folders: [], sets: [], cards: [], total: 0 };
   const subjects = new Map(library.subjects.map(item => [item.id, item]));
   const folders = new Map(library.folders.map(item => [item.id, item]));
   const recentIds = setIds ? new Set(setIds) : null;
@@ -52,20 +67,36 @@ export function searchLibrary(library, query, { subjectId = null, folderId = nul
   const foundFolders = !recentIds ? library.folders.filter(item =>
     (!subjectId || item.subjectId === subjectId) && (!folderId || item.id !== folderId && withinFolder.has(item.id))
   ).map(item => ({ item, path: location(item, item.parentId) })).filter(({ item, path }) => matches(item, path)) : [];
-  const foundSets = library.sets.filter(item =>
+  const scopedSets = library.sets.filter(item =>
     (!subjectId || item.subjectId === subjectId) && (!folderId || withinFolder.has(item.folderId)) && (!recentIds || recentIds.has(item.id))
-  ).map(item => ({ item, path: location(item, item.folderId) })).filter(({ item, path }) => matches(item, path));
+  ).map(item => ({ item, path: location(item, item.folderId) }));
+  const foundSets = scopedSets.filter(({ item, path }) => matches(item, path));
+  const parents = new Map(scopedSets.map(entry => [entry.item.id, entry]));
   let remaining = Math.max(1, Number.isFinite(limit) ? Math.floor(limit) : 100);
   const take = items => { const selected = items.slice(0, remaining);remaining -= selected.length;return selected; };
-  return { subjects: take(foundSubjects), folders: take(foundFolders), sets: take(foundSets), total: foundSubjects.length + foundFolders.length + foundSets.length };
+  const results = { subjects: take(foundSubjects), folders: take(foundFolders), sets: take(foundSets), cards: [],
+    total: foundSubjects.length + foundFolders.length + foundSets.length };
+  for (const card of library.cards || []) {
+    const parent = parents.get(card.setId);
+    if (!parent || !matchesCard(card, words)) continue;
+    results.total++;
+    if (results.cards.length < remaining) {
+      results.cards.push({ item: card, path: [parent.path, parent.item.name].filter(Boolean).join(' / ') });
+    }
+  }
+  return results;
 }
 
 export function cardListPage(cards, query = '', limit = 100) {
   const words = searchable(query).trim().split(/\s+/).filter(Boolean);
-  const matches = words.length ? cards.filter(card => {
-    const text = searchable([card.front, card.back, card.frontExampleSentence, card.backExampleSentence].join(' '));
-    return words.every(word => text.includes(word));
-  }) : cards;
   const count = Math.max(1, Number.isFinite(limit) ? Math.floor(limit) : 100);
-  return { cards: matches.slice(0, count), total: matches.length };
+  if (!words.length) return { cards: cards.slice(0, count), total: cards.length };
+  const page = [];
+  let total = 0;
+  for (const card of cards) {
+    if (!matchesCard(card, words)) continue;
+    total++;
+    if (page.length < count) page.push(card);
+  }
+  return { cards: page, total };
 }

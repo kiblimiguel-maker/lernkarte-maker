@@ -2,7 +2,7 @@
 
 const assert = require('node:assert/strict');
 const { nextCardPosition, moveCardInOrder } = require('./model.js');
-const { normalizeLibrary, getLibrarySiblings, reorderLibraryItems, canMoveLibraryItem, moveLibraryItem, nextLibraryPosition, getFolderDescendantIds, createImportedCards, createCopiedCards, nextSetName, swapSetCardSides, recordCardAnswer, updateCardAnswer, createStudySession, getStudyResults, getStudyResult, getStudyCurrentIndex, getStudyCard, getNextStudyCardId, navigateStudySession, shuffleStudyCards, setStudyAnswer, getSetProgress, getLastFullRound, rememberFullRound, restoreLegacyRoundScores, resetSetProgress, summarizeResults, summarizeSession, nextUnratedIndex } = require('./model.js');
+const { normalizeLibrary, getLibrarySiblings, reorderLibraryItems, canMoveLibraryItem, moveLibraryItem, nextLibraryPosition, getFolderDescendantIds, createImportedCards, createCopiedCards, nextSetName, swapSetCardSides, lastAnswerWasMissed, recordCardAnswer, updateCardAnswer, createStudySession, getStudyResults, getStudyResult, getStudyCurrentIndex, getStudyCard, getNextStudyCardId, navigateStudySession, shuffleStudyCards, setStudyAnswer, getSetProgress, getLastFullRound, rememberFullRound, restoreLegacyRoundScores, resetSetProgress, summarizeResults, summarizeSession, nextUnratedIndex } = require('./model.js');
 
 assert.deepEqual(normalizeLibrary(null), { subjects: [], folders: [], sets: [], cards: [], recent: [], studySessions: {}, studyHistory: [] });
 const malformedCollections = normalizeLibrary({
@@ -50,6 +50,16 @@ assert.equal(nextUnratedIndex([true, false], 0), -1, 'a fully rated set has no u
 const completedSummary = summarizeSession({ id: 'session-1', setId: 'set-1', startedAt: '2026-10-05T12:00:00.000Z', cardIds: ['a', 'b'], results: [true, false] }, '2026-10-05T12:03:00.000Z');
 assert.deepEqual([completedSummary.cardCount, completedSummary.known, completedSummary.missed, completedSummary.percentage], [2, 1, 1, 50]);
 
+const latestAnswer = {};
+assert.equal(lastAnswerWasMissed(latestAnswer), false);
+recordCardAnswer(latestAnswer, true, '2026-11-27T09:00:00Z');
+recordCardAnswer(latestAnswer, false, '2026-11-27T10:00:00Z');
+assert.equal(lastAnswerWasMissed(latestAnswer), true, 'Read the latest rating even when the totals are tied.');
+updateCardAnswer(latestAnswer, false, true, '2026-11-27T10:01:00Z');
+assert.equal(lastAnswerWasMissed(latestAnswer), false, 'Correcting the answer removes it from exam practice.');
+assert.equal(lastAnswerWasMissed({ incorrectCount: 2 }), true, 'Older all-incorrect ratings are unambiguous.');
+assert.equal(lastAnswerWasMissed({ incorrectCount: 2, correctCount: 1 }), false, 'Ambiguous older totals cannot identify the last rating.');
+assert.equal(lastAnswerWasMissed({ ...latestAnswer, incorrectCount: 1 }), false, 'Older mistakes do not override a newer correct rating.');
 const roundSet = { id: 'set-1' };
 const roundCards = [{ id: 'a' }, { id: 'b' }];
 function finishRound(cardIds, results, isRetry = false) {

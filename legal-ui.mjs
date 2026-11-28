@@ -67,9 +67,44 @@ export function createLegalUI({ analytics = null, statisticsProvider = 'google',
   banner.className = 'consent-banner';
   banner.setAttribute('aria-labelledby','consent-banner-title');
   banner.hidden = true;
-  banner.innerHTML = `<div class="consent-banner-copy"><h2 id="consent-banner-title">Deine Privatsphäre</h2><p>Wir verwenden notwendige Technologien, damit Lernkarten Maker zuverlässig funktioniert. Mit deiner Zustimmung nutzen wir ${statisticsName} ${statisticsPurpose}. <a class="consent-privacy-link" href="#legal=privacy" data-legal-page="privacy">Datenschutzerklärung</a></p></div><div class="consent-banner-actions"><button type="button" class="quiet-button" data-consent-choice="accepted">Statistik erlauben</button><button type="button" class="quiet-button" data-consent-choice="necessary">Nur notwendige</button><button type="button" class="text-button" data-cookie-settings>Einstellungen</button></div><p class="legal-error" data-banner-error role="alert" hidden></p>`;
-  doc.body.append(banner);
+  const optionalStatistics = statisticsProvider === 'vercel'
+    ? 'zählt Vercel Web Analytics allgemeine App-Aufrufe'
+    : 'erfasst Google Analytics 4 allgemeine Aufrufe und die Nutzung von Funktionen';
+  banner.innerHTML = `
+    <div class="consent-banner-choice">
+      <div class="consent-banner-copy">
+        <h2 id="consent-banner-title">Deine Privatsphäre</h2>
+        <p>Für deine Anmeldung und Einstellungen verwendet Lernkarten Maker lokalen Speicher. Mit deiner Erlaubnis ${optionalStatistics}.</p>
+      </div>
+      <div class="consent-banner-actions">
+        <button type="button" class="quiet-button" data-consent-choice="necessary">Nur notwendige</button>
+        <button type="button" class="quiet-button" data-consent-choice="accepted">Statistik erlauben</button>
+      </div>
+      <div class="consent-banner-links">
+        <a class="consent-privacy-link" href="#legal=privacy" data-legal-page="privacy">Datenschutzerklärung</a>
+        <button type="button" data-cookie-settings>Cookie-Einstellungen</button>
+      </div>
+    </div>
+    <div class="consent-notice" hidden>
+      <p id="consent-notice-title">Nur notwendige Technologien sind aktiv.</p>
+      <button type="button" class="text-button" data-cookie-settings>Auswahl ändern</button>
+      <button type="button" class="icon-button" data-dismiss-cookie-notice aria-label="Hinweis schliessen">×</button>
+    </div>
+    <p class="legal-error" data-legal-error data-banner-error role="alert" hidden></p>`;
+  const authScreen = doc.getElementById('auth-screen');
+  const loginPanel = authScreen?.querySelector('.auth-login');
+  function placeBanner() {
+    const inline = loginPanel && !authScreen.hidden;
+    const parent = inline ? loginPanel : doc.body;
+    if (banner.parentNode === parent) return;
+    parent.insertBefore(banner, inline ? loginPanel.querySelector('.auth-preview') : null);
+    bannerSpace();
+  }
+  const authVisibility = loginPanel ? new win.MutationObserver(placeBanner) : null;
+  authVisibility?.observe(authScreen, { attributes: true, attributeFilter: ['hidden'] });
+  placeBanner();
   let page = null, busy = false, destroyed = false, opener = null;
+  let renderedCookieState;
   const available = () => analytics?.isAvailable?.() === true;
   const consent = () => analytics?.readConsent?.() || null;
   const setFooter = content => { footer.innerHTML = content; };
@@ -80,17 +115,25 @@ export function createLegalUI({ analytics = null, statisticsProvider = 'google',
     element.textContent=message; element.hidden=false;
   };
   function bannerSpace() {
-    const height=banner.hidden ? 0 : Math.ceil(banner.getBoundingClientRect().height)+16;
+    const floating = !banner.hidden && banner.parentNode === doc.body;
+    const height=floating ? Math.ceil(banner.getBoundingClientRect().height)+16 : 0;
     doc.documentElement.style.setProperty('--consent-banner-space',`${height}px`);
-    doc.body.toggleAttribute('data-consent-banner',!banner.hidden);
+    doc.body.toggleAttribute('data-consent-banner',floating);
   }
   const observer = typeof win.ResizeObserver === 'function' ? new win.ResizeObserver(bannerSpace) : null;
   observer?.observe(banner);
   function syncConsent() {
     if (destroyed) return;
-    banner.hidden=!(available()&&analytics?.shouldPrompt?.()!==false&&!consent());
+    const mode = analytics?.bannerMode?.();
+    const notice = mode === 'notice';
+    banner.classList.toggle('consent-banner--notice', notice);
+    banner.querySelector('.consent-banner-choice').hidden = notice;
+    banner.querySelector('.consent-notice').hidden = !notice;
+    banner.setAttribute('aria-labelledby', notice ? 'consent-notice-title' : 'consent-banner-title');
+    banner.hidden = !mode;
+    if (!mode) banner.querySelector('[data-banner-error]').hidden = true;
     bannerSpace();
-    if (page === 'cookies' && !busy) renderCookies();
+    if (page === 'cookies' && !busy) renderCookies(true);
   }
 
   function setRoute(next) {
@@ -113,7 +156,17 @@ export function createLegalUI({ analytics = null, statisticsProvider = 'google',
     const next=readLegalPage(win.location.hash);
     if(next===page)return;
     page=next;
-    if(!page){dialog.close();if(opener?.isConnected)opener.focus({preventScroll:true});opener=null;return;}
+    if(!page){
+      syncConsent();
+      dialog.close();
+      if (opener?.isConnected && opener.getClientRects().length) opener.focus({preventScroll:true});
+      else if (banner.contains(opener)) {
+        const target = authScreen && !authScreen.hidden ? '#google-sign-in' : '#navigation-toggle';
+        doc.querySelector(target)?.focus({preventScroll:true});
+      }
+      opener = null;
+      return;
+    }
     if(!dialog.open)opener=doc.activeElement;
     render();
     if(!dialog.open)dialog.showModal();
@@ -131,8 +184,11 @@ export function createLegalUI({ analytics = null, statisticsProvider = 'google',
     }
     body.innerHTML=`<p class="legal-version">Stand ${esc(document.date)} · Version ${esc(document.version)}</p>${renderSections(document.sections)}`;
   }
-  function renderCookies() {
+  function renderCookies(onlyIfChanged = false) {
     const ready=available(), current=consent();
+    const state = [ready, current?.choice, current?.updatedAt].join('|');
+    if (onlyIfChanged && state === renderedCookieState) return;
+    renderedCookieState = state;
     body.innerHTML=`<p class="legal-intro">Du entscheidest über freiwillige Nutzungsstatistiken. Deine Lernfunktionen bleiben auch ohne Analyse verfügbar.</p><section class="cookie-category"><div><h3>Notwendige Technologien</h3><p>Anmeldung, Sicherheit, Benutzersitzung, App-Einstellungen, Cookie-Auswahl und technisch notwendige Funktionen.</p></div><span class="cookie-required">Immer aktiv</span></section><section class="cookie-category"><label for="legal-analytics-enabled"><h3>Statistik und Analyse</h3><p>${statisticsName} ${statisticsPurpose}. Deine Lerninhalte bleiben ausserhalb der Messung.</p></label><input id="legal-analytics-enabled" type="checkbox" ${ready&&current?.choice==='accepted'?'checked':''} ${ready?'':'disabled data-permanent-disabled="true"'} aria-describedby="legal-analytics-note"></section><p class="field-hint" id="legal-analytics-note">${ready?'Standardmässig deaktiviert. Du kannst deine Auswahl jederzeit ändern.':'Optionale Analyse ist in dieser Umgebung nicht verfügbar.'}</p>${current?`<p class="legal-version">Letzte Auswahl: ${esc(dateLabel(current.updatedAt))}</p>`:''}`;
     setFooter(`${closeButton}<button type="button" class="quiet-button" data-consent-choice="necessary">Nur notwendige</button>${ready?'<button type="button" class="quiet-button" data-cookie-save>Auswahl speichern</button>':''}`);
   }
@@ -208,6 +264,7 @@ export function createLegalUI({ analytics = null, statisticsProvider = 'google',
   const click=event=>{
     const target=event.target.closest('button');if(!target)return;
     if(target.hasAttribute('data-legal-close'))close();
+    else if(target.hasAttribute('data-dismiss-cookie-notice'))analytics?.dismissNotice?.();
     else if(target.dataset.consentChoice)void choose(target.dataset.consentChoice,target.closest('.consent-banner')||body);
     else if(target.hasAttribute('data-cookie-settings'))open('cookies');
     else if(target.hasAttribute('data-cookie-save'))void choose(body.querySelector('#legal-analytics-enabled').checked?'accepted':'necessary');
@@ -220,6 +277,6 @@ export function createLegalUI({ analytics = null, statisticsProvider = 'google',
   syncConsent();syncRoute();
   return {
     open,close,
-    destroy(){destroyed=true;unsubscribe?.();observer?.disconnect();win.removeEventListener('hashchange',syncRoute);doc.removeEventListener('click',externalClick);dialog.remove();banner.remove();doc.body.removeAttribute('data-consent-banner');doc.documentElement.style.removeProperty('--consent-banner-space');}
+    destroy(){destroyed=true;unsubscribe?.();observer?.disconnect();authVisibility?.disconnect();win.removeEventListener('hashchange',syncRoute);doc.removeEventListener('click',externalClick);dialog.remove();banner.remove();doc.body.removeAttribute('data-consent-banner');doc.documentElement.style.removeProperty('--consent-banner-space');}
   };
 }

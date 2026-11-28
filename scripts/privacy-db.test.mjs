@@ -25,7 +25,7 @@ for (const fullHistory of [false, true]) {
       if (!fullHistory && name === '20261116064041_preserve_shared_study_settings.sql') continue;
       await db.exec(await readFile(new URL(`supabase/migrations/${name}`, root), 'utf8'));
     }
-    const checks = ['exam-sharing.sql', 'account-deletion.sql'];
+    const checks = ['card-changes.sql', 'library-organisation.sql', 'exam-sharing.sql', 'account-deletion.sql'];
     if (fullHistory) checks.unshift('library-sharing.sql');
     for (const name of checks) {
       await db.exec(await readFile(new URL(`supabase/checks/${name}`, root), 'utf8'));

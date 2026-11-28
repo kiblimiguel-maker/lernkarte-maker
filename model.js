@@ -324,13 +324,28 @@
     return swapped;
   }
 
+  const missedReviewDelay = 10 * 60_000;
+  const knownReviewDelay = 24 * 60 * 60_000;
+
+  function updateReviewTime(card, known, timestamp) {
+    card.lastReviewedAt = timestamp;
+    card.nextReviewAt = new Date(new Date(timestamp).getTime() + (known ? knownReviewDelay : missedReviewDelay)).toISOString();
+    card.updatedAt = timestamp;
+  }
+
+  function lastAnswerWasMissed(card) {
+    if (!count(card.incorrectCount)) return false;
+    if (!count(card.correctCount)) return true;
+    // Existing cards encode their most recent answer in the scheduled interval.
+    // Mixed totals without usable dates cannot identify the last answer.
+    return Date.parse(card.nextReviewAt) - Date.parse(card.lastReviewedAt) === missedReviewDelay;
+  }
+
   function recordCardAnswer(card, known, timestamp) {
     if (known) card.correctCount = count(card.correctCount) + 1;
     else card.incorrectCount = count(card.incorrectCount) + 1;
     card.attemptCount = count(card.attemptCount) + 1;
-    card.lastReviewedAt = timestamp;
-    card.nextReviewAt = new Date(new Date(timestamp).getTime() + (known ? 86400000 : 600000)).toISOString();
-    card.updatedAt = timestamp;
+    updateReviewTime(card, known, timestamp);
     return card;
   }
 
@@ -340,9 +355,7 @@
       return;
     }
     if (previousAnswer === nextAnswer) {
-      card.lastReviewedAt = timestamp;
-      card.nextReviewAt = new Date(new Date(timestamp).getTime() + (nextAnswer ? 86400000 : 600000)).toISOString();
-      card.updatedAt = timestamp;
+      updateReviewTime(card, nextAnswer, timestamp);
       return;
     }
     if (previousAnswer) card.correctCount = Math.max(0, count(card.correctCount) - 1);
@@ -350,32 +363,47 @@
     if (nextAnswer) card.correctCount = count(card.correctCount) + 1;
     else card.incorrectCount = count(card.incorrectCount) + 1;
     card.attemptCount = Math.max(count(card.attemptCount), card.correctCount + card.incorrectCount);
-    card.lastReviewedAt = timestamp;
-    card.nextReviewAt = new Date(new Date(timestamp).getTime() + (nextAnswer ? 86400000 : 600000)).toISOString();
-    card.updatedAt = timestamp;
+    updateReviewTime(card, nextAnswer, timestamp);
   }
 
   function createStudySession(cards, saved = null) {
     const byId = new Map(records(cards).filter(card => typeof card.id === 'string').map(card => [card.id, card]));
     const savedIds = Array.isArray(saved?.cardIds) ? [...new Set(saved.cardIds.filter(id => byId.has(id)))] : [];
+    // A saved retry whose entire subset was deleted no longer represents a round.
+    if (Array.isArray(saved?.cardIds) && saved.cardIds.length && !savedIds.length) saved = null;
     const cardIds = savedIds.length ? savedIds : [...byId.keys()];
-    const validIds = new Set(cardIds);
+    const indexByCardId = new Map(cardIds.map((id, index) => [id, index]));
     const orderedCards = cardIds.map(id => byId.get(id));
     const resultsByCardId = Object.create(null);
     for (const [cardId, result] of Object.entries(saved?.resultsByCardId || {})) {
-      if (validIds.has(cardId) && (result === null || typeof result === 'boolean')) resultsByCardId[cardId] = result;
+      if (indexByCardId.has(cardId) && (result === null || typeof result === 'boolean')) resultsByCardId[cardId] = result;
     }
     if (Array.isArray(saved?.results) && Array.isArray(saved?.cardIds)) saved.cardIds.forEach((cardId, index) => {
-      if (validIds.has(cardId) && resultsByCardId[cardId] === undefined && (saved.results[index] === null || typeof saved.results[index] === 'boolean')) resultsByCardId[cardId] = saved.results[index];
+      if (indexByCardId.has(cardId) && resultsByCardId[cardId] === undefined && (saved.results[index] === null || typeof saved.results[index] === 'boolean')) resultsByCardId[cardId] = saved.results[index];
     });
-    for (const cardId of cardIds) if (resultsByCardId[cardId] === undefined) resultsByCardId[cardId] = null;
+    let knownCount = 0, missedCount = 0;
+    for (const cardId of cardIds) {
+      if (resultsByCardId[cardId] === true) knownCount++;
+      else if (resultsByCardId[cardId] === false) missedCount++;
+      else resultsByCardId[cardId] = null;
+    }
 
     const fallbackIndex = Number.isInteger(saved?.index) ? Math.max(0, Math.min(saved.index, cardIds.length - 1)) : 0;
     const fallbackCurrent = cardIds[fallbackIndex];
-    const savedHistory = Array.isArray(saved?.historyCardIds) ? saved.historyCardIds.filter(id => validIds.has(id)) : [];
-    const savedCurrent = typeof saved?.currentCardId === 'string' && validIds.has(saved.currentCardId) ? saved.currentCardId : fallbackCurrent;
+    const originalHistory = Array.isArray(saved?.historyCardIds) ? saved.historyCardIds : [];
+    const cursor = Number.isInteger(saved?.historyIndex) ? Math.max(0, saved.historyIndex) : originalHistory.length - 1;
+    const savedHistory = [];
+    let restoredCursor = 0;
+    for (let i = 0; i < originalHistory.length; i++) {
+      const id = originalHistory[i];
+      if (!indexByCardId.has(id)) continue;
+      // Removing a card between two visits can make both neighbours identical.
+      if (savedHistory.at(-1) !== id) savedHistory.push(id);
+      if (i <= cursor) restoredCursor = savedHistory.length - 1;
+    }
+    const savedCurrent = typeof saved?.currentCardId === 'string' && indexByCardId.has(saved.currentCardId) ? saved.currentCardId : fallbackCurrent;
     let historyCardIds = savedHistory.length ? savedHistory : cardIds.slice(0, fallbackIndex + 1);
-    let historyIndex = Number.isInteger(saved?.historyIndex) ? Math.max(0, Math.min(saved.historyIndex, historyCardIds.length - 1)) : historyCardIds.length - 1;
+    let historyIndex = savedHistory.length ? restoredCursor : historyCardIds.length - 1;
     if (!savedHistory.length) {
       const visited = new Set(historyCardIds);
       for (const cardId of cardIds) if (resultsByCardId[cardId] !== null && !visited.has(cardId)) {
@@ -393,17 +421,29 @@
       }
     }
     const currentCardId = historyCardIds[historyIndex];
+    const shuffleRemainingCardIds = Array.isArray(saved?.shuffleRemainingCardIds)
+      ? [...new Set(saved.shuffleRemainingCardIds.filter(id => indexByCardId.has(id)))]
+      : [];
+    // Deleting a card can make the last history entry and the next mixed card
+    // adjacent duplicates. A later occurrence still belongs to the mixed round.
+    if (shuffleRemainingCardIds.length && shuffleRemainingCardIds[0] === historyCardIds.at(-1)) {
+      shuffleRemainingCardIds.shift();
+    }
     return {
       id: saved?.id,
       setId: saved?.setId,
       startedAt: saved?.startedAt,
       isRetry: saved?.isRetry === true,
       cards: orderedCards,
+      indexByCardId,
+      visitedCardIds: new Set(historyCardIds),
+      knownCount,
+      missedCount,
       resultsByCardId,
       historyCardIds,
       historyIndex,
       currentCardId: currentCardId || cardIds[0] || null,
-      shuffleRemainingCardIds: Array.isArray(saved?.shuffleRemainingCardIds) ? [...new Set(saved.shuffleRemainingCardIds.filter(id => validIds.has(id) && (historyIndex < historyCardIds.length - 1 || id !== currentCardId)))] : []
+      shuffleRemainingCardIds
     };
   }
 
@@ -411,48 +451,69 @@
     return session.cards.map(card => session.resultsByCardId[card.id] ?? null);
   }
 
+  function serializeStudySession(session) {
+    // IDs and answers use the same order. Older clients can restore this format too.
+    return {
+      id: session.id, setId: session.setId, startedAt: session.startedAt, isRetry: session.isRetry,
+      cardIds: session.cards.map(card => card.id), results: getStudyResults(session),
+      historyCardIds: session.historyCardIds.slice(), historyIndex: session.historyIndex,
+      currentCardId: session.currentCardId, index: Math.max(0, getStudyCurrentIndex(session)),
+      shuffleRemainingCardIds: session.shuffleRemainingCardIds.slice(),
+      missedCardIdsCopied: [...(session.missedCardIdsCopied || [])]
+    };
+  }
+
   function getStudyResult(session, cardId = session?.currentCardId) {
     return session && cardId ? (session.resultsByCardId[cardId] ?? null) : null;
   }
 
   function getStudyCurrentIndex(session) {
-    return session?.cards.findIndex(card => card.id === session.currentCardId) ?? -1;
+    return session?.indexByCardId.get(session.currentCardId) ?? -1;
   }
 
   function getStudyCard(session, cardId = session?.currentCardId) {
-    return session?.cards.find(card => card.id === cardId) || null;
+    return session?.cards[session.indexByCardId.get(cardId)] ?? null;
   }
 
   function getNextStudyCardId(session) {
     if (!session?.cards.length) return null;
     if (session.historyIndex < session.historyCardIds.length - 1) return session.historyCardIds[session.historyIndex + 1];
     if (session.shuffleRemainingCardIds?.length) return session.shuffleRemainingCardIds[0];
+    if (session.knownCount + session.missedCount === session.cards.length) return null;
     const currentIndex = getStudyCurrentIndex(session);
-    const visited = new Set(session.historyCardIds);
-    for (const [cardId, result] of Object.entries(session.resultsByCardId)) if (result !== null) visited.add(cardId);
-    const findNext = predicate => {
-      for (let step = 1; step < session.cards.length; step++) {
-        const card = session.cards[(currentIndex + step + session.cards.length) % session.cards.length];
-        if (getStudyResult(session, card.id) === null && predicate(card.id)) return card.id;
-      }
-      return null;
-    };
-    return findNext(cardId => !visited.has(cardId)) || findNext(() => true);
+    const allVisited = session.visitedCardIds.size === session.cards.length;
+    let firstSkipped = null;
+    for (let step = 1; step < session.cards.length; step++) {
+      const cardId = session.cards[(currentIndex + step) % session.cards.length].id;
+      if (getStudyResult(session, cardId) !== null) continue;
+      if (allVisited || !session.visitedCardIds.has(cardId)) return cardId;
+      firstSkipped ??= cardId;
+    }
+    return firstSkipped;
+  }
+
+  function appendStudyVisit(session, cardId) {
+    if (session.historyIndex < session.historyCardIds.length - 1) {
+      session.historyCardIds.length = session.historyIndex + 1;
+      session.visitedCardIds = new Set(session.historyCardIds);
+    }
+    session.historyCardIds.push(cardId);
+    session.visitedCardIds.add(cardId);
+    session.historyIndex = session.historyCardIds.length - 1;
+    session.currentCardId = cardId;
   }
 
   function visitStudyCard(session, cardId) {
-    if (!session || !session.cards.some(card => card.id === cardId) || cardId === session.currentCardId) return false;
+    if (!session?.indexByCardId.has(cardId) || cardId === session.currentCardId) return false;
     const forwardIndex = session.historyCardIds.indexOf(cardId, session.historyIndex + 1);
     if (forwardIndex >= 0) {
       session.historyIndex = forwardIndex;
       session.currentCardId = cardId;
       return true;
     }
-    session.shuffleRemainingCardIds = (session.shuffleRemainingCardIds || []).filter(id => id !== cardId);
-    session.historyCardIds = session.historyCardIds.slice(0, session.historyIndex + 1);
-    session.historyCardIds.push(cardId);
-    session.historyIndex = session.historyCardIds.length - 1;
-    session.currentCardId = cardId;
+    const scheduled = session.shuffleRemainingCardIds.indexOf(cardId);
+    if (scheduled !== -1) session.shuffleRemainingCardIds.splice(scheduled, 1);
+    appendStudyVisit(session, cardId);
     return true;
   }
 
@@ -482,20 +543,24 @@
       [shuffled[0], shuffled[target]] = [shuffled[target], shuffled[0]];
     }
     session.cards = shuffled;
+    shuffled.forEach((card, index) => session.indexByCardId.set(card.id, index));
     session.shuffleRemainingCardIds = shuffled.slice(1).map(card => card.id);
     // Start a new forward branch, retaining the path back to the current card.
     // Every card in the replaced branch also belongs to the new full schedule.
-    session.historyCardIds = session.historyCardIds.slice(0, session.historyIndex + 1);
-    session.historyCardIds.push(shuffled[0].id);
-    session.historyIndex = session.historyCardIds.length - 1;
-    session.currentCardId = shuffled[0].id;
+    appendStudyVisit(session, shuffled[0].id);
     return true;
   }
 
   function setStudyAnswer(session, cardId, answer) {
     if (!session?.resultsByCardId || !Object.hasOwn(session.resultsByCardId, cardId) || typeof answer !== 'boolean') return null;
     const previous = session.resultsByCardId[cardId];
-    session.resultsByCardId[cardId] = answer;
+    if (previous !== answer) {
+      if (previous === true) session.knownCount--;
+      if (previous === false) session.missedCount--;
+      if (answer) session.knownCount++;
+      else session.missedCount++;
+      session.resultsByCardId[cardId] = answer;
+    }
     return previous;
   }
 
@@ -611,7 +676,7 @@
     return -1;
   }
 
-  const api = { normalizeLibrary, getLibrarySiblings, reorderLibraryItems, canMoveLibraryItem, moveLibraryItem, nextLibraryPosition, getFolderDescendantIds, nextCardPosition, moveCardInOrder, createImportedCards, createCopiedCards, nextSetName, swapSetCardSides, recordCardAnswer, updateCardAnswer, createStudySession, getStudyResults, getStudyResult, getStudyCurrentIndex, getStudyCard, getNextStudyCardId, visitStudyCard, navigateStudySession, shuffleStudyCards, setStudyAnswer, getCardProgress, getSetProgress, getLastFullRound, rememberFullRound, restoreLegacyRoundScores, resetSetProgress, summarizeResults, summarizeSession, nextUnratedIndex };
+  const api = { normalizeLibrary, getLibrarySiblings, reorderLibraryItems, canMoveLibraryItem, moveLibraryItem, nextLibraryPosition, getFolderDescendantIds, nextCardPosition, moveCardInOrder, createImportedCards, createCopiedCards, nextSetName, swapSetCardSides, lastAnswerWasMissed, recordCardAnswer, updateCardAnswer, createStudySession, serializeStudySession, getStudyResults, getStudyResult, getStudyCurrentIndex, getStudyCard, getNextStudyCardId, visitStudyCard, navigateStudySession, shuffleStudyCards, setStudyAnswer, getCardProgress, getSetProgress, getLastFullRound, rememberFullRound, restoreLegacyRoundScores, resetSetProgress, summarizeResults, summarizeSession, nextUnratedIndex };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (typeof globalThis !== 'undefined') globalThis.WortwerkModel = api;
 })();

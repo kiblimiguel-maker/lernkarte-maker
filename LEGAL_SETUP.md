@@ -23,6 +23,8 @@
 
 ## 4. Freiwillige Besuchsstatistik mit Vercel Web Analytics
 
+Nach «Nur notwendige» zeigt die öffentliche Startseite beim nächsten Öffnen einen schliessbaren Statushinweis. Nach einer Zustimmung merkt sich der Browser separat die Banneranzeige im lokalen Speicher. Die Messberechtigung läuft weiterhin nach 180 Tagen ab. Danach kann sie nur über die Cookie-Einstellungen erneut erteilt werden. Ein Widerruf entfernt die Anzeigeeinstellung.
+
 1. Aktiviere **Analytics** im bestehenden Vercel-Projekt, falls der Dienst dort noch ausgeschaltet ist. Hobby umfasst bis zu 50’000 Ereignisse pro Monat und einen Berichtszeitraum von einem Monat. Die Statistik dieses Projekts verwendet allgemeine Aufrufe der App. Dafür ist kein kostenpflichtiges Add-on nötig. Bei Pro können je nach Verbrauch Kosten anfallen. Die Berichtsfrist ist von der Tageskennung und der tatsächlichen Speicherfrist bei Vercel zu unterscheiden. [Vercel zum Einrichten](https://vercel.com/docs/analytics/quickstart) · [Tarife und Berichtszeitraum](https://vercel.com/docs/analytics/limits-and-pricing)
 2. Prüfe den Netzwerkverkehr auf `https://lernkarte-maker.vercel.app/` vor der Auswahl, nach dem Ablehnen, nach der Zustimmung und nach dem Widerruf in den **Cookie-Einstellungen**. Nach Zustimmung ist pro Laden höchstens ein allgemeiner Seitenaufruf vorgesehen. Konto- und Lerndaten, private Links, URL-Parameter, Verweise mit zusätzlichen Pfaden oder Parametern und einzelne App-Aktionen bleiben ausserhalb der Statistik. Kontrolliere zusätzlich, dass Vorschauen und private Aufrufe keine Messung auslösen. [Vercel zu Datenschutz](https://vercel.com/docs/analytics/privacy-policy) · [Vercel zur Datenbereinigung](https://vercel.com/docs/analytics/redacting-sensitive-data)
 

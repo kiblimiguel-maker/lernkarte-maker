@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import { examDateStatus, examSets, isExam, sortedExams, validateExamInput, planExamSubjectChange } from './exams.mjs';
+import { examDateStatus, examSets, reorderedExamSetIds, isExam, sortedExams, validateExamInput, planExamSubjectChange } from './exams.mjs';
 import { renderExamsPage, renderExamDetail } from './exam-view.mjs';
 import { toLibraryRows } from './repository-core.mjs';
 const model = createRequire(import.meta.url)('./model.js');
@@ -27,6 +27,20 @@ assert.equal(examSets(library, exam)[0], library.sets[0], 'links retain existing
 assert.deepEqual(examSets(library, { kind: 'folder', id: 'exam', subjectId: 'fr' }), []);
 assert.deepEqual(examSets({}, exam), []);
 assert.deepEqual(library, original, 'collecting exam material must not move or copy any original');
+
+const members = examSets(library, exam);
+const order = reorderedExamSetIds(members, 'nested', 'direct', 'before');
+assert.deepEqual(order, ['linked', 'nested', 'direct', 'foreign']);
+assert.equal(reorderedExamSetIds(members, 'nested', 'foreign', 'after'), null, 'Skip no-op drops.');
+assert.equal(reorderedExamSetIds(members, 'unselected', 'linked', 'before'), null);
+assert.equal(reorderedExamSetIds(members, 'linked', 'missing', 'after'), null);
+const orderedExam = {...exam, examSetOrder: [...order, 'nested', 'missing', 'unselected']};
+assert.deepEqual(examSets(library,orderedExam).map(item=>item.id), order, 'Ordering cannot add unrelated or duplicate decks.');
+assert.deepEqual(examSets(library,{...orderedExam,examSetIds:['linked']}).map(item=>item.id), ['linked','nested','direct'], 'A removed link disappears.');
+const movedOut = {...library,sets:library.sets.map(item=>item.id==='nested'?{...item,folderId:null}:item)};
+assert.ok(!examSets(movedOut,orderedExam).some(item=>item.id==='nested'), 'A saved order cannot retain a contained deck moved out of the exam.');
+assert.deepEqual(examSets(library,{...exam,examSetOrder:['nested']}).map(item=>item.id), ['nested', 'linked', 'direct', 'foreign'], 'New material follows previously ordered decks.');
+assert.deepEqual(library, original, 'Sorting test links preserves the underlying library.');
 
 const cyclic = structuredClone(library);
 cyclic.folders[1].parentId = 'deep';

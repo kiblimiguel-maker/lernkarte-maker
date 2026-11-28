@@ -1,5 +1,6 @@
 const productionOrigin = 'https://lernkarte-maker.vercel.app';
 const choiceCookie = '__Host-lernkarten-vercel-choice';
+const hideBannerKey = 'lernkarten-vercel-hide-banner-v1';
 const maxAgeSeconds = 180 * 86_400;
 
 function isPublicEntry(location) {
@@ -27,6 +28,7 @@ export function createVercelAnalytics({
   let stopped = false;
   let requested = false;
   let loading = false;
+  let bannerDismissed = false;
 
   function readConsent() {
     if (!available || stopped) return null;
@@ -51,6 +53,25 @@ export function createVercelAnalytics({
   }
 
   const mayCount = () => publicEntry && isPublicEntry(win.location) && readConsent()?.choice === 'accepted';
+
+  // This local display preference never authorises or renews a pageview.
+  function hideFutureBanners(hide) {
+    try {
+      if (hide) win.localStorage.setItem(hideBannerKey, '1');
+      else win.localStorage.removeItem(hideBannerKey);
+    } catch { /* The consent cookie still works when local storage is unavailable. */ }
+  }
+
+  function bannerMode() {
+    if (!publicEntry || !isPublicEntry(win.location) || bannerDismissed || stopped) return null;
+    const choice = readConsent()?.choice;
+    if (choice === 'necessary') return 'notice';
+    if (choice === 'accepted') return null;
+    try {
+      if (win.localStorage.getItem(hideBannerKey) === '1') return null;
+    } catch { /* An unknown preference uses the first-visit banner. */ }
+    return 'choice';
+  }
 
   function hasAttribution() {
     // The Vercel script can add legacy identify/group data from its own storage.
@@ -93,20 +114,36 @@ export function createVercelAnalytics({
     const saved = writeChoice(`${choice}.${Date.now()}`, maxAgeSeconds) ||
       (choice === 'necessary' && writeChoice('', 0));
     stopped = !saved;
-    if (saved) sync();
+    if (saved) {
+      bannerDismissed = true;
+      hideFutureBanners(choice === 'accepted');
+      sync();
+    }
     return saved;
   }
 
   if (available) {
+    if (readConsent()?.choice === 'accepted') hideFutureBanners(true);
     win.addEventListener('hashchange', sync);
-    win.addEventListener('pageshow', sync);
+    win.addEventListener('pageshow', event => {
+      if (event.persisted) bannerDismissed = false;
+      sync();
+    });
     win.addEventListener('focus', sync);
+    win.addEventListener('storage', event => {
+      if (event.key === hideBannerKey || event.key === null) sync();
+    });
     void countEntry();
   }
 
   return {
     isAvailable: () => available,
-    shouldPrompt: () => publicEntry && isPublicEntry(win.location) && !readConsent(),
+    bannerMode,
+    dismissNotice() {
+      if (bannerMode() !== 'notice') return;
+      bannerDismissed = true;
+      sync();
+    },
     readConsent,
     consent,
     revoke: () => consent('necessary'),

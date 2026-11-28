@@ -30,7 +30,7 @@ import {legalConfig} from '/legal-config.mjs';
 const fixtureConfig = new URL(location.href).searchParams.has('contacts')
   ? {...legalConfig, supportEmail:'${supportEmail}', privacyEmail:'${privacyEmail}'}
   : {...legalConfig, supportEmail:'', privacyEmail:'', operator:{...legalConfig.operator,email:''}};
-window.__analytics={available:false,current:null,listeners:[],calls:[],isAvailable(){return this.available},readConsent(){return this.current},subscribe(callback){this.listeners.push(callback);return()=>{}},consent(choice){this.calls.push(choice);this.current={choice,version:'test',updatedAt:'2026-11-25T12:00:00Z'};this.listeners.forEach(callback=>callback())},revoke(){this.calls.push('revoked');this.current={choice:'necessary',version:'test',updatedAt:'2026-11-25T12:00:00Z'};this.listeners.forEach(callback=>callback())}};
+window.__analytics={available:false,current:null,listeners:[],calls:[],isAvailable(){return this.available},bannerMode(){return this.available&&!this.current?'choice':null},readConsent(){return this.current},subscribe(callback){this.listeners.push(callback);return()=>{}},consent(choice){this.calls.push(choice);this.current={choice,version:'test',updatedAt:'2026-11-25T12:00:00Z'};this.listeners.forEach(callback=>callback())},revoke(){this.calls.push('revoked');this.current={choice:'necessary',version:'test',updatedAt:'2026-11-25T12:00:00Z'};this.listeners.forEach(callback=>callback())}};
 window.__legal = createLegalUI({config:fixtureConfig, analytics:window.__analytics});
 document.getElementById('underlying').onclick=()=>document.body.dataset.used='true';
 </script></body></html>`;
@@ -83,6 +83,30 @@ async function verify(browser,origin,engine,viewport,colorScheme,reduced){
       await page.locator('#legal-dialog').waitFor({state:'hidden'});
     }
     assert.equal(await page.locator('.consent-banner').isVisible(),false,'Public sign-in supports every legal link without activating analytics.');
+    // Exercise the actual sign-in layout with an eligible first visit and no analytics SDK.
+    const login = await context.newPage();
+    await login.addInitScript(scheme => localStorage.setItem('lernkarten-appearance-v1', scheme), colorScheme);
+    await login.route('**/vercel-analytics.mjs*', route => route.fulfill({
+      contentType: 'text/javascript',
+      body: "export function createVercelAnalytics(){return {isAvailable:()=>true,bannerMode:()=>'choice',readConsent:()=>null,subscribe:()=>()=>{}}}"
+    }));
+    await login.goto(origin);
+    const inlineBanner = login.locator('#auth-screen .consent-banner');
+    await inlineBanner.waitFor();
+    const loginPanel = await inlineBanner.boundingBox();
+    const signIn = await login.locator('#google-sign-in').boundingBox();
+    assert.equal(await login.locator('html').getAttribute('data-appearance'), colorScheme);
+    assert.ok(signIn.y + signIn.height <= loginPanel.y + 1, 'The banner has its own space below sign-in.');
+    assert.ok(loginPanel.x >= 0 && loginPanel.x + loginPanel.width <= viewport.width + 1);
+    if (viewport.width <= 680) {
+      const preview = await login.locator('.auth-preview').boundingBox();
+      assert.ok(loginPanel.y + loginPanel.height <= preview.y + 1, 'Card preview follows the banner on phones.');
+    }
+    if (process.env.QA_SCREENSHOT_DIR) {
+      await mkdir(process.env.QA_SCREENSHOT_DIR, {recursive:true});
+      await login.screenshot({path:resolve(process.env.QA_SCREENSHOT_DIR,`login-${engine}-${viewport.width}-banner.png`),animations:'disabled'});
+    }
+    await login.close();
     await page.goto(`${origin}/#share=${token}`);
     await page.locator('#shared-library-report').click();
     await page.locator('#legal-dialog[open]').waitFor();
@@ -111,11 +135,19 @@ async function verify(browser,origin,engine,viewport,colorScheme,reduced){
     assert.deepEqual(await page.evaluate(()=>window.__analytics.calls), [], 'Reading the privacy notice does not consent.');
     await close();
     const yes=await page.locator('.consent-banner [data-consent-choice="accepted"]').boundingBox(),no=await page.locator('.consent-banner [data-consent-choice="necessary"]').boundingBox();
+    const panel = await page.locator('.consent-banner').boundingBox();
+    assert.ok(panel.x >= 0 && panel.y >= 0 && panel.x + panel.width <= viewport.width + 1 && panel.y + panel.height <= viewport.height + 1);
+    for (const box of [yes,no]) assert.ok(box.x >= panel.x && box.x + box.width <= panel.x + panel.width + 1 && box.y >= panel.y && box.y + box.height <= panel.y + panel.height + 1, 'Both choices are fully visible.');
+    assert.ok(Math.abs(yes.y - no.y) <= 1, 'The two choices share a row on supported viewports.');
+    await screenshot('banner');
     assert.ok(Math.abs(yes.width-no.width)<=1&&Math.abs(yes.height-no.height)<=1,'Accept and reject remain equal controls.');
     await page.locator('#underlying').click();assert.equal(await page.locator('body').getAttribute('data-used'),'true','The banner does not open a blocking dialog.');
     await page.locator('.consent-banner [data-consent-choice="accepted"]').click();await page.locator('.consent-banner').waitFor({state:'hidden'});
     assert.deepEqual(await page.evaluate(()=>window.__analytics.calls),['accepted']);
-    await open('cookies');assert.equal(await page.locator('#legal-analytics-enabled').isChecked(),true);await page.locator('#legal-analytics-enabled').uncheck();await page.locator('[data-cookie-save]').click();
+    await open('cookies');assert.equal(await page.locator('#legal-analytics-enabled').isChecked(),true);await page.locator('#legal-analytics-enabled').uncheck();
+    await page.evaluate(() => window.__analytics.listeners.forEach(notify => notify()));
+    assert.equal(await page.locator('#legal-analytics-enabled').isChecked(), false, 'An unchanged consent notification preserves the pending edit.');
+    await page.locator('[data-cookie-save]').click();
     assert.deepEqual(await page.evaluate(()=>window.__analytics.calls),['accepted','revoked'],'Revocation does not double-save through a fallback.');await screenshot('cookies');await close();
     await page.evaluate(() => {
       const analytics = window.__analytics;

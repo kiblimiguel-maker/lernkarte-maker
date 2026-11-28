@@ -33,7 +33,7 @@ const library = {
 };
 const originalLibrary = structuredClone(library);
 const ids = entries => entries.map(({ item }) => item.id);
-assert.deepEqual(searchLibrary(library, ''), { subjects: [], folders: [], sets: [], total: 0 });
+assert.deepEqual(searchLibrary(library, ''), { subjects: [], folders: [], sets: [], cards: [], total: 0 });
 assert.deepEqual(ids(searchLibrary(library, 'FRANCAIS').subjects), ['fr']);
 assert.equal(searchLibrary(library, 'vocabulaire').total, 0, 'legacy subject descriptions are excluded from search');
 assert.equal(searchLibrary(library, 'gebaude').total, 0, 'legacy stack descriptions are excluded from search');
@@ -49,6 +49,29 @@ assert.equal(searchLibrary(library, 'francais', { limit: 1 }).total, 8, 'bounded
 assert.equal(searchLibrary(library, 'francais', { limit: 1 }).subjects.length, 1);
 assert.equal(searchLibrary(library, 'francais', { limit: 1 }).sets.length, 0);
 assert.deepEqual(library, originalLibrary, 'search never modifies records, sort order or parent relationships');
+
+const twoSubjects = { ...library, cards: [
+  { id:'one', setId:'deep', front:'anziehen', back:'vêtir', backExampleSentence:'Elle se vêt pour sortir.' },
+  { id:'two', setId:'other', front:'das Kleid', back:'le vêtement', frontExampleSentence:'Ein Kleid wie im Märchen.' },
+  { id:'three', setId:'science-set', front:'Gewand', back:'vêtement' },
+  { id:'orphan', setId:'deleted', front:'vêtir', back:'' }
+] };
+const verb = searchLibrary(twoSubjects, 'VETIR');
+assert.deepEqual(ids(verb.cards), ['one']);
+assert.equal(verb.cards[0].path, 'Français / Unité 1 / Grammaire / Verbes');
+assert.deepEqual(ids(searchLibrary(twoSubjects, 'elle sortir').cards), ['one'], 'Find example sentences on the back.');
+assert.deepEqual(ids(searchLibrary(twoSubjects, 'marchen').cards), ['two'], 'Find example sentences on the front.');
+assert.deepEqual(ids(searchLibrary(twoSubjects, 'vet', { subjectId:'fr', folderId:'unit' }).cards), ['one']);
+assert.deepEqual(ids(searchLibrary(twoSubjects, 'vet', { setIds:['science-set'] }).cards), ['three']);
+assert.equal(searchLibrary(twoSubjects, 'vet', { limit:1 }).total, 3);
+assert.equal(searchLibrary(twoSubjects, 'vet', { limit:1 }).cards.length, 1);
+twoSubjects.cards[0].back = 'porter';
+assert.equal(searchLibrary(twoSubjects, 'vetir').total, 0, 'An in-place edit immediately removes outdated matches.');
+assert.deepEqual(ids(searchLibrary(twoSubjects, 'porter').cards), ['one']);
+const bigDecks = { subjects:[], folders:[], sets:[{ id:'a', name:'Erster Stapel' },{ id:'b', name:'Zweiter Stapel' }], cards };
+assert.equal(searchLibrary(bigDecks, 'chateau').cards.length, 100);
+assert.equal(searchLibrary(bigDecks, 'chateau').total, 50000);
+assert.equal(searchLibrary(bigDecks, 'Begriff 49999').cards[0].item.id,'49999');
 
 const cyclic = { subjects: library.subjects, folders: [{ id: 'a', subjectId: 'fr', name: 'A', parentId: 'b' }, { id: 'b', subjectId: 'fr', name: 'B', parentId: 'a' }], sets: [{ id: 'cycle', subjectId: 'fr', folderId: 'a', name: 'Cycle' }] };
 assert.deepEqual(ids(searchLibrary(cyclic, 'cycle', { subjectId: 'fr', folderId: 'a' }).sets), ['cycle'], 'malformed parent cycles terminate safely');

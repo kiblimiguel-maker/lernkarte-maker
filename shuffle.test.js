@@ -2,7 +2,7 @@
 
 const assert = require('node:assert/strict');
 const {
-  createStudySession, shuffleStudyCards, getStudyCard, getStudyResult,
+  createStudySession, serializeStudySession, shuffleStudyCards, getStudyCard, getStudyResult,
   getStudyResults, getStudyCurrentIndex, getNextStudyCardId,
   navigateStudySession, setStudyAnswer, updateCardAnswer, summarizeResults
 } = require('./model.js');
@@ -19,15 +19,6 @@ const rate = (session, cardId, answer) => {
   updateCardAnswer(card, previous, answer, '2026-11-05T12:00:00.000Z');
   setStudyAnswer(session, cardId, answer);
 };
-const savedRecord = session => ({
-  id: session.id, setId: session.setId, startedAt: session.startedAt,
-  cardIds: ids(session), results: getStudyResults(session),
-  resultsByCardId: { ...session.resultsByCardId },
-  historyCardIds: session.historyCardIds.slice(), historyIndex: session.historyIndex,
-  currentCardId: session.currentCardId, index: getStudyCurrentIndex(session),
-  shuffleRemainingCardIds: session.shuffleRemainingCardIds.slice()
-});
-
 const source = makeCards();
 const session = createStudySession(source);
 rate(session, 'mix-1', true);
@@ -86,7 +77,7 @@ for (let iteration = 0; iteration < 20; iteration++) {
   assert.deepEqual({ ...session.resultsByCardId }, beforeRatings);
 }
 
-const record = savedRecord(session);
+const record = serializeStudySession(session);
 const restored = createStudySession(source, record);
 assert.deepEqual(ids(restored), ids(session));
 assert.equal(restored.currentCardId, session.currentCardId);
@@ -105,10 +96,57 @@ shuffleStudyCards(pendingBacktrack, () => 0);
 assert.ok(pendingBacktrack.shuffleRemainingCardIds.includes(beforePendingMix));
 navigateStudySession(pendingBacktrack, -1);
 assert.equal(pendingBacktrack.currentCardId, beforePendingMix);
-const backtrackRecord = savedRecord(pendingBacktrack);
+const backtrackRecord = serializeStudySession(pendingBacktrack);
 const backtrackResume = createStudySession(makeCards(), backtrackRecord);
 assert.deepEqual(backtrackResume.shuffleRemainingCardIds, pendingBacktrack.shuffleRemainingCardIds, 'resume from history retains a later scheduled occurrence of the displayed card');
 assert.equal(getNextStudyCardId(backtrackResume), getNextStudyCardId(pendingBacktrack));
+
+assert.equal(Object.hasOwn(record, 'resultsByCardId'), false, 'the snapshot stores a single ID-aligned answer sequence');
+assert.deepEqual([restored.knownCount, restored.missedCount], [1, 1]);
+const oldFormat = createStudySession(source, { ...record, resultsByCardId: beforeRatings });
+assert.deepEqual(getStudyResults(oldFormat), getStudyResults(restored));
+
+const interrupted = {
+  id: 'saved', setId: 'mix-set', isRetry: false, cardIds: ['a', 'deleted', 'c'], results: [null, null, null],
+  historyCardIds: ['a', 'deleted', 'a', 'c'], historyIndex: 0, currentCardId: 'a', index: 0
+};
+const survivors = [{ id: 'a' }, { id: 'c' }];
+const afterDeletion = createStudySession(survivors, interrupted);
+assert.deepEqual(afterDeletion.historyCardIds, ['a', 'c']);
+setStudyAnswer(afterDeletion, 'a', true);
+assert.equal(navigateStudySession(afterDeletion, 1), true, 'rating after deletion can reach the remaining unanswered card');
+assert.equal(afterDeletion.currentCardId, 'c');
+
+// A deleted first card of a mixed round can uncover an earlier visit at the
+// boundary between replayed history and the remaining mixed order.
+const fourCards = ['a', 'b', 'c', 'd'].map(id => ({ id }));
+function restoreAfterMixedCardDeletion(draws, stepsBack) {
+  const mixed = createStudySession(fourCards);
+  navigateStudySession(mixed, 1);
+  navigateStudySession(mixed, 1);
+  shuffleStudyCards(mixed, () => draws.shift());
+  assert.equal(mixed.currentCardId, 'd');
+  for (let i = 0; i < stepsBack; i++) navigateStudySession(mixed, -1);
+  const saved = JSON.parse(JSON.stringify(serializeStudySession(mixed)));
+  return createStudySession(fourCards.filter(card => card.id !== 'd'), saved);
+}
+const replayThenRate = restoreAfterMixedCardDeletion([.3, 0, 0], 2);
+assert.equal(replayThenRate.currentCardId, 'b');
+for (const expectedId of ['c', 'a', 'b']) {
+  assert.equal(navigateStudySession(replayThenRate, 1), true);
+  assert.equal(replayThenRate.currentCardId, expectedId);
+  setStudyAnswer(replayThenRate, expectedId, true);
+}
+assert.equal(getNextStudyCardId(replayThenRate), null);
+assert.equal(replayThenRate.knownCount, 3);
+const laterVisit = restoreAfterMixedCardDeletion([.3, .7, 0], 1);
+assert.equal(laterVisit.currentCardId, 'c');
+assert.deepEqual(laterVisit.shuffleRemainingCardIds, ['a', 'c', 'b'], 'a non-adjacent scheduled visit still belongs to the mixed round');
+
+const expiredRetry = createStudySession(survivors, { ...interrupted, isRetry: true, cardIds: ['deleted'], results: [false] });
+assert.equal(expiredRetry.id, undefined, 'a deleted retry subset starts a fresh whole-deck round');
+assert.equal(expiredRetry.isRetry, false);
+assert.deepEqual(getStudyResults(expiredRetry), [null, null]);
 
 const removedId = record.shuffleRemainingCardIds[0];
 const invalidQueue = { ...record, shuffleRemainingCardIds: [removedId, 'missing-card', ...record.shuffleRemainingCardIds, ...record.shuffleRemainingCardIds] };
@@ -129,6 +167,9 @@ assert.deepEqual([
   getStudyCard(corrected, 'mix-1').attemptCount
 ], [1, 0, 1], 'changing a previous answer after mix corrects its counters once');
 assert.deepEqual(summarizeResults(getStudyResults(corrected)), { known: 1, missed: 0, unrated: 4, evaluated: 1, percentage: 100 });
+
+assert.deepEqual([corrected.knownCount, corrected.missedCount], [1, 0], 'correcting an answer keeps totals in sync');
+assert.equal(getStudyCurrentIndex(corrected), corrected.cards.findIndex(card => card.id === corrected.currentCardId));
 
 const alreadyRated = createStudySession(makeCards());
 for (const card of alreadyRated.cards) rate(alreadyRated, card.id, true);

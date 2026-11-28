@@ -34,6 +34,7 @@
 .exam-empty h2 { margin-top: 12px; }
 .exam-empty p, .exam-sets-empty p { max-width: 63ch; color: var(--muted); line-height: 1.6; }
 .exam-detail-heading .subject-heading { min-width: 0; }
+.exam-detail-heading .library-detail-actions { max-width: 100%; flex-wrap: wrap; }
 .exam-detail-heading .subject-heading > div { min-width: 0; }
 .exam-detail-heading .page-context { margin-bottom: 6px; }
 .exam-detail-status { display: flex; margin-top: 10px; }

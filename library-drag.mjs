@@ -49,7 +49,7 @@ export function bindLibraryDrag({ identify, targets, resolve, destinations, navi
     }
     state.target = candidate;
     state.visual.preview(candidate?.placement ? candidate.element : null, candidate?.placement);
-    state.visual.highlight(candidate?.element, candidate?.label || 'Ziehe zu einer neuen Position oder in einen Ordner.');
+    state.visual.highlight(candidate?.element, candidate?.label || state.source.hint || 'Ziehe zu einer neuen Position oder in einen Ordner.');
     clearSpring(state);
     if (!candidate) recheckAfterLayout(state);
     if (!candidate?.open) return;

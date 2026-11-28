@@ -78,7 +78,24 @@ export function examSets(library, exam) {
     }
   }
   for (const set of available.values()) if (set.subjectId === exam.subjectId && within.has(set.folderId)) add(set.id);
-  return result;
+  if (!Array.isArray(exam.examSetOrder)) return result;
+  // Presentation order is independent of membership: moving a contained deck
+  // out of the exam must still remove it unless the user explicitly linked it.
+  const ids = new Set(exam.examSetOrder.filter(id => included.has(id)));
+  for (const set of result) ids.add(set.id);
+  return Array.from(ids, id => available.get(id));
+}
+
+export function reorderedExamSetIds(sets, id, targetId, placement) {
+  if (id === targetId || !['before', 'after'].includes(placement)) return null;
+  const ids = sets.map(set => set.id);
+  const from = ids.indexOf(id), target = ids.indexOf(targetId);
+  if (from < 0 || target < 0) return null;
+  const to = target - Number(from < target) + Number(placement === 'after');
+  if (from === to) return null;
+  ids.splice(from, 1);
+  ids.splice(to, 0, id);
+  return ids;
 }
 
 // Build an isolated organisation plan using the same validated folder move as
